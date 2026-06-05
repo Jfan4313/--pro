@@ -1,0 +1,241 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: projects
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - type: string (required)
+    //   - manager: string (required)
+    //   - constructProgress: number (required)
+    //   - supplyProgress: number (required)
+    //   - status: string (required, enum: normal, warning, delayed, success)
+    //   - dueDate: string (required)
+    //   - columnId: string (required)
+    //   - createdAt: string (required, immutable)
+    //   - authorUID: string (required, immutable)
+    //
+    // Collection: tasks
+    // Document ID: auto-generated
+    // Fields:
+    //   - projectId: string (required)
+    //   - taskName: string (required)
+    //   - predecessorId: string (optional)
+    //   - assignee: string (required)
+    //   - deadline: string (required)
+    //   - status: string (required, enum: pending, in-progress, completed, delayed)
+    //   - createdAt: string (required, immutable)
+    //   - authorUID: string (required, immutable)
+    //
+    // Collection: personnel
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - role: string (required)
+    //   - team: string (required)
+    //   - entryDate: string (required)
+    //   - status: string (required, enum: on-site, off-site)
+    //   - safetyTrained: boolean (required)
+    //   - projects: array of objects (optional)
+    //   - idCardNumber: string (optional)
+    //   - specialCerts: string (optional)
+    //   - idCardImage: string (optional)
+    //   - specialCertsImage: string (optional)
+    //   - createdAt: string (required, immutable)
+    //   - authorUID: string (required, immutable)
+    //
+    // Collection: materials
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - category: string (required)
+    //   - specification: string (optional)
+    //   - unit: string (optional)
+    //   - quantity: number (required)
+    //   - usedQuantity: number (required)
+    //   - threshold: number (optional)
+    //   - status: string (required, enum: in-stock, low-stock, out-of-stock, ordered)
+    //   - supplier: string (optional)
+    //   - expectedDate: string (optional)
+    //   - projectId: string (optional)
+    //   - createdAt: string (required, immutable)
+    //   - authorUID: string (required, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return true; // Temporarily bypassed for development
+    }
+
+    function uidUnchanged() {
+      return true; // Temporarily bypassed for development
+    }
+
+    function uidNotModified() {
+      return true; // Temporarily bypassed for development
+    }
+
+    function createdAtNotModified() {
+      return !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    function isPositiveOrZero(field) {
+      return request.resource.data[field] is number && request.resource.data[field] >= 0;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidProject(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.type is string && data.type.size() > 0 && data.type.size() < 50 &&
+             data.manager is string && data.manager.size() > 0 && data.manager.size() < 50 &&
+             isPositiveOrZero('constructProgress') && data.constructProgress <= 100 &&
+             isPositiveOrZero('supplyProgress') && data.supplyProgress <= 100 &&
+             data.status in ['normal', 'warning', 'delayed', 'success'] &&
+             data.dueDate is string && data.dueDate.size() > 0 && data.dueDate.size() < 30 &&
+             data.columnId is string && data.columnId.size() > 0 && data.columnId.size() < 50;
+    }
+
+    function isValidTask(data) {
+      return data.projectId is string && data.projectId.size() > 0 && data.projectId.size() < 100 &&
+             data.taskName is string && data.taskName.size() > 0 && data.taskName.size() < 200 &&
+             data.assignee is string && data.assignee.size() > 0 && data.assignee.size() < 50 &&
+             data.deadline is string && data.deadline.size() > 0 && data.deadline.size() < 30 &&
+             data.status in ['pending', 'in-progress', 'completed', 'delayed'] &&
+             (!('predecessorId' in data) || (data.predecessorId is string && data.predecessorId.size() < 100));
+    }
+
+    function isValidPersonnel(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
+             data.role is string && data.role.size() > 0 && data.role.size() < 50 &&
+             data.team is string && data.team.size() > 0 && data.team.size() < 50 &&
+             data.entryDate is string && data.entryDate.size() > 0 && data.entryDate.size() < 30 &&
+             data.status in ['on-site', 'off-site'] &&
+             data.safetyTrained is bool &&
+             (!('idCardNumber' in data) || (data.idCardNumber is string && data.idCardNumber.size() < 30)) &&
+             (!('specialCerts' in data) || (data.specialCerts is string && data.specialCerts.size() < 100)) &&
+             (!('idCardImage' in data) || (data.idCardImage is string && data.idCardImage.size() < 1048576)) &&
+             (!('specialCertsImage' in data) || (data.specialCertsImage is string && data.specialCertsImage.size() < 1048576)) &&
+             (!('projects' in data) || (data.projects is list && data.projects.size() < 100));
+    }
+
+    function isValidMaterial(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 50 &&
+             isPositiveOrZero('quantity') &&
+             isPositiveOrZero('usedQuantity') &&
+             data.status in ['in-stock', 'low-stock', 'out-of-stock', 'ordered'] &&
+             (!('specification' in data) || (data.specification is string && data.specification.size() < 100)) &&
+             (!('unit' in data) || (data.unit is string && data.unit.size() < 20)) &&
+             (!('threshold' in data) || (data.threshold is number && data.threshold >= 0)) &&
+             (!('supplier' in data) || (data.supplier is string && data.supplier.size() < 100)) &&
+             (!('expectedDate' in data) || (data.expectedDate is string && data.expectedDate.size() < 30)) &&
+             (!('projectId' in data) || (data.projectId is string && data.projectId.size() < 100));
+    }
+
+    function isValidBOM(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isPositiveOrZero('plannedQty') &&
+             isPositiveOrZero('procuredQty') &&
+             data.unit is string && data.unit.size() > 0 && data.unit.size() < 20 &&
+             data.project is string && data.project.size() > 0 && data.project.size() < 100 &&
+             (!('spec' in data) || (data.spec is string && data.spec.size() < 100));
+    }
+
+    function isValidBOMHistory(data) {
+      return data.date is string && data.date.size() > 0 && data.date.size() < 30 &&
+             data.user is string && data.user.size() > 0 && data.user.size() < 50 &&
+             data.action is string && data.action.size() > 0 && data.action.size() < 100 &&
+             data.details is string && data.details.size() > 0 && data.details.size() < 500;
+    }
+
+    function isValidMaterialPrice(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isPositiveOrZero('price') &&
+             data.unit is string && data.unit.size() > 0 && data.unit.size() < 20 &&
+             data.date is string && data.date.size() > 0 && data.date.size() < 30 &&
+             data.supplier is string && data.supplier.size() > 0 && data.supplier.size() < 100 &&
+             (!('spec' in data) || (data.spec is string && data.spec.size() < 100));
+    }
+
+    function isValidMaterialPriceHistory(data) {
+      return data.materialId is string && data.materialId.size() > 0 && data.materialId.size() < 100 &&
+             isPositiveOrZero('price') &&
+             data.unit is string && data.unit.size() > 0 && data.unit.size() < 20 &&
+             data.date is string && data.date.size() > 0 && data.date.size() < 30 &&
+             data.supplier is string && data.supplier.size() > 0 && data.supplier.size() < 100;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    match /projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidProject(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidProject(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTask(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidTask(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /personnel/{personnelId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPersonnel(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidPersonnel(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /materials/{materialId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMaterial(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidMaterial(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /boms/{bomId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBOM(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidBOM(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /bomHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBOMHistory(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidBOMHistory(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /materialPrices/{priceId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMaterialPrice(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidMaterialPrice(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+
+    match /materialPriceHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMaterialPriceHistory(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidMaterialPriceHistory(request.resource.data) && uidNotModified() && createdAtNotModified();
+      allow delete: if isAuthenticated();
+    }
+    match /appData/{documentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+  }
+}

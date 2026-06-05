@@ -1,0 +1,192 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "A construction project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "manager": { "type": "string" },
+        "constructProgress": { "type": "number" },
+        "supplyProgress": { "type": "number" },
+        "status": { "type": "string", "enum": ["normal", "warning", "delayed", "success"] },
+        "dueDate": { "type": "string" },
+        "columnId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["name", "type", "manager", "constructProgress", "supplyProgress", "status", "dueDate", "columnId", "createdAt", "authorUID"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task within a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "taskName": { "type": "string" },
+        "predecessorId": { "type": "string" },
+        "assignee": { "type": "string" },
+        "deadline": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed", "delayed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["projectId", "taskName", "assignee", "deadline", "status", "createdAt", "authorUID"]
+    },
+    "Personnel": {
+      "title": "Personnel",
+      "description": "A staff member on site",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "team": { "type": "string" },
+        "entryDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["on-site", "off-site"] },
+        "safetyTrained": { "type": "boolean" },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "type": "string", "enum": ["active", "archived"] }
+            }
+          }
+        },
+        "idCardNumber": { "type": "string" },
+        "specialCerts": { "type": "string" },
+        "idCardImage": { "type": "string" },
+        "specialCertsImage": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["name", "role", "team", "entryDate", "status", "safetyTrained", "createdAt", "authorUID"]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "A construction material or equipment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "specification": { "type": "string" },
+        "unit": { "type": "string" },
+        "quantity": { "type": "number" },
+        "usedQuantity": { "type": "number" },
+        "threshold": { "type": "number" },
+        "status": { "type": "string", "enum": ["in-stock", "low-stock", "out-of-stock", "ordered"] },
+        "supplier": { "type": "string" },
+        "expectedDate": { "type": "string" },
+        "projectId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["name", "category", "quantity", "usedQuantity", "status", "createdAt", "authorUID"]
+    },
+    "BOM": {
+      "title": "BOM",
+      "description": "Bill of Materials item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "spec": { "type": "string" },
+        "plannedQty": { "type": "number" },
+        "procuredQty": { "type": "number" },
+        "unit": { "type": "string" },
+        "project": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["name", "plannedQty", "procuredQty", "unit", "project", "createdAt", "authorUID"]
+    },
+    "BOMHistory": {
+      "title": "BOMHistory",
+      "description": "History of BOM updates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "user": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["date", "user", "action", "details", "createdAt", "authorUID"]
+    },
+    "MaterialPrice": {
+      "title": "MaterialPrice",
+      "description": "Current price of a material",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "spec": { "type": "string" },
+        "price": { "type": "number" },
+        "unit": { "type": "string" },
+        "date": { "type": "string" },
+        "supplier": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["name", "price", "unit", "date", "supplier", "createdAt", "authorUID"]
+    },
+    "MaterialPriceHistory": {
+      "title": "MaterialPriceHistory",
+      "description": "Historical price of a material",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "materialId": { "type": "string" },
+        "price": { "type": "number" },
+        "unit": { "type": "string" },
+        "date": { "type": "string" },
+        "supplier": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorUID": { "type": "string" }
+      },
+      "required": ["materialId", "price", "unit", "date", "supplier", "createdAt", "authorUID"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Stores project data"
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Stores task data"
+    },
+    "/personnel/{personnelId}": {
+      "schema": { "$ref": "#/entities/Personnel" },
+      "description": "Stores personnel data"
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "#/entities/Material" },
+      "description": "Stores material data"
+    },
+    "/boms/{bomId}": {
+      "schema": { "$ref": "#/entities/BOM" },
+      "description": "Stores BOM data"
+    },
+    "/bomHistory/{historyId}": {
+      "schema": { "$ref": "#/entities/BOMHistory" },
+      "description": "Stores BOM history data"
+    },
+    "/materialPrices/{priceId}": {
+      "schema": { "$ref": "#/entities/MaterialPrice" },
+      "description": "Stores material price data"
+    },
+    "/materialPriceHistory/{historyId}": {
+      "schema": { "$ref": "#/entities/MaterialPriceHistory" },
+      "description": "Stores material price history data"
+    }
+  }
+}
