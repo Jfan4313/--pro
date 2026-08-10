@@ -1,14 +1,18 @@
 import React, { useState } from "react";
-import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save } from "lucide-react";
+import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
+import { useEntityList } from "@/src/hooks/useEntityList";
 
 export const STAGES = [
   { 
     id: "1_initiation", 
-    name: "① 项目立项(前期收资)", 
-    desc: "地理位置、环境条件、用电需求、相关政策等基础资料收集", 
+    name: "① 项目立项(现场勘察/前期收资)", 
+    desc: "完成现场勘察，收集地理位置、建筑结构、电房设备、用电需求等基础资料", 
     checklist: [
+      { id: "site-survey", label: "完成现场勘察并归档结构、电房及设备分类照片" },
       { id: "c1", label: "屋顶结构材质及荷载初步勘察" },
       { id: "c2", label: "业主资信及财务状况初筛(如涉及融资)" },
       { id: "c3", label: "项目所在地航拍图及周边环境录像" },
@@ -199,9 +203,25 @@ export const getProjectCurrentStageInfo = (projectId: string, lifecycleStates: R
   };
 };
 
-export function ProjectLifecycle() {
-  const [boardData] = useFirebaseSync("projectBoardData", []);
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatUploadTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (projectId: string) => void }) {
+  const [boardData] = useProjectBoardData();
   const [lifecycleStates, setLifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   
   const allProjects = Array.isArray(boardData) 
     ? boardData.flatMap((col: any) => col.projects || [])
@@ -211,6 +231,7 @@ export function ProjectLifecycle() {
   const [activeStage, setActiveStage] = useState(STAGES[0].id);
 
   const activeProj = allProjects.find((p: any) => p.id === selectedProject) || allProjects[0];
+  const activeProjectSurveys = activeProj ? surveyRecords.filter((record: any) => record.projectId === activeProj.id) : [];
   
   // Safe accessor for current project state
   const projState = activeProj ? (lifecycleStates[activeProj.id] || {}) : {};
@@ -222,18 +243,20 @@ export function ProjectLifecycle() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       if(!activeProj) return;
       const file = e.target.files[0];
       const stage = STAGES.find(s => s.id === activeStage);
       if(!stage) return;
-      
-      const projName = activeProj.name;
-      
-      const extMatch = file.name.match(/\.([^.]+)$/);
-      const ext = extMatch ? `.${extMatch[1]}` : "";
-      const baseName = file.name.replace(ext, "");
+
+      const ext = file.name.includes(".") ? `.${file.name.split(".").pop()}` : "";
+      const baseName = file.name.replace(new RegExp(`${ext.replace(".", "\\.")}$`), "");
+      const expectedFile = stage.files.find((name) => {
+        const cleanExpected = name.replace(/\.[^.]+$/, "");
+        return baseName.includes(cleanExpected) || cleanExpected.includes(baseName);
+      });
+      const fileType = expectedFile ? expectedFile.replace(/\.[^.]+$/, "") : baseName;
       
       // Default files if the state is empty
       const defaultFiles = stage.files.map((f, i) => ({
@@ -245,38 +268,49 @@ export function ProjectLifecycle() {
       }));
 
       const currentFiles = stageState.files || defaultFiles;
-      
-      const sameBaseFiles = currentFiles.filter((f: any) => f.originalBase === baseName);
-      const version = `V${sameBaseFiles.length + 1}`;
-      
-      const now = new Date();
-      const timeStr = `${now.getFullYear()}-${(now.getMonth()+1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      
-      const stageShortName = stage.name.split(' ')[1] || '阶段';
-      
-      const newFileName = `${projName}_${stageShortName}_${baseName}_${version}${ext}`;
-      
-      const newFileObj = {
-        name: newFileName,
-        originalBase: baseName,
-        uploadTime: timeStr,
-        version: version,
-        isCustom: true
-      };
-      
-      setLifecycleStates(prev => ({
-        ...prev,
-        [activeProj.id]: {
-          ...(prev[activeProj.id] || {}),
-          [activeStage]: {
-            ...((prev[activeProj.id] || {})[activeStage] || { checklist: {}, fields: {} }),
-            files: [...currentFiles, newFileObj]
+
+      try {
+        const contentBase64 = await fileToBase64(file);
+        const uploaded = await apiClient.uploadProjectStageFile({
+          projectId: activeProj.id,
+          stageId: stage.id,
+          project: activeProj,
+          stage,
+          fileType,
+          filename: file.name,
+          contentBase64,
+        });
+
+        const newFileObj = {
+          name: uploaded.storedName,
+          originalName: uploaded.originalName,
+          originalBase: uploaded.originalBase,
+          uploadTime: formatUploadTime(uploaded.uploadedAt),
+          version: uploaded.version,
+          fileType: uploaded.fileType,
+          relativePath: uploaded.relativePath,
+          absolutePath: uploaded.absolutePath,
+          isCustom: true,
+          archived: true,
+        };
+        
+        setLifecycleStates(prev => ({
+          ...prev,
+          [activeProj.id]: {
+            ...(prev[activeProj.id] || {}),
+            [activeStage]: {
+              ...((prev[activeProj.id] || {})[activeStage] || { checklist: {}, fields: {} }),
+              files: [...currentFiles, newFileObj]
+            }
           }
-        }
-      }));
-      
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件已自动命名并记录上传时间' }));
-      if (fileInputRef.current) fileInputRef.current.value = "";
+        }));
+        
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件已规范命名并保存到项目资料夹' }));
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件保存失败，请检查本地后端和保存位置' }));
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
     }
   };
 
@@ -319,7 +353,7 @@ export function ProjectLifecycle() {
   };
 
   return (
-    <div className="flex h-full bg-[#f8fafc] animate-in fade-in duration-300">
+    <div className="flex min-h-full md:h-full bg-[#f8fafc] animate-in fade-in duration-300">
       {/* Sidebar: Projects List */}
       <div className="w-72 bg-white border-r border-slate-200 flex flex-col hidden md:flex shrink-0 z-10 shadow-sm relative">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -354,12 +388,12 @@ export function ProjectLifecycle() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
+      <div className="flex-1 flex flex-col min-w-0 md:h-full md:overflow-hidden bg-white">
         {activeProj ? (
           <>
-            <div className="p-6 bg-slate-50/50 border-b border-slate-200 shrink-0">
-              <div className="flex items-start justify-between">
-                <div>
+            <div className="p-4 md:p-6 bg-slate-50/50 border-b border-slate-200 shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div className="min-w-0">
                   <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{activeProj.name}</h1>
                   <div className="flex flex-wrap items-center gap-3 mt-3">
                     <span className="font-mono bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md text-xs font-medium">编号: TS-{activeProj.id.toUpperCase().replace('P', '2026')}</span>
@@ -367,13 +401,21 @@ export function ProjectLifecycle() {
                     <span className="text-slate-500 text-sm flex items-center gap-1.5"><Clock className="w-4 h-4" />竣工计划: {activeProj.dueDate}</span>
                   </div>
                 </div>
+                <select
+                  value={selectedProject}
+                  onChange={(event) => setSelectedProject(event.target.value)}
+                  className="md:hidden w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
+                  aria-label="选择项目"
+                >
+                  {allProjects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </select>
               </div>
             </div>
 
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex flex-col md:flex-row md:overflow-hidden">
               {/* Stages Timeline */}
-              <div className="w-64 bg-slate-50/80 border-r border-slate-200 p-4 overflow-y-auto shrink-0 flex flex-col gap-1 custom-scrollbar">
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 pt-2">归档七阶段 (EPC流程)</div>
+              <div className="w-full md:w-64 bg-slate-50/80 border-b md:border-b-0 md:border-r border-slate-200 p-3 md:p-4 overflow-x-auto md:overflow-y-auto shrink-0 flex flex-row md:flex-col gap-2 md:gap-1 custom-scrollbar">
+                <div className="hidden md:block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 pt-2">归档七阶段 (EPC流程)</div>
                 {STAGES.map((stage, idx) => {
                   const isActive = activeStage === stage.id;
                   const isCompleted = STAGES.findIndex(s => s.id === activeStage) > idx;
@@ -382,7 +424,7 @@ export function ProjectLifecycle() {
                       key={stage.id}
                       onClick={() => setActiveStage(stage.id)}
                       className={cn(
-                        "w-full text-left px-3 py-3 rounded-lg flex gap-3 transition-colors duration-200 border mt-1",
+                        "min-w-[9rem] md:min-w-0 md:w-full text-left px-3 py-3 rounded-lg flex gap-3 transition-colors duration-200 border md:mt-1",
                         isActive ? "bg-white border-indigo-200 shadow-sm" : "border-transparent hover:bg-slate-100/80"
                       )}
                     >
@@ -416,13 +458,13 @@ export function ProjectLifecycle() {
               </div>
 
               {/* Stage Details */}
-              <div className="flex-1 bg-white p-8 overflow-y-auto w-full custom-scrollbar">
+              <div className="flex-1 bg-white p-4 md:p-8 md:overflow-y-auto w-full min-w-0 custom-scrollbar">
                 {(() => {
                   const stage = STAGES.find(s => s.id === activeStage)!;
                   return (
                     <div className="max-w-4xl">
-                      <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-100">
-                        <div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 md:mb-8 pb-4 border-b border-slate-100">
+                        <div className="min-w-0">
                           <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                             {stage.name}
                           </h2>
@@ -432,13 +474,16 @@ export function ProjectLifecycle() {
                           </p>
                         </div>
                         <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
-                        <button 
-                          onClick={handleUploadClick}
-                          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 shadow-sm transition-colors"
-                        >
-                          <Upload className="w-4 h-4" />
-                          上传规范资料
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          {stage.id === "1_initiation" && <button onClick={() => onOpenSiteSurvey?.(activeProj.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm"><Camera className="h-4 w-4" />现场勘察{activeProjectSurveys.length > 0 ? `（${activeProjectSurveys.length}）` : ""}</button>}
+                          <button 
+                            onClick={handleUploadClick}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 shadow-sm transition-colors"
+                          >
+                            <Upload className="w-4 h-4" />
+                            上传规范资料
+                          </button>
+                        </div>
                       </div>
 
                       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm mb-6">
@@ -464,10 +509,11 @@ export function ProjectLifecycle() {
                                         <input 
                                           type="checkbox" 
                                           className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                                          checked={stageState.checklist?.[item.id] || false}
+                                          checked={item.id === "site-survey" ? activeProjectSurveys.length > 0 : (stageState.checklist?.[item.id] || false)}
                                           onChange={(e) => updateChecklist(item.id, e.target.checked)}
+                                          disabled={item.id === "site-survey" && activeProjectSurveys.length > 0}
                                         />
-                                        <span className={cn("text-sm transition-colors", stageState.checklist?.[item.id] ? "text-slate-400 line-through" : "text-slate-700 font-medium")}>{item.label}</span>
+                                        <span className={cn("text-sm transition-colors", (item.id === "site-survey" ? activeProjectSurveys.length > 0 : stageState.checklist?.[item.id]) ? "text-slate-400 line-through" : "text-slate-700 font-medium")}>{item.label}{item.id === "site-survey" && activeProjectSurveys.length > 0 ? `（已归档 ${activeProjectSurveys.length} 次）` : ""}</span>
                                       </label>
                                     ))}
                                   </div>
@@ -570,14 +616,27 @@ export function ProjectLifecycle() {
                                             </span>
                                           )}
                                         </div>
-                                        <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 font-mono">
+                                        {fileObj.originalName && (
+                                          <p className="text-xs text-slate-500 mt-1">原始文件：{fileObj.originalName}</p>
+                                        )}
+                                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1 font-mono">
                                           <span>{fileObj.uploadTime}</span>
                                           <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> <span className="text-emerald-600 font-sans font-medium">已归档</span></span>
+                                          {fileObj.relativePath && <span className="font-sans text-slate-500">位置：{fileObj.relativePath}</span>}
                                         </div>
                                       </div>
                                     </div>
                                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <button onClick={() => window.dispatchEvent(new CustomEvent('show-toast', { detail: '已开始下载' }))} className="p-2.5 px-3 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 font-medium text-xs rounded-lg transition-colors border border-indigo-100 flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => {
+                                          if (fileObj.relativePath) {
+                                            window.open(getProjectFileDownloadUrl(fileObj.relativePath), "_blank");
+                                          } else {
+                                            window.dispatchEvent(new CustomEvent('show-toast', { detail: '这是待上传清单，请先上传真实文件' }));
+                                          }
+                                        }}
+                                        className="p-2.5 px-3 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 font-medium text-xs rounded-lg transition-colors border border-indigo-100 flex items-center gap-1.5"
+                                      >
                                         <Download className="w-4 h-4" /> 下载
                                       </button>
                                     </div>

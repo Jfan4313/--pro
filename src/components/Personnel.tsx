@@ -2,9 +2,10 @@ import React, { useState, useMemo, useRef } from "react";
 import { Users, UserCheck, ShieldAlert, Search, Filter, MoreHorizontal, CheckCircle2, AlertCircle, X, Download, UploadCloud, FileBadge, Image as ImageIcon, Edit, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 
 const personnelDataInitial = [
-  { id: "W001", name: "张伟", role: "项目经理", team: "管理组", entryDate: "2025-10-01", status: "on-site", safetyTrained: true, projects: [{ name: "A区商业综合体", status: "active" }], idCardNumber: "110105198508123456", specialCerts: "无", idCardImage: null, specialCertsImage: null },
+  { id: "W001", name: "张伟", role: "项目经理", team: "管理组", entryDate: "2025-10-01", status: "on-site", safetyTrained: true, sourceType: "内部", companyName: "智建建筑工程有限公司", projects: [{ name: "A区商业综合体", status: "active" }], idCardNumber: "110105198508123456", specialCerts: "无", idCardImage: null, specialCertsImage: null },
   { id: "W002", name: "李娜", role: "安全员", team: "管理组", entryDate: "2025-10-05", status: "on-site", safetyTrained: true, projects: [{ name: "A区商业综合体", status: "active" }], idCardNumber: "310104199203157890", specialCerts: "安全员C证", idCardImage: null, specialCertsImage: null },
   { id: "W003", name: "王强", role: "高级电工", team: "电气一班", entryDate: "2026-01-15", status: "on-site", safetyTrained: true, projects: [{ name: "B区住宅一期", status: "active" }], idCardNumber: "420102198811224567", specialCerts: "高压电工作业证", idCardImage: null, specialCertsImage: null },
   { id: "W004", name: "赵敏", role: "结构工程师", team: "土建组", entryDate: "2025-11-20", status: "off-site", safetyTrained: true, projects: [{ name: "C区地下车库", status: "archived" }], idCardNumber: "440305199506081234", specialCerts: "无", idCardImage: null, specialCertsImage: null },
@@ -15,7 +16,7 @@ const personnelDataInitial = [
 
 export function Personnel() {
   const [data, setData] = useFirebaseSync("personnelData", personnelDataInitial);
-  const [boardData] = useFirebaseSync("projectBoardData", []);
+  const [boardData] = useProjectBoardData();
 
   const dynamicProjects = React.useMemo(() => {
     const list = new Set<string>();
@@ -53,6 +54,8 @@ export function Personnel() {
     team: "",
     idCardNumber: "",
     specialCerts: "",
+    sourceType: "内部",
+    companyName: "",
     idCardImage: null as string | null,
     specialCertsImage: null as string | null
   });
@@ -133,7 +136,7 @@ export function Personnel() {
   const openAddModal = () => {
     setEditingId(null);
     setFormData({
-      name: "", id: "", projects: [{ name: dynamicProjects[1] || "", status: "active" as const }], role: "", team: "", idCardNumber: "", specialCerts: "", idCardImage: null, specialCertsImage: null
+      name: "", id: "", projects: [{ name: dynamicProjects[1] || "", status: "active" as const }], role: "", team: "", idCardNumber: "", specialCerts: "", sourceType: "内部", companyName: "", idCardImage: null, specialCertsImage: null
     });
     setIsModalOpen(true);
   };
@@ -142,7 +145,7 @@ export function Personnel() {
     setIsModalOpen(false);
     setEditingId(null);
     setFormData({
-      name: "", id: "", projects: [{ name: dynamicProjects[1] || "", status: "active" as const }], role: "", team: "", idCardNumber: "", specialCerts: "", idCardImage: null, specialCertsImage: null
+      name: "", id: "", projects: [{ name: dynamicProjects[1] || "", status: "active" as const }], role: "", team: "", idCardNumber: "", specialCerts: "", sourceType: "内部", companyName: "", idCardImage: null, specialCertsImage: null
     });
   };
 
@@ -155,6 +158,8 @@ export function Personnel() {
       team: person.team,
       idCardNumber: person.idCardNumber || "",
       specialCerts: person.specialCerts || "",
+      sourceType: person.sourceType || "内部",
+      companyName: person.companyName || "",
       idCardImage: person.idCardImage || null,
       specialCertsImage: person.specialCertsImage || null
     });
@@ -289,62 +294,87 @@ export function Personnel() {
           </button>
         </div>
         
-        <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[1180px] table-fixed text-left text-sm">
+          <colgroup>
+            <col style={{ width: "86px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "220px" }} />
+            <col style={{ width: "190px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "160px" }} />
+            <col style={{ width: "130px" }} />
+            <col style={{ width: "94px" }} />
+          </colgroup>
           <thead className="bg-slate-50/50 text-slate-500 font-medium border-b border-slate-100">
             <tr>
-              <th className="px-6 py-4">工号</th>
-              <th className="px-6 py-4">姓名</th>
-              <th className="px-6 py-4">所属项目</th>
-              <th className="px-6 py-4">工种/职务</th>
-              <th className="px-6 py-4">所属班组</th>
-              <th className="px-6 py-4">特种作业证</th>
-              <th className="px-6 py-4">进场时间</th>
-              <th className="px-6 py-4">状态</th>
-              <th className="px-6 py-4">安全培训</th>
-              <th className="px-6 py-4 text-right">操作</th>
+              <th className="px-4 py-4 whitespace-nowrap">工号</th>
+              <th className="px-4 py-4 whitespace-nowrap">人员</th>
+              <th className="px-4 py-4 whitespace-nowrap">所属项目</th>
+              <th className="px-4 py-4 whitespace-nowrap">岗位/班组</th>
+              <th className="px-4 py-4 whitespace-nowrap">特种作业证</th>
+              <th className="px-4 py-4 whitespace-nowrap">进场/状态</th>
+              <th className="px-4 py-4 whitespace-nowrap">安全培训</th>
+              <th className="px-4 py-4 text-right whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filteredData.map((person) => (
               <tr key={person.id} className="hover:bg-slate-50/80 transition-colors">
-                <td className="px-6 py-4 font-mono text-slate-500">{person.id}</td>
-                <td className="px-6 py-4 font-medium text-slate-900">
-                  <div className="flex items-center gap-2">
-                    {person.name}
-                    {person.idCardImage && (
-                      <button 
-                        onClick={() => setViewingImage(person.idCardImage)}
-                        className="text-indigo-500 hover:text-indigo-700"
-                        title="查看身份证"
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                      </button>
-                    )}
+                <td className="px-4 py-4 font-mono text-slate-500 whitespace-nowrap">{person.id}</td>
+                <td className="px-4 py-4 font-medium text-slate-900">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <span>{person.name}</span>
+                      {person.idCardImage && (
+                        <button 
+                          onClick={() => setViewingImage(person.idCardImage)}
+                          className="text-indigo-500 hover:text-indigo-700"
+                          title="查看身份证"
+                        >
+                          <ImageIcon className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs font-normal text-slate-400">{person.sourceType || "内部"}{person.companyName ? ` · ${person.companyName}` : ""}</div>
                   </div>
                 </td>
-                <td className="px-6 py-4 text-slate-600">
-                  <div className="flex flex-wrap gap-1">
-                    {person.projects.map((p: any, i: number) => (
-                      <span key={i} className={cn(
-                        "inline-block px-2 py-1 rounded text-xs",
-                        p.status === 'active' ? "bg-indigo-50 text-indigo-700 border border-indigo-100" : "bg-slate-100 text-slate-500 border border-slate-200"
-                      )}>
-                        {p.name} {p.status === 'archived' && '(已归档)'}
+                <td className="px-4 py-4 text-slate-600">
+                  <div className="flex items-center gap-1">
+                    {person.projects.length > 0 ? (
+                      <>
+                        <span className={cn(
+                        "inline-block max-w-[166px] truncate px-2 py-1 rounded text-xs whitespace-nowrap",
+                        person.projects[0].status === 'active' ? "bg-indigo-50 text-indigo-700 border border-indigo-100" : "bg-slate-100 text-slate-500 border border-slate-200"
+                      )} title={`${person.projects[0].name}${person.projects[0].status === 'archived' ? '(已归档)' : ''}`}>
+                        {person.projects[0].name}{person.projects[0].status === 'archived' && '(已归档)'}
                       </span>
-                    ))}
-                    {person.projects.length === 0 && (
+                        {person.projects.length > 1 && (
+                          <span className="inline-flex h-6 items-center rounded border border-slate-200 bg-slate-50 px-2 text-xs text-slate-500" title={person.projects.map((p: any) => p.name).join("、")}>
+                            +{person.projects.length - 1}
+                          </span>
+                        )}
+                      </>
+                    ) : (
                       <span className="inline-block px-2 py-1 bg-slate-50 text-slate-400 rounded text-xs">无项目</span>
                     )}
                   </div>
                 </td>
-                <td className="px-6 py-4 text-slate-600">{person.role}</td>
-                <td className="px-6 py-4 text-slate-600">{person.team}</td>
-                <td className="px-6 py-4">
+                <td className="px-4 py-4 text-slate-600">
+                  <div className="min-w-0">
+                    <div className="truncate whitespace-nowrap font-medium text-slate-700" title={person.role}>{person.role}</div>
+                    <div className="mt-0.5 truncate whitespace-nowrap text-xs text-slate-400" title={person.team}>{person.team}</div>
+                  </div>
+                </td>
+                <td className="px-4 py-4">
                   {person.specialCerts && person.specialCerts !== "无" ? (
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        <FileBadge className="w-3 h-3 mr-1" />
-                        {person.specialCerts}
+                      <span
+                        className="inline-flex max-w-[112px] items-center px-2 py-1 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 whitespace-nowrap"
+                        title={person.specialCerts}
+                      >
+                        <FileBadge className="w-3 h-3 mr-1 shrink-0" />
+                        <span className="truncate">有证件</span>
                       </span>
                       {person.specialCertsImage && (
                         <button 
@@ -360,23 +390,25 @@ export function Personnel() {
                     <span className="text-slate-400 text-xs">无</span>
                   )}
                 </td>
-                <td className="px-6 py-4 text-slate-500 font-mono">{person.entryDate}</td>
-                <td className="px-6 py-4">
-                  <span className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-medium",
-                    person.status === 'on-site' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-600 border border-slate-200"
-                  )}>
-                    {person.status === 'on-site' ? '在岗' : '休息'}
-                  </span>
+                <td className="px-4 py-4">
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <span className="font-mono text-slate-500">{person.entryDate}</span>
+                    <span className={cn(
+                      "inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap",
+                      person.status === 'on-site' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-600 border border-slate-200"
+                    )}>
+                      {person.status === 'on-site' ? '在岗' : '休息'}
+                    </span>
+                  </div>
                 </td>
-                <td className="px-6 py-4">
+                <td className="px-4 py-4">
                   {person.safetyTrained ? (
-                    <span className="text-emerald-600 flex items-center text-xs font-medium"><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> 已完成</span>
+                    <span className="text-emerald-600 inline-flex items-center text-xs font-medium whitespace-nowrap"><CheckCircle2 className="w-3.5 h-3.5 mr-1 shrink-0" /> 已完成</span>
                   ) : (
-                    <span className="text-amber-600 flex items-center text-xs font-medium"><AlertCircle className="w-3.5 h-3.5 mr-1" /> 待培训</span>
+                    <span className="text-amber-600 inline-flex items-center text-xs font-medium whitespace-nowrap"><AlertCircle className="w-3.5 h-3.5 mr-1 shrink-0" /> 待培训</span>
                   )}
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td className="px-4 py-4 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button onClick={() => handleEdit(person)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors" title="编辑">
                       <Edit className="w-4 h-4" />
@@ -390,6 +422,7 @@ export function Personnel() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {isModalOpen && (
@@ -513,6 +546,20 @@ export function Personnel() {
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">所属班组 <span className="text-rose-500">*</span></label>
                     <input type="text" required value={formData.team} onChange={e => setFormData({...formData, team: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="例如：安装二班" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">人员来源</label>
+                    <select value={formData.sourceType} onChange={e => setFormData({...formData, sourceType: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                      <option>内部</option>
+                      <option>外包个人</option>
+                      <option>分包单位人员</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">所属单位</label>
+                    <input type="text" value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="内部人员可留空" />
                   </div>
                 </div>
                 <div className="flex gap-6 mt-4">

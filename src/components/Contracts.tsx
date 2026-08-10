@@ -2,9 +2,11 @@ import React, { useState, useMemo } from "react";
 import { FileText, Upload, Search, Filter, MoreHorizontal, Download, Eye, FileSignature, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { flattenProjects } from "@/src/lib/management";
 
 const initialContracts = [
-  { id: "C-2026-001", name: "A区商业综合体总承包合同", type: "施工合同", partyA: "城建集团", partyB: "第一建筑工程公司", amount: "¥12,500万", date: "2026-01-15", status: "active" },
+  { id: "C-2026-001", name: "A区商业综合体总承包合同", type: "施工合同", partyA: "城建集团", partyB: "第一建筑工程公司", amount: "¥12,500万", date: "2026-01-15", status: "active", projectId: "p1" },
   { id: "C-2026-002", name: "钢材采购年度框架协议", type: "采购合同", partyA: "第一建筑工程公司", partyB: "宝钢股份", amount: "按实结算", date: "2026-02-01", status: "active" },
   { id: "C-2026-003", name: "B区塔吊租赁合同", type: "租赁合同", partyA: "第一建筑工程公司", partyB: "宏达机械租赁", amount: "¥85万", date: "2026-02-20", status: "pending" },
   { id: "C-2025-105", name: "前期地勘服务协议", type: "服务合同", partyA: "城建集团", partyB: "省地质勘查院", amount: "¥120万", date: "2025-11-10", status: "completed" },
@@ -12,8 +14,11 @@ const initialContracts = [
 
 export function Contracts() {
   const [contracts, setContracts] = useFirebaseSync("project_contracts", initialContracts);
+  const [externalPartners] = useFirebaseSync<any[]>("externalPartners", []);
+  const [projectBoardData] = useProjectBoardData();
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const projects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
 
   const filteredContracts = useMemo(() => {
     return contracts.filter((c: any) => {
@@ -71,6 +76,24 @@ export function Contracts() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const form = new FormData(e.currentTarget as HTMLFormElement);
+    const partnerId = String(form.get("partnerId") || "");
+    const partner = externalPartners.find((item: any) => item.id === partnerId);
+    const newContract = {
+      id: `C-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+      name: String(form.get("name") || ""),
+      type: String(form.get("type") || "施工合同"),
+      partyA: String(form.get("partyA") || ""),
+      partyB: String(form.get("partyB") || partner?.name || ""),
+      amount: String(form.get("amount") || ""),
+      date: String(form.get("date") || new Date().toISOString().split("T")[0]),
+      status: String(form.get("status") || "pending"),
+      projectId: String(form.get("projectId") || ""),
+      partnerId,
+      paymentNodes: [],
+      deliverables: partner?.requiredDocs || [],
+    };
+    setContracts((prev: any[]) => [newContract, ...prev]);
     setIsModalOpen(false);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '新建合同成功' }));
   };
@@ -149,6 +172,7 @@ export function Contracts() {
               <th className="px-6 py-4">合同名称</th>
               <th className="px-6 py-4">类型</th>
               <th className="px-6 py-4">甲方/乙方</th>
+              <th className="px-6 py-4">关联</th>
               <th className="px-6 py-4">合同金额</th>
               <th className="px-6 py-4">签订日期</th>
               <th className="px-6 py-4">状态</th>
@@ -165,6 +189,12 @@ export function Contracts() {
                   <div className="flex flex-col">
                     <span className="text-xs text-slate-400">甲: {contract.partyA}</span>
                     <span className="text-xs text-slate-500">乙: {contract.partyB}</span>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-slate-600">
+                  <div className="flex flex-col text-xs">
+                    <span>{projects.find((p: any) => p.id === contract.projectId)?.name || "未关联项目"}</span>
+                    <span className="text-slate-400 mt-1">{externalPartners.find((p: any) => p.id === contract.partnerId)?.name || "未关联合协"}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4 font-medium text-slate-700">{contract.amount}</td>
@@ -203,7 +233,7 @@ export function Contracts() {
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between p-6 border-b border-slate-100">
               <h3 className="text-lg font-bold text-slate-900">新建合同</h3>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -213,36 +243,65 @@ export function Contracts() {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">合同名称</label>
-                <input type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="输入合同名称" />
+                <input name="name" type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="输入合同名称" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">合同类型</label>
-                  <select className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                  <select name="type" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                     <option>施工合同</option>
                     <option>采购合同</option>
+                    <option>设计合同</option>
+                    <option>分包合同</option>
+                    <option>劳务合同</option>
+                    <option>检测合同</option>
                     <option>租赁合同</option>
                     <option>服务合同</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">合同金额</label>
-                  <input type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="如：¥100万" />
+                  <input name="amount" type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="如：¥100万" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">甲方</label>
-                  <input type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="输入甲方名称" />
+                  <input name="partyA" type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="输入甲方名称" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">乙方</label>
-                  <input type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="输入乙方名称" />
+                  <input name="partyB" type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="输入乙方名称" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">关联项目</label>
+                  <select name="projectId" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                    <option value="">暂不关联</option>
+                    {projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">参建/外协单位</label>
+                  <select name="partnerId" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                    <option value="">暂不关联</option>
+                    {externalPartners.map((partner: any) => <option key={partner.id} value={partner.id}>{partner.name}</option>)}
+                  </select>
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">签订日期</label>
-                <input type="date" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                <input name="date" type="date" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">合同状态</label>
+                <select name="status" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                  <option value="pending">待签批</option>
+                  <option value="active">执行中</option>
+                  <option value="draft">草稿/模板</option>
+                  <option value="completed">已归档</option>
+                </select>
               </div>
               <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">

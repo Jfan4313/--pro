@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Download, PieChart as PieChartIcon, BarChart3, Wallet, Receipt, Edit2, X, Save, Plus, Calendar, CheckCircle, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useFirebaseSync } from '../hooks/useFirebaseSync';
+import { useProjectBoardData } from '../hooks/useProjectBoardData';
 import { cn } from '../lib/utils';
 
 const initialCostData = [
@@ -67,7 +68,7 @@ const typeLabels: Record<string, string> = {
 
 export function CostDashboard() {
   const [costData, setCostData] = useFirebaseSync("costDataV2", initialCostData);
-  const [projectBoardData] = useFirebaseSync("projectBoardData", []);
+  const [projectBoardData] = useProjectBoardData();
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
@@ -741,16 +742,16 @@ export function CostDashboard() {
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">成本与预算管理</h2>
           <p className="text-slate-500 mt-1">项目预算划分、费用台账与回款进度追踪</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex w-full md:w-auto flex-col sm:flex-row sm:items-center gap-3 md:gap-4">
           <select
             value={selectedProjectId}
             onChange={(e) => setSelectedProjectId(e.target.value)}
-            className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-sm"
+            className="w-full sm:w-auto px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-sm"
           >
             <option value="all">汇总视图 (所有项目)</option>
             {allProjects.map((p: any) => (
@@ -762,7 +763,7 @@ export function CostDashboard() {
           </select>
           <button 
             onClick={handleExportCSV}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm"
           >
             <Download className="w-4 h-4" /> 导出报表
           </button>

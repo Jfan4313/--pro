@@ -1,0 +1,18 @@
+project.zero-carbon.online {
+    encode zstd gzip
+
+    request_body {
+        max_size 30MB
+    }
+
+    # 现有 Caddy 运行在 solar-platform_default Docker 网络中，
+    # 172.18.0.1 是该网络访问宿主机的网关地址。
+    reverse_proxy 172.18.0.1:8787
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+        -Server
+    }
+}

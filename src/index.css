@@ -9,6 +9,23 @@
 }
 
 @layer utilities {
+  .survey-input {
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    padding: 0.7rem 0.85rem;
+    font-size: 0.875rem;
+    color: #334155;
+    outline: none;
+    transition: border-color 150ms, box-shadow 150ms;
+  }
+
+  .survey-input:focus {
+    border-color: #818cf8;
+    box-shadow: 0 0 0 3px rgb(99 102 241 / 0.12);
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -25,3 +42,41 @@
   }
 }
 
+@media (max-width: 767px) {
+  .app-shell {
+    height: 100dvh;
+  }
+
+  .mobile-topbar {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .mobile-bottom-nav {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+
+  .mobile-sheet {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .app-main {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    overscroll-behavior-y: contain;
+  }
+
+  .app-main > .p-8 {
+    padding: 1rem !important;
+  }
+
+  .app-main > .space-y-8 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1rem !important;
+  }
+
+  .app-toast {
+    right: 1rem;
+    bottom: calc(5.5rem + env(safe-area-inset-bottom));
+    left: 1rem;
+    justify-content: center;
+    padding: 0.75rem 1rem;
+  }
+}

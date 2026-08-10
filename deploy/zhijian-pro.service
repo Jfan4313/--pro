@@ -1,0 +1,21 @@
+[Unit]
+Description=Zhijian Pro project management service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/zhijian-pro
+EnvironmentFile=/etc/zhijian-pro.env
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/zhijian-pro
+
+[Install]
+WantedBy=multi-user.target

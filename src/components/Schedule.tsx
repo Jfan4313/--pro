@@ -2,6 +2,8 @@ import React, { useState, useRef } from "react";
 import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { flattenTasks, formatLocalDate } from "@/src/lib/management";
 import * as XLSX from "xlsx";
 
 const initialScheduleData = [
@@ -83,7 +85,8 @@ const projectTemplates = [
 
 export function Schedule() {
   const [data, setData] = useFirebaseSync("scheduleData", initialScheduleData);
-  const [boardData] = useFirebaseSync("projectBoardData", []);
+  const [boardData] = useProjectBoardData();
+  const [externalPartners] = useFirebaseSync<any[]>("externalPartners", []);
   
   // 动态获取项目列表，合并 scheduleData 和 boardData 中的项目名称，以便新建项目能够显示
   const projects = React.useMemo(() => {
@@ -110,6 +113,7 @@ export function Schedule() {
   const [editingTask, setEditingTask] = useState<{projectId: string, taskId: string, taskName: string, deadline: string} | null>(null);
   const [editingDep, setEditingDep] = useState<{projectId: string, taskId: string, taskName: string, predecessorId: string | null} | null>(null);
   const [newTaskProject, setNewTaskProject] = useState<string>("");
+  const [taskFilter, setTaskFilter] = useState<"project" | "mine" | "overdue" | "unassigned" | "external" | "externalOverdue" | "quick">("project");
 
   // 当 data 更新时，如果 newTaskProject 为空且有项目，则默认选中第一个
   React.useEffect(() => {
@@ -252,6 +256,29 @@ export function Schedule() {
     ? data 
     : data.filter(p => p.name === selectedProject);
 
+  const allFlatTasks = React.useMemo(() => flattenTasks(data), [data]);
+  const todayStr = formatLocalDate();
+  const taskBuckets = React.useMemo(() => ({
+    project: allFlatTasks.filter((task: any) => task.status !== "completed"),
+    mine: allFlatTasks.filter((task: any) => task.assignee && task.assignee !== "待指派"),
+    overdue: allFlatTasks.filter((task: any) => task.deadline && task.deadline < todayStr && task.status !== "completed"),
+    unassigned: allFlatTasks.filter((task: any) => !task.responsibilityType && (!task.assignee || task.assignee === "待指派")),
+    external: allFlatTasks.filter((task: any) => task.responsibilityType === "外协单位" || task.responsibilityType === "外包个人"),
+    externalOverdue: allFlatTasks.filter((task: any) => (task.responsibilityType === "外协单位" || task.responsibilityType === "外包个人") && task.deadline && task.deadline < todayStr && task.status !== "completed"),
+    quick: allFlatTasks.filter((task: any) => task.source === "quick-intake"),
+  }), [allFlatTasks, todayStr]);
+
+  const taskFilterLabels = {
+    project: "项目待办",
+    mine: "我的待办",
+    overdue: "逾期待办",
+    unassigned: "责任未明确",
+    external: "外协任务",
+    externalOverdue: "外协逾期",
+    quick: "来自快速待办",
+  };
+  const visibleTaskList = taskBuckets[taskFilter];
+
   const handleExportCSV = () => {
     const headers = ["项目名称", "任务名称", "开始日期", "结束日期", "截止日期", "负责人", "状态", "前置任务"];
     const rows: string[][] = [];
@@ -368,6 +395,8 @@ export function Schedule() {
     const endDateRaw = (form.elements.namedItem('endDate') as HTMLInputElement).value;
     const deadline = (form.elements.namedItem('deadline') as HTMLInputElement).value;
     const assignee = (form.elements.namedItem('assignee') as HTMLInputElement).value;
+    const responsibilityType = (form.elements.namedItem('responsibilityType') as HTMLSelectElement).value;
+    const responsibleId = (form.elements.namedItem('responsibleId') as HTMLSelectElement).value;
     const predecessorId = (form.elements.namedItem('predecessorId') as HTMLSelectElement).value || null;
     
     if (new Date(startDateRaw) > new Date(endDateRaw)) {
@@ -397,6 +426,8 @@ export function Schedule() {
                 deadline,
                 status: "pending",
                 assignee,
+                responsibilityType,
+                responsibleId,
                 predecessorId
               }
             ]
@@ -421,6 +452,8 @@ export function Schedule() {
                 deadline,
                 status: "pending",
                 assignee,
+                responsibilityType,
+                responsibleId,
                 predecessorId
             }]
          });
@@ -498,30 +531,30 @@ export function Schedule() {
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">施工日程管理</h2>
           <p className="text-slate-500 text-sm mt-1">全局掌控工程节点，预防工期延误</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex w-full xl:w-auto flex-wrap gap-2 md:gap-3">
           <select 
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium outline-none hover:border-slate-300 transition-colors shadow-sm"
+            className="min-w-0 flex-1 sm:flex-none px-3 md:px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium outline-none hover:border-slate-300 transition-colors shadow-sm"
           >
             {projects.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button 
               onClick={() => setViewMode('gantt')} 
-              className={cn("px-3 py-1.5 rounded-md text-sm font-medium flex items-center transition-colors", viewMode === 'gantt' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}
+              className={cn("px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm font-medium flex items-center transition-colors", viewMode === 'gantt' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}
             >
               <LayoutList className="w-4 h-4 mr-1.5" />
               甘特图
             </button>
             <button 
               onClick={() => setViewMode('table')} 
-              className={cn("px-3 py-1.5 rounded-md text-sm font-medium flex items-center transition-colors", viewMode === 'table' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}
+              className={cn("px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm font-medium flex items-center transition-colors", viewMode === 'table' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}
             >
               <TableIcon className="w-4 h-4 mr-1.5" />
               施工计划表
@@ -551,6 +584,40 @@ export function Schedule() {
             <Plus className="w-4 h-4 mr-2" />
             排期计划
           </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
+          <div>
+            <h3 className="font-bold text-slate-900">任务管理视图</h3>
+            <p className="text-xs text-slate-500 mt-1">快速筛选项目经理需要处理的任务</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["project", "mine", "overdue", "external", "externalOverdue", "unassigned", "quick"] as const).map((key) => (
+              <button
+                key={key}
+                onClick={() => setTaskFilter(key)}
+                className={cn("px-3 py-1.5 rounded-lg text-xs font-medium transition-colors", taskFilter === key ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
+              >
+                {taskFilterLabels[key]} ({taskBuckets[key].length})
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {visibleTaskList.slice(0, 6).map((task: any) => (
+            <div key={`${task.projectId}-${task.id}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="text-sm font-medium text-slate-900 line-clamp-1">{task.name}</div>
+              <div className="text-xs text-slate-500 mt-1">{task.projectName} · {task.responsibilityType || "内部人员"}：{task.assignee || "待指派"} · {task.deadline || "无截止"}</div>
+              {task.sourceSummary && <div className="text-xs text-slate-400 mt-2 line-clamp-1">来源：{task.sourceSummary}</div>}
+            </div>
+          ))}
+          {visibleTaskList.length === 0 && (
+            <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 py-8 text-center text-sm text-slate-400">
+              当前筛选暂无任务
+            </div>
+          )}
         </div>
       </div>
 
@@ -617,8 +684,13 @@ export function Schedule() {
                           <div className="w-[10%] flex items-center">
                             <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md truncate">{task.assignee}</span>
                           </div>
+                          <div className="w-[10%] flex items-center">
+                            <span className={cn("text-[10px] px-2 py-1 rounded-md truncate", task.responsibilityType === "外协单位" || task.responsibilityType === "外包个人" ? "bg-amber-50 text-amber-700" : "bg-slate-50 text-slate-500")}>
+                              {task.responsibilityType || "内部人员"}
+                            </span>
+                          </div>
                           
-                          <div className="w-[12%] flex items-center">
+                          <div className="w-[10%] flex items-center">
                             <select
                               value={task.status}
                               onChange={(e) => handleStatusChange(project.id, task.id, e.target.value, task.predecessorId)}
@@ -637,7 +709,7 @@ export function Schedule() {
                             </select>
                           </div>
 
-                          <div className="w-[15%] flex items-center gap-1">
+                          <div className="w-[14%] flex items-center gap-1">
                             <span className="text-xs text-slate-500 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-100 truncate">
                               截止: {task.deadline.slice(5)}
                             </span>
@@ -654,7 +726,7 @@ export function Schedule() {
                             </button>
                           </div>
 
-                          <div className="w-[15%] flex items-center gap-1">
+                          <div className="w-[14%] flex items-center gap-1">
                             <span className="text-xs text-slate-500 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-100 truncate max-w-[80px]" title={task.predecessorId ? project.tasks.find(t => t.id === task.predecessorId)?.name : '无前置'}>
                               {task.predecessorId ? project.tasks.find(t => t.id === task.predecessorId)?.name : '无前置'}
                             </span>
@@ -671,7 +743,7 @@ export function Schedule() {
                             </button>
                           </div>
 
-                          <div className="w-[28%] flex items-center">
+                          <div className="w-[26%] flex items-center">
                             <span className="text-xs text-slate-400 w-10 text-right mr-2 font-mono">{task.start}</span>
                             <div className="flex-1 h-4 bg-slate-100 rounded relative">
                               {/* Pseudo Gantt Bar - Simplified for UI mockup */}
@@ -709,7 +781,7 @@ export function Schedule() {
                   <th className="px-6 py-4">结束日期</th>
                   <th className="px-6 py-4">截止日期</th>
                   <th className="px-6 py-4">前置任务</th>
-                  <th className="px-6 py-4">责任人</th>
+                  <th className="px-6 py-4">责任主体</th>
                   <th className="px-6 py-4">状态</th>
                 </tr>
               </thead>
@@ -749,7 +821,10 @@ export function Schedule() {
                           </button>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-slate-600">{task.assignee}</td>
+                      <td className="px-6 py-4 text-slate-600">
+                        <div className="font-medium text-slate-700">{task.assignee}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">{task.responsibilityType || "内部人员"}</div>
+                      </td>
                       <td className="px-6 py-4">
                         <select
                           value={task.status}
@@ -869,7 +944,28 @@ export function Schedule() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">责任人</label>
-                      <input type="text" name="assignee" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="姓名" />
+                      <input type="text" name="assignee" required list="schedule-responsible-options" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="姓名/单位名称" />
+                      <datalist id="schedule-responsible-options">
+                        {externalPartners.map((partner: any) => <option key={partner.id} value={partner.name} />)}
+                      </datalist>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">责任主体类型</label>
+                      <select name="responsibilityType" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                        <option>内部人员</option>
+                        <option>内部班组</option>
+                        <option>外协单位</option>
+                        <option>外包个人</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">关联外协</label>
+                      <select name="responsibleId" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                        <option value="">不关联</option>
+                        {externalPartners.map((partner: any) => <option key={partner.id} value={partner.id}>{partner.name}</option>)}
+                      </select>
                     </div>
                   </div>
                   <div>

@@ -1,14 +1,19 @@
-import { Bell, Search, Briefcase, Users, Package, Calendar } from "lucide-react";
+import { Bell, Search, Briefcase, Users, Package, Building2, X, LogOut } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useFirebaseSync } from "../hooks/useFirebaseSync";
+import { useProjectBoardData } from "../hooks/useProjectBoardData";
+import { useAuth } from "@/src/lib/auth";
 
 export function Header({ setActiveTab }: { setActiveTab?: (tab: string) => void }) {
+  const { user, logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [isFocused, setIsFocused] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [isAccountOpen, setIsAccountOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  const [projectBoardData] = useFirebaseSync<any[]>("projectBoardData", []);
+  const [projectBoardData] = useProjectBoardData();
   const [personnelData] = useFirebaseSync<any[]>("personnelData", []);
   const [materialsData] = useFirebaseSync<any[]>("materialsData", []);
 
@@ -64,23 +69,39 @@ export function Header({ setActiveTab }: { setActiveTab?: (tab: string) => void 
   }, [searchQuery, projectBoardData, personnelData, materialsData]);
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10">
-      <div className="relative" ref={searchRef}>
-        <div className={`flex items-center bg-slate-100 rounded-lg px-3 py-2 w-96 transition-shadow ${isFocused ? 'ring-2 ring-indigo-500/50 bg-white border border-indigo-200' : 'border border-transparent'}`}>
+    <header className="mobile-topbar min-h-16 bg-white/95 backdrop-blur-xl border-b border-slate-200 flex items-center justify-between gap-3 px-4 md:px-6 sticky top-0 z-30">
+      <div className={`${isMobileSearchOpen ? "hidden" : "flex"} md:hidden min-w-0 items-center gap-2.5`}>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white"><Building2 className="h-4 w-4" /></span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-slate-900">智建协同 Pro</p>
+          <p className="text-[10px] text-slate-500">项目管理工作台</p>
+        </div>
+      </div>
+
+      <div className={`${isMobileSearchOpen ? "flex flex-1" : "hidden"} md:block relative`} ref={searchRef}>
+        <div className={`flex items-center bg-slate-100 rounded-xl px-3 py-2 w-full md:w-96 transition-shadow ${isFocused ? 'ring-2 ring-indigo-500/30 bg-white border border-indigo-200' : 'border border-transparent'}`}>
           <Search className="w-4 h-4 text-slate-400 mr-2" />
           <input 
             type="text" 
             placeholder="搜索项目、人员或物资..." 
             value={searchQuery}
+            autoFocus={isMobileSearchOpen}
             onChange={(e) => setSearchQuery(e.target.value)}
             onFocus={() => setIsFocused(true)}
             className="bg-transparent border-none outline-none text-sm w-full text-slate-700 placeholder:text-slate-400"
           />
+          <button
+            className="md:hidden ml-2 rounded-full p-1 text-slate-400"
+            onClick={() => { setIsMobileSearchOpen(false); setIsFocused(false); setSearchQuery(""); }}
+            aria-label="关闭搜索"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Search Dropdown */}
         {isFocused && searchQuery.trim() && (
-          <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="absolute top-full left-0 mt-2 w-full min-w-[min(24rem,calc(100vw-2rem))] bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
             {results.length > 0 ? (
               <div className="py-2">
                 {results.map((result, idx) => (
@@ -113,10 +134,21 @@ export function Header({ setActiveTab }: { setActiveTab?: (tab: string) => void 
       </div>
       
       <div className="flex items-center gap-4">
+        <button
+          onClick={() => { setIsMobileSearchOpen(true); setIsFocused(true); }}
+          className={`${isMobileSearchOpen ? "hidden" : "block"} md:hidden p-2 text-slate-500 rounded-full hover:bg-slate-100`}
+          aria-label="搜索"
+        >
+          <Search className="w-5 h-5" />
+        </button>
         <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-full hover:bg-slate-100">
           <Bell className="w-5 h-5" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
         </button>
+        <div className="relative">
+          <button onClick={() => setIsAccountOpen(!isAccountOpen)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-xs font-bold text-white" aria-label="帐号菜单">{user?.name?.slice(0, 1) || "我"}</button>
+          {isAccountOpen && <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-slate-100 bg-white p-3 shadow-xl"><p className="text-sm font-bold text-slate-900">{user?.name}</p><p className="mt-1 truncate text-xs text-slate-500">@{user?.username}</p><button onClick={() => void logout()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-100 py-2.5 text-sm font-semibold text-slate-600"><LogOut className="h-4 w-4" />退出登录</button></div>}
+        </div>
       </div>
     </header>
   );

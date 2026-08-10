@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Truck, Clock, FileText, Search, Filter, ArrowRight, X, Building2, Phone, Star, Plus, MapPin } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 
 const initialSupplyData = [
   { id: "PO-2026-001", projectId: "p5", supplier: "隆基绿能科技股份有限公司", items: "单晶硅光伏组件 550Wp", amount: "¥1,250,000", orderDate: "2026-02-15", expectedDate: "2026-03-20", status: "in-transit" },
@@ -29,7 +30,7 @@ const statusConfig = {
 export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { defaultTab?: "orders" | "reconciliation", hideHeader?: boolean }) {
   const [orders, setOrders] = useFirebaseSync("supplyOrders", initialSupplyData);
   const [suppliers, setSuppliers] = useFirebaseSync("suppliers", initialSupplierData);
-  const [projectBoardData] = useFirebaseSync("projectBoardData", []);
+  const [projectBoardData] = useProjectBoardData();
   const [bomData] = useFirebaseSync("bomData", [
     { id: "BOM-001", name: "单晶硅光伏组件", spec: "550Wp", plannedQty: 2000, procuredQty: 1200, unit: "块", project: "A区商业综合体" },
     { id: "BOM-002", name: "热镀锌钢支架", spec: "C型钢 41x41x2.0", plannedQty: 1000, procuredQty: 500, unit: "米", project: "A区商业综合体" },
@@ -685,4 +686,3 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
     </div>
   );
 }
-

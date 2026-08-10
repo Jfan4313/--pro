@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Send, Paperclip, Search, MoreVertical, FileText, Image as ImageIcon, Megaphone, Users, Plus, X, Building2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 
 const initialChannels = [
   { id: "1", name: "全局公告", type: "announcement", unread: 2, members: ["所有人"] },
@@ -45,7 +46,7 @@ export function Chat() {
   const [postText, setPostText] = useState("");
   const [posts, setPosts] = useFirebaseSync("chatPosts", initialPosts);
   const [personnelData] = useFirebaseSync("personnelData", []);
-  const [projectBoardData] = useFirebaseSync("projectBoardData", []);
+  const [projectBoardData] = useProjectBoardData();
 
   const [isCreateChannelModalOpen, setIsCreateChannelModalOpen] = useState(false);
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);

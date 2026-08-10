@@ -2,30 +2,9 @@ import React, { useState, useEffect, useMemo } from "react";
 import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
-
-const sampleProjects = [
-  { id: "p1", name: "C区绿色建筑改造", type: "绿色建筑", manager: "陈杰", constructProgress: 0, supplyProgress: 15, status: "normal", dueDate: "2026-12-31" },
-  { id: "p4", name: "智能微电网二期", type: "智能微电网", manager: "赵敏", constructProgress: 10, supplyProgress: 80, status: "normal", dueDate: "2026-07-20" },
-  { id: "p6", name: "北侧风力发电机组", type: "风力发电", manager: "李娜", constructProgress: 45, supplyProgress: 100, status: "delayed", dueDate: "2026-08-15" },
-  { id: "p8", name: "展示中心光储充一体", type: "综合能源", manager: "王强", constructProgress: 100, supplyProgress: 100, status: "success", dueDate: "2026-01-15" }
-];
-
-const initialBoardData = STAGES.map((stage, idx) => {
-  // Distribute sample projects into stages somewhat evenly for visual effect
-  let projectsInStage = [];
-  if (idx === 0) projectsInStage = [sampleProjects[0]];
-  else if (idx === 3) projectsInStage = [sampleProjects[1]];
-  else if (idx === 6) projectsInStage = [sampleProjects[2]];
-  else if (idx === 8) projectsInStage = [sampleProjects[3]];
-  
-  return {
-    id: stage.id,
-    title: stage.name.split(' ')[1] || stage.name,
-    count: projectsInStage.length,
-    projects: projectsInStage
-  };
-});
+import { apiClient } from "@/src/lib/apiClient";
 
 const statusConfig = {
   normal: { icon: Clock, color: "text-slate-400", tooltip: "进度正常" },
@@ -44,8 +23,8 @@ const typeColors: Record<string, string> = {
   "综合能源": "bg-indigo-100 text-indigo-700 border-indigo-200",
 };
 
-export function ProjectBoard() {
-  const [data, setData] = useFirebaseSync("projectBoardData", initialBoardData);
+export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: string) => void }) {
+  const [data, setData, , boardSeed] = useProjectBoardData();
   const [supplyOrders] = useFirebaseSync("supplyOrders", []);
   const [personnelData] = useFirebaseSync("personnelData", []);
   const [scheduleData] = useFirebaseSync("scheduleData", []);
@@ -121,7 +100,7 @@ export function ProjectBoard() {
       }
 
       setData((prevData: any) => {
-      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : initialBoardData;
+      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;
       const newData = [...currentData];
       const sourceColIndex = newData.findIndex(c => c.id === sourceColumnId);
       const targetColIndex = newData.findIndex(c => c.id === targetColumnId);
@@ -171,7 +150,7 @@ export function ProjectBoard() {
     };
 
     setData((prevData: any) => {
-      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : initialBoardData;
+      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;
       const newData = [...currentData];
       const firstColId = STAGES[0].id;
       let planningColIndex = newData.findIndex(c => c.id === firstColId);
@@ -187,6 +166,11 @@ export function ProjectBoard() {
       }
       return newData;
     });
+
+    apiClient.initProjectFolders(newProject.id, { project: newProject, stages: [STAGES[0]] })
+      .catch(() => {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目已创建，资料夹稍后可在生命周期上传时自动生成' }));
+      });
 
     setIsModalOpen(false);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '新建项目成功' }));
@@ -257,7 +241,7 @@ export function ProjectBoard() {
     if (!editingProject) return;
     
     setData((prevData: any) => {
-      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : initialBoardData;
+      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;
       return currentData.map((col: any) => ({
         ...col,
         projects: col.projects.map((p: any) => p.id === editingProject.id ? editingProject : p)
@@ -279,7 +263,7 @@ export function ProjectBoard() {
           <button 
             onClick={() => {
               if (window.confirm('确定要重置看板数据吗？所有自定义项目将被清除。')) {
-                setData(initialBoardData);
+                setData(boardSeed);
                 window.dispatchEvent(new CustomEvent('show-toast', { detail: '看板已重置' }));
               }
             }}
@@ -299,7 +283,7 @@ export function ProjectBoard() {
 
       <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
         <div className="flex gap-4 md:gap-6 h-full min-w-max px-1">
-          {(Array.isArray(data) && data.length > 0 ? data : initialBoardData).map((column) => (
+          {(Array.isArray(data) && data.length > 0 ? data : boardSeed).map((column) => (
             <div 
               key={column.id} 
               className={cn(
@@ -367,7 +351,7 @@ export function ProjectBoard() {
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
-                              onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('show-toast', { detail: '查看项目详情' })); }}
+                              onClick={(e) => { e.stopPropagation(); onOpenProject?.(project.id); }}
                               className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors" 
                               title="查看详情"
                             >

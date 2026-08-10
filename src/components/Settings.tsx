@@ -1,7 +1,11 @@
 import React from "react";
-import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield } from "lucide-react";
+import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { apiClient } from "@/src/lib/apiClient";
+import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { flattenProjects } from "@/src/lib/management";
 
 const defaultSettings = {
   notifications: {
@@ -13,21 +17,131 @@ const defaultSettings = {
   },
   security: {
     twoFactorAuth: false,
+  },
+  fileManagement: {
+    rootPath: "",
+    autoRename: true,
+    autoCreateFolders: true,
   }
 };
 
 export function Settings() {
   const [settings, setSettings] = useFirebaseSync("appSettings", defaultSettings);
+  const [boardData] = useProjectBoardData();
+  const [lifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const [fileRootInput, setFileRootInput] = React.useState("");
+  const [defaultFileRoot, setDefaultFileRoot] = React.useState("");
+  const [isSavingFileRoot, setIsSavingFileRoot] = React.useState(false);
+  const [isInitializingFolders, setIsInitializingFolders] = React.useState(false);
 
-  const handleToggle = (category: keyof typeof defaultSettings, key: string) => {
+  const mergedSettings = {
+    ...defaultSettings,
+    ...settings,
+    notifications: { ...defaultSettings.notifications, ...(settings as any)?.notifications },
+    security: { ...defaultSettings.security, ...(settings as any)?.security },
+    fileManagement: { ...defaultSettings.fileManagement, ...(settings as any)?.fileManagement },
+  };
+
+  const projectCount = flattenProjects(boardData as any[]).length;
+
+  React.useEffect(() => {
+    let mounted = true;
+    apiClient.getFileSettings()
+      .then((remote) => {
+        if (!mounted) return;
+        setDefaultFileRoot(remote.defaultRootPath);
+        setFileRootInput(mergedSettings.fileManagement.rootPath || remote.rootPath);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setFileRootInput(mergedSettings.fileManagement.rootPath || "");
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleToggle = async (category: keyof typeof defaultSettings, key: string) => {
+    const nextValue = !(mergedSettings as any)[category][key];
     setSettings((prev: any) => ({
       ...prev,
       [category]: {
         ...prev[category],
-        [key]: !prev[category][key],
+        [key]: nextValue,
       },
     }));
+
+    if (category === "fileManagement") {
+      try {
+        await apiClient.updateFileSettings({
+          rootPath: fileRootInput || mergedSettings.fileManagement.rootPath || defaultFileRoot,
+          autoRename: key === "autoRename" ? nextValue : mergedSettings.fileManagement.autoRename,
+          autoCreateFolders: key === "autoCreateFolders" ? nextValue : mergedSettings.fileManagement.autoCreateFolders,
+        });
+      } catch {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '本地后端未连接，设置已先保存在本机' }));
+        return;
+      }
+    }
+
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '设置已保存' }));
+  };
+
+  const saveFileRoot = async () => {
+    const rootPath = fileRootInput.trim();
+    if (!rootPath) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请先填写文件保存位置' }));
+      return;
+    }
+
+    setIsSavingFileRoot(true);
+    try {
+      const saved = await apiClient.updateFileSettings({
+        rootPath,
+        autoRename: mergedSettings.fileManagement.autoRename,
+        autoCreateFolders: mergedSettings.fileManagement.autoCreateFolders,
+      });
+      setDefaultFileRoot(saved.defaultRootPath);
+      setFileRootInput(saved.rootPath);
+      setSettings((prev: any) => ({
+        ...prev,
+        fileManagement: {
+          ...defaultSettings.fileManagement,
+          ...(prev.fileManagement || {}),
+          rootPath: saved.rootPath,
+          autoRename: saved.autoRename,
+          autoCreateFolders: saved.autoCreateFolders,
+        },
+      }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件保存位置已更新' }));
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '保存失败，请检查本地后端和文件夹权限' }));
+    } finally {
+      setIsSavingFileRoot(false);
+    }
+  };
+
+  const initializeAllProjectFolders = async () => {
+    const projects = flattenProjects(boardData as any[]);
+    if (projects.length === 0) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '当前还没有项目可初始化' }));
+      return;
+    }
+
+    setIsInitializingFolders(true);
+    try {
+      let count = 0;
+      for (const project of projects) {
+        const stageInfo = getProjectCurrentStageInfo(project.id, lifecycleStates);
+        await apiClient.initProjectFolders(project.id, { project, stages: STAGES.slice(0, stageInfo.index + 1) });
+        count += 1;
+      }
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `已为 ${count} 个项目生成当前阶段资料夹` }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '生成失败，请检查本地后端和文件保存位置' }));
+    } finally {
+      setIsInitializingFolders(false);
+    }
   };
 
   return (
@@ -49,21 +163,21 @@ export function Settings() {
               icon={Package}
               title="物资库存预警"
               description="当物资库存低于安全阈值时接收通知"
-              checked={settings.notifications.lowStock}
+              checked={mergedSettings.notifications.lowStock}
               onChange={() => handleToggle('notifications', 'lowStock')}
             />
             <SettingToggle
               icon={AlertTriangle}
               title="任务延期提醒"
               description="当施工任务超出预计完成时间时接收通知"
-              checked={settings.notifications.delayedTasks}
+              checked={mergedSettings.notifications.delayedTasks}
               onChange={() => handleToggle('notifications', 'delayedTasks')}
             />
             <SettingToggle
               icon={MessageSquare}
               title="紧急公告通知"
               description="当有标记为紧急的系统或项目公告时接收通知"
-              checked={settings.notifications.urgentAnnouncements}
+              checked={mergedSettings.notifications.urgentAnnouncements}
               onChange={() => handleToggle('notifications', 'urgentAnnouncements')}
             />
             
@@ -73,15 +187,86 @@ export function Settings() {
               icon={Mail}
               title="邮件通知"
               description="将重要提醒发送至您的注册邮箱"
-              checked={settings.notifications.emailAlerts}
+              checked={mergedSettings.notifications.emailAlerts}
               onChange={() => handleToggle('notifications', 'emailAlerts')}
             />
             <SettingToggle
               icon={Smartphone}
               title="移动端推送"
               description="允许在移动设备上接收应用内推送"
-              checked={settings.notifications.pushAlerts}
+              checked={mergedSettings.notifications.pushAlerts}
               onChange={() => handleToggle('notifications', 'pushAlerts')}
+            />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+            <FolderOpen className="w-5 h-5 text-cyan-600" />
+            <h3 className="text-lg font-medium text-slate-800">文件管理</h3>
+          </div>
+          <div className="p-6 space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-slate-900 mb-2">项目资料保存位置</label>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  value={fileRootInput}
+                  onChange={(event) => setFileRootInput(event.target.value)}
+                  placeholder={defaultFileRoot || "请选择本地项目资料文件夹"}
+                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+                <button
+                  onClick={saveFileRoot}
+                  disabled={isSavingFileRoot}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60 transition-colors"
+                >
+                  <Save className="w-4 h-4" />
+                  {isSavingFileRoot ? "保存中" : "保存位置"}
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                软件上传的项目资料会按项目和阶段自动归档到这里；不填写时使用默认位置。
+              </p>
+              {defaultFileRoot && (
+                <p className="text-xs text-slate-400 mt-1">默认位置：{defaultFileRoot}</p>
+              )}
+            </div>
+
+            <div className="h-px bg-slate-100"></div>
+
+            <div className="rounded-lg border border-cyan-100 bg-cyan-50/60 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-900">为现有项目生成资料夹</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  当前识别到 {projectCount} 个项目，只生成各项目当前阶段及以前阶段的资料夹。
+                </p>
+              </div>
+              <button
+                onClick={initializeAllProjectFolders}
+                disabled={isInitializingFolders || projectCount === 0}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-cyan-700 text-white text-sm font-medium hover:bg-cyan-800 disabled:opacity-60 transition-colors"
+              >
+                <FolderPlus className="w-4 h-4" />
+                {isInitializingFolders ? "生成中" : "一键生成"}
+              </button>
+            </div>
+
+            <div className="h-px bg-slate-100"></div>
+
+            <SettingToggle
+              icon={FileNameIcon}
+              title="上传时自动规范命名"
+              description="保留原始文件名，同时保存为项目、阶段、资料类型、版本号组合的新文件名"
+              checked={mergedSettings.fileManagement.autoRename}
+              onChange={() => handleToggle('fileManagement', 'autoRename')}
+            />
+            <SettingToggle
+              icon={FolderOpen}
+              title="新项目自动生成立项资料夹"
+              description="新项目先只生成立项阶段资料夹，进入后续阶段时再生成对应资料夹"
+              checked={mergedSettings.fileManagement.autoCreateFolders}
+              onChange={() => handleToggle('fileManagement', 'autoCreateFolders')}
             />
           </div>
         </div>
@@ -97,7 +282,7 @@ export function Settings() {
               icon={Shield}
               title="双重身份验证 (2FA)"
               description="在登录时要求提供额外的验证码以提高账户安全性"
-              checked={settings.security.twoFactorAuth}
+              checked={mergedSettings.security.twoFactorAuth}
               onChange={() => handleToggle('security', 'twoFactorAuth')}
             />
           </div>
@@ -105,6 +290,10 @@ export function Settings() {
       </div>
     </div>
   );
+}
+
+function FileNameIcon({ className }: { className?: string }) {
+  return <span className={cn("text-xs font-bold", className)}>Aa</span>;
 }
 
 function SettingToggle({ 

@@ -1,39 +1,72 @@
-import { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { useEffect, useRef, useState } from "react";
+import { apiClient } from "@/src/lib/apiClient";
+import { offlineDb } from "@/src/lib/offlineDb";
+import { onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
+
+function isEmptySeed(value: unknown) {
+  if (Array.isArray(value)) return value.length === 0;
+  if (value && typeof value === "object") return Object.keys(value).length === 0;
+  return value === "" || value === null || value === undefined;
+}
 
 export function useFirebaseSync<T>(key: string, initialValue: T) {
   const [data, setData] = useState<T>(initialValue);
   const [loading, setLoading] = useState(true);
+  const dataRef = useRef(data);
 
   useEffect(() => {
-    const docRef = doc(db, 'appData', key);
-    const unsubscribe = onSnapshot(docRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setData(snapshot.data().value as T);
-      } else {
-        // Initialize if it doesn't exist
-        setDoc(docRef, { value: initialValue }, { merge: true });
-        setData(initialValue);
+    dataRef.current = data;
+  }, [data]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      const cached = await offlineDb.getAppData<T>(key);
+      if (!cancelled && cached !== undefined) setData(cached);
+
+      try {
+        const remote = await apiClient.getAppData<T>(key);
+        const shouldPromoteLocalSeed = isEmptySeed(remote.value) && !isEmptySeed(initialValue);
+        const value = shouldPromoteLocalSeed ? initialValue : remote.value;
+        if (shouldPromoteLocalSeed) {
+          await queueAppDataUpdate(key, value);
+        } else {
+          await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
+        }
+        if (!cancelled) setData(value);
+      } catch (error: any) {
+        if (error?.status === 404) {
+          const seedValue = cached !== undefined && !isEmptySeed(cached) ? cached : initialValue;
+          if (!isEmptySeed(seedValue)) {
+            await queueAppDataUpdate(key, seedValue);
+          }
+          if (!cancelled) setData(seedValue);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
-    }, (error) => {
-      console.error(`Error syncing ${key}:`, error);
-      setLoading(false);
+    };
+
+    void load();
+
+    const unsubscribe = onSyncEvent((event) => {
+      if (event.type === "app_data_changed" && event.key === key) {
+        setData(event.value as T);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [key]);
 
   const updateData = async (newValue: T | ((val: T) => T)) => {
-    try {
-      const valueToStore = newValue instanceof Function ? newValue(data) : newValue;
-      setData(valueToStore); // Optimistic update
-      const docRef = doc(db, 'appData', key);
-      await setDoc(docRef, { value: valueToStore }, { merge: true });
-    } catch (error) {
-      console.error(`Error updating ${key}:`, error);
-    }
+    const valueToStore = newValue instanceof Function ? newValue(dataRef.current) : newValue;
+    dataRef.current = valueToStore;
+    setData(valueToStore);
+    await queueAppDataUpdate(key, valueToStore);
   };
 
   return [data, updateData, loading] as const;

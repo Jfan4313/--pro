@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { Plus, Save, X, Building2, Package, DollarSign, Calendar, Truck } from "lucide-react";
 import { useFirebaseSync } from "../hooks/useFirebaseSync";
+import { useProjectBoardData } from "../hooks/useProjectBoardData";
 
 export function ProcurementEntry({ onClose }: { onClose: () => void }) {
-  const [projectBoardData] = useFirebaseSync("projectBoardData", []);
+  const [projectBoardData] = useProjectBoardData();
   const [supplyOrders, setSupplyOrders] = useFirebaseSync("supplyOrders", []);
   const [costData, setCostData] = useFirebaseSync("costDataV2", []);
   const [materialsData, setMaterialsData] = useFirebaseSync("materialsData", []);

@@ -3,7 +3,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { ArrowUpRight, ArrowDownRight, Zap, AlertTriangle, Save, Download, Upload, Briefcase, CheckCircle2, Users, Package, FileText, ChevronRight } from 'lucide-react';
 import { cn } from "@/src/lib/utils";
 import { useFirebaseSync } from '../hooks/useFirebaseSync';
+import { useProjectBoardData } from '../hooks/useProjectBoardData';
 import { STAGES, getProjectCurrentStageInfo } from './ProjectLifecycle';
+import { appendTaskToSchedule, buildTaskFromQuickIntake, deriveRisks, flattenProjects, flattenTasks, formatLocalDate } from '@/src/lib/management';
+import { MobileHome } from './MobileHome';
 
 const progressTrendData = [
   { month: '1月', planned: 10, actual: 12 },
@@ -47,16 +50,28 @@ const recentAnnouncements = [
   }
 ];
 
-export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
-  const [projects] = useFirebaseSync<any[]>('projectBoardData', []);
-  const [tasks] = useFirebaseSync<any[]>('scheduleData', []);
+export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
+  const [projects] = useProjectBoardData();
+  const [tasks, setTasks] = useFirebaseSync<any[]>('scheduleData', []);
   const [personnel] = useFirebaseSync<any[]>('personnelData', []);
   const [materials] = useFirebaseSync<any[]>('materialsData', []);
   const [lifecycleStates] = useFirebaseSync<Record<string, any>>('projectLifecycleStates', {});
+  const [quickIntakeItems, setQuickIntakeItems] = useFirebaseSync<any[]>('quickIntakeItems', []);
+  const [supplyOrders] = useFirebaseSync<any[]>('supplyOrders', []);
+  const [contracts] = useFirebaseSync<any[]>('project_contracts', []);
+  const [costData] = useFirebaseSync<any[]>('costDataV2', []);
+  const [externalPartners] = useFirebaseSync<any[]>('externalPartners', []);
 
   const allFlatProjects = useMemo(() => {
-    return Array.isArray(projects) ? projects.flatMap(col => col.projects || []) : [];
+    return flattenProjects(projects);
   }, [projects]);
+
+  const allTasks = useMemo(() => flattenTasks(tasks), [tasks]);
+  const today = formatLocalDate();
+  const todayTasks = useMemo(() => allTasks.filter((task: any) => task.deadline === today && task.status !== 'completed'), [allTasks, today]);
+  const overdueTasks = useMemo(() => allTasks.filter((task: any) => task.deadline && task.deadline < today && task.status !== 'completed'), [allTasks, today]);
+  const pendingQuickIntakes = useMemo(() => (Array.isArray(quickIntakeItems) ? quickIntakeItems : []).filter((item: any) => item.status === 'pending'), [quickIntakeItems]);
+  const risks = useMemo(() => deriveRisks({ projects: allFlatProjects, tasks: allTasks, supplyOrders, contracts, costData, personnel, externalPartners }), [allFlatProjects, allTasks, supplyOrders, contracts, costData, personnel, externalPartners]);
 
   const lifecycleSummary = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -97,18 +112,75 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
 
     return {
       totalProjects,
-      delayedTasks,
+      delayedTasks: overdueTasks.length,
       totalPersonnel: personnel.length,
       lowStockMaterials
     };
-  }, [projects, tasks, personnel, materials]);
+  }, [projects, overdueTasks.length, personnel, materials]);
+
+  const pendingApprovals = useMemo(() => {
+    const pendingContracts = contracts.filter((item: any) => item.status === 'pending' || item.status === 'draft').length;
+    const pendingOrders = supplyOrders.filter((item: any) => item.approvalStatus === 'pending' || item.status === 'production').length;
+    const pendingCollections = costData.reduce((count: number, project: any) => count + (project.collection?.records || []).filter((record: any) => record.status === 'pending').length, 0);
+    return pendingContracts + pendingOrders + pendingCollections;
+  }, [contracts, supplyOrders, costData]);
+
+  const financeSummary = useMemo(() => {
+    return costData.reduce((acc: any, project: any) => {
+      const budget = (project.budget?.material || 0) + (project.budget?.labor || 0) + (project.budget?.management || 0) + (project.budget?.risk || 0);
+      const actual = (project.actualLedger || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
+      acc.budget += budget;
+      acc.actual += actual;
+      return acc;
+    }, { budget: 0, actual: 0 });
+  }, [costData]);
+  const acceptedProjects = allFlatProjects.filter((project: any) => project.status === 'success' || project.constructProgress >= 100).length;
+  const fundUsage = financeSummary.budget > 0 ? Math.round((financeSummary.actual / financeSummary.budget) * 100) : 0;
+
+  const confirmQuickIntake = async (item: any) => {
+    const project = allFlatProjects.find((p: any) => p.id === item.projectId || p.name === item.projectName);
+    if (!project) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请先为该待办选择有效项目' }));
+      return;
+    }
+    const task = buildTaskFromQuickIntake(item);
+    await setTasks((prev: any[]) => appendTaskToSchedule(prev, project, task));
+    await setQuickIntakeItems((prev: any[]) => (Array.isArray(prev) ? prev : []).map((entry: any) => entry.id === item.id ? {
+      ...entry,
+      status: 'confirmed',
+      confirmedAt: new Date().toISOString(),
+      auditTrail: [...(entry.auditTrail || []), { action: 'confirmed', actor: '项目经理', at: new Date().toISOString(), note: '写入施工日程' }]
+    } : entry));
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '待办已确认并写入施工日程' }));
+  };
+
+  const rejectQuickIntake = async (item: any) => {
+    await setQuickIntakeItems((prev: any[]) => (Array.isArray(prev) ? prev : []).map((entry: any) => entry.id === item.id ? {
+      ...entry,
+      status: 'rejected',
+      rejectedAt: new Date().toISOString(),
+      auditTrail: [...(entry.auditTrail || []), { action: 'rejected', actor: '项目经理', at: new Date().toISOString(), note: '从待确认池驳回' }]
+    } : entry));
+  };
 
   const handleAction = (action: string) => {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: `${action} 操作已执行` }));
   };
 
   return (
-    <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
+    <>
+    <MobileHome
+      projects={allFlatProjects}
+      todayTasks={todayTasks}
+      overdueTasks={overdueTasks}
+      pendingApprovals={pendingApprovals}
+      pendingQuickIntakes={pendingQuickIntakes}
+      risks={risks}
+      announcements={recentAnnouncements}
+      setActiveTab={setActiveTab}
+      onOpenProject={onOpenProject}
+    />
+    <div className="hidden md:block p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">项目汇总</h2>
         <div className="flex gap-3">
@@ -121,6 +193,79 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
           <button onClick={() => handleAction('导入配置')} className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
             <Upload className="w-4 h-4" /> 导入配置
           </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-lg text-slate-900">今日工作台</h3>
+              <p className="text-sm text-slate-500 mt-1">先处理异常、待确认事项和今日任务</p>
+            </div>
+            <button onClick={() => setActiveTab('schedule')} className="text-sm text-indigo-600 font-medium">进入任务管理</button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 border-b border-slate-100">
+            <WorkbenchMetric label="今日待办" value={todayTasks.length} tone="indigo" />
+            <WorkbenchMetric label="逾期任务" value={overdueTasks.length} tone="rose" />
+            <WorkbenchMetric label="待确认采集" value={pendingQuickIntakes.length} tone="amber" />
+            <WorkbenchMetric label="待审批/待确认" value={pendingApprovals} tone="slate" />
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-slate-900">待确认快速待办</h4>
+                <span className="text-xs text-slate-400">{pendingQuickIntakes.length} 项</span>
+              </div>
+              <div className="space-y-3">
+                {pendingQuickIntakes.slice(0, 4).map((item: any) => (
+                  <div key={item.id} className="rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+                    <div className="text-sm font-medium text-slate-900">{item.title}</div>
+                    <div className="text-xs text-slate-500 mt-1">{item.projectName || '未选项目'} · {item.assignee || '待指派'} · {item.deadline || '无截止'}</div>
+                    <div className="flex justify-end gap-2 mt-3">
+                      <button onClick={() => rejectQuickIntake(item)} className="px-3 py-1.5 text-xs font-medium rounded-lg text-slate-500 hover:bg-white">驳回</button>
+                      <button onClick={() => confirmQuickIntake(item)} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white">确认写入</button>
+                    </div>
+                  </div>
+                ))}
+                {pendingQuickIntakes.length === 0 && <EmptyState text="暂无待确认采集" />}
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-slate-900">今日任务</h4>
+                <span className="text-xs text-slate-400">{todayTasks.length} 项</span>
+              </div>
+              <div className="space-y-3">
+                {todayTasks.slice(0, 5).map((task: any) => (
+                  <button key={`${task.projectId}-${task.id}`} onClick={() => setActiveTab('schedule')} className="w-full text-left rounded-xl border border-slate-100 bg-slate-50 p-3 hover:border-indigo-200">
+                    <div className="text-sm font-medium text-slate-900">{task.name}</div>
+                    <div className="text-xs text-slate-500 mt-1">{task.projectName} · {task.assignee || '待指派'}</div>
+                  </button>
+                ))}
+                {todayTasks.length === 0 && <EmptyState text="今天没有明确截止任务" />}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="font-bold text-lg text-slate-900">风险预警</h3>
+            <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-lg">{risks.length}</span>
+          </div>
+          <div className="p-4 space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar">
+            {risks.slice(0, 8).map((risk: any) => (
+              <button key={risk.id} onClick={() => setActiveTab(risk.actionTab)} className="w-full text-left rounded-xl border border-slate-100 p-3 hover:border-rose-200 hover:bg-rose-50/40">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cn("text-xs font-bold", risk.level === 'high' ? 'text-rose-600' : 'text-amber-600')}>{risk.type}</span>
+                  <span className="text-[10px] text-slate-400">{risk.projectName}</span>
+                </div>
+                <div className="text-sm font-medium text-slate-900 mt-1">{risk.title}</div>
+              </button>
+            ))}
+            {risks.length === 0 && <EmptyState text="暂无风险预警" />}
+          </div>
         </div>
       </div>
 
@@ -214,8 +359,8 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
               <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 text-xs font-bold rounded-lg">正常</span>
             </div>
             <h4 className="text-slate-500 text-sm font-medium mb-2">已验收项目数</h4>
-            <div className="text-3xl font-bold text-slate-900 tracking-tight mb-2">8 <span className="text-lg font-normal text-slate-400">个</span></div>
-            <p className="text-xs text-slate-400">本年度累计</p>
+            <div className="text-3xl font-bold text-slate-900 tracking-tight mb-2">{acceptedProjects} <span className="text-lg font-normal text-slate-400">个</span></div>
+            <p className="text-xs text-slate-400">来自项目看板状态</p>
           </div>
           
           <div 
@@ -226,11 +371,11 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
               <div className="p-2.5 bg-slate-50 rounded-xl text-slate-600 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
                 <Zap className="w-5 h-5" />
               </div>
-              <span className="px-2.5 py-1 bg-purple-50 text-purple-600 text-xs font-bold rounded-lg">82%</span>
+              <span className="px-2.5 py-1 bg-purple-50 text-purple-600 text-xs font-bold rounded-lg">{fundUsage}%</span>
             </div>
             <h4 className="text-slate-500 text-sm font-medium mb-2">资金使用率</h4>
-            <div className="text-3xl font-bold text-slate-900 tracking-tight mb-2">¥41,000万</div>
-            <p className="text-xs text-slate-400">总预算 ¥50,000万</p>
+            <div className="text-3xl font-bold text-slate-900 tracking-tight mb-2">¥{financeSummary.actual.toLocaleString()}万</div>
+            <p className="text-xs text-slate-400">总预算 ¥{financeSummary.budget.toLocaleString()}万</p>
           </div>
         </div>
       </div>
@@ -314,7 +459,7 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
             </thead>
             <tbody>
               {lifecycleSummary.recentProjects.slice(0, 5).map(proj => (
-                <tr key={proj.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                <tr key={proj.id} onClick={() => onOpenProject?.(proj.id)} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer">
                   <td className="py-3 px-4 font-medium text-slate-900 text-sm">
                     {proj.name}
                   </td>
@@ -345,6 +490,7 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
         </div>
       </div>
     </div>
+    </>
   );
 }
 
@@ -381,4 +527,23 @@ function StatCard({ title, value, trend, trendText, icon: Icon, hideTrend, trend
       </div>
     </div>
   );
+}
+
+function WorkbenchMetric({ label, value, tone }: any) {
+  const colors: Record<string, string> = {
+    indigo: "text-indigo-600 bg-indigo-50",
+    rose: "text-rose-600 bg-rose-50",
+    amber: "text-amber-600 bg-amber-50",
+    slate: "text-slate-600 bg-slate-50",
+  };
+  return (
+    <div className="p-4 border-r last:border-r-0 border-slate-100">
+      <div className={cn("inline-flex px-2 py-1 rounded-lg text-xs font-bold mb-2", colors[tone] || colors.slate)}>{label}</div>
+      <div className="text-2xl font-bold text-slate-900 font-mono">{value}</div>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 py-8 text-center text-sm text-slate-400">{text}</div>;
 }
