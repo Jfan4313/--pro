@@ -1,0 +1,78 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: zhijian-pro-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate TypeScript
+        run: npm run lint
+
+      - name: Build production app
+        run: npm run build
+
+      - name: Package release
+        run: |
+          tar -czf zhijian-pro-release.tgz \
+            dist server shared src public deploy \
+            package.json package-lock.json
+          sha256sum zhijian-pro-release.tgz > zhijian-pro-release.sha256
+
+      - name: Configure restricted SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/zhijian_pro_deploy
+          chmod 600 ~/.ssh/zhijian_pro_deploy
+          printf '%s\n' '8.138.177.223 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMVr6XnZVJcNYFkSSpQ1ZAGkcDjmKccjYRL5fXKkjNb4' > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy and verify
+        env:
+          DEPLOY_HOST: 8.138.177.223
+          DEPLOY_USER: root
+        run: |
+          RELEASE_CHECKSUM="$(cut -d ' ' -f1 zhijian-pro-release.sha256)"
+          ssh -i ~/.ssh/zhijian_pro_deploy \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy $GITHUB_SHA $RELEASE_CHECKSUM" \
+            < zhijian-pro-release.tgz
+
+      - name: Verify public endpoint
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error \
+              https://project.zero-carbon.online/api/health; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1

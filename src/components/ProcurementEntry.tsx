@@ -1,14 +1,14 @@
 import React, { useState } from "react";
 import { Plus, Save, X, Building2, Package, DollarSign, Calendar, Truck } from "lucide-react";
-import { useFirebaseSync } from "../hooks/useFirebaseSync";
+import { useSyncedAppData } from "../hooks/useSyncedAppData";
 import { useProjectBoardData } from "../hooks/useProjectBoardData";
 
 export function ProcurementEntry({ onClose }: { onClose: () => void }) {
   const [projectBoardData] = useProjectBoardData();
-  const [supplyOrders, setSupplyOrders] = useFirebaseSync("supplyOrders", []);
-  const [costData, setCostData] = useFirebaseSync("costDataV2", []);
-  const [materialsData, setMaterialsData] = useFirebaseSync("materialsData", []);
-  const [scheduleData, setScheduleData] = useFirebaseSync("scheduleData", []);
+  const [supplyOrders, setSupplyOrders] = useSyncedAppData("supplyOrders", []);
+  const [costData, setCostData] = useSyncedAppData("costDataV2", []);
+  const [materialsData, setMaterialsData] = useSyncedAppData("materialsData", []);
+  const [scheduleData, setScheduleData] = useSyncedAppData("scheduleData", []);
 
   const allProjects = projectBoardData.flatMap((col: any) => col.projects || []);
 

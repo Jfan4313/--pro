@@ -1,8 +1,21 @@
 import React, { useState, useMemo } from "react";
 import { Building2, Users, FolderTree, Plus, MoreVertical, Search, ChevronRight, Edit2, Trash2, UserPlus, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { motion, AnimatePresence } from "motion/react";
+
+type OrgNodeType = "company" | "department" | "team";
+
+type OrgNode = {
+  id: string;
+  name: string;
+  type: OrgNodeType;
+  children: OrgNode[];
+};
+
+type OrgDialogState =
+  | { mode: "add"; parentId: string; parentName: string; nodeType: OrgNodeType; name: string }
+  | { mode: "edit"; nodeId: string; originalName: string; name: string };
 
 const initialOrgData = {
   id: "org-1",
@@ -44,13 +57,16 @@ const initialOrgData = {
 };
 
 export function Organization() {
-  const [orgData, setOrgData] = useFirebaseSync("organizationData", initialOrgData);
-  const [personnelData, setPersonnelData] = useFirebaseSync("personnelData", []);
+  const [orgData, setOrgData] = useSyncedAppData<OrgNode>("organizationData", initialOrgData as OrgNode);
+  const [personnelData, setPersonnelData] = useSyncedAppData("personnelData", []);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("org-1");
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(["org-1", "dept-1", "dept-2"]));
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
+  const [orgDialog, setOrgDialog] = useState<OrgDialogState | null>(null);
+
+  const showToast = (detail: string) => window.dispatchEvent(new CustomEvent('show-toast', { detail }));
 
   const toggleExpand = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -63,7 +79,7 @@ export function Organization() {
   };
 
   // Helper to find a node by ID
-  const findNode = (node: any, id: string): any => {
+  const findNode = (node: OrgNode, id: string): OrgNode | null => {
     if (node.id === id) return node;
     if (node.children) {
       for (const child of node.children) {
@@ -75,15 +91,43 @@ export function Organization() {
   };
 
   // Helper to get all team names under a node
-  const getTeamNames = (node: any): string[] => {
+  const getTeamNames = (node: OrgNode): string[] => {
     let names: string[] = [node.name];
     if (node.children) {
-      node.children.forEach((child: any) => {
+      node.children.forEach((child: OrgNode) => {
         names = names.concat(getTeamNames(child));
       });
     }
     return names;
   };
+
+  const getChildType = (node: OrgNode): OrgNodeType => node.type === "company" ? "department" : "team";
+
+  const getTypeLabel = (type: OrgNodeType) => type === "company" ? "公司" : type === "department" ? "部门" : "班组";
+
+  const createNode = (name: string, type: OrgNodeType): OrgNode => ({
+    id: `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name,
+    type,
+    children: [],
+  });
+
+  const addNode = (node: OrgNode, parentId: string, child: OrgNode): OrgNode => {
+    if (node.id === parentId) return { ...node, children: [...(node.children || []), child] };
+    return { ...node, children: (node.children || []).map((item) => addNode(item, parentId, child)) };
+  };
+
+  const renameNode = (node: OrgNode, nodeId: string, name: string): OrgNode => {
+    if (node.id === nodeId) return { ...node, name };
+    return { ...node, children: (node.children || []).map((item) => renameNode(item, nodeId, name)) };
+  };
+
+  const removeNode = (node: OrgNode, nodeId: string): OrgNode => ({
+    ...node,
+    children: (node.children || [])
+      .filter((item) => item.id !== nodeId)
+      .map((item) => removeNode(item, nodeId)),
+  });
 
   const selectedNode = useMemo(() => findNode(orgData, selectedNodeId), [orgData, selectedNodeId]);
 
@@ -133,10 +177,64 @@ export function Organization() {
     setPersonnelData((prev: any[]) => 
       prev.map(p => p.id === personId ? { ...p, team: selectedNode.name } : p)
     );
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: '成员已添加到该组织' }));
+    showToast('成员已添加到该组织');
   };
 
-  const renderTree = (node: any, level: number = 0) => {
+  const openAddDialog = (parent: OrgNode) => {
+    const nodeType = getChildType(parent);
+    setOrgDialog({ mode: "add", parentId: parent.id, parentName: parent.name, nodeType, name: "" });
+  };
+
+  const openEditDialog = (node: OrgNode) => {
+    setOrgDialog({ mode: "edit", nodeId: node.id, originalName: node.name, name: node.name });
+  };
+
+  const handleSaveOrgDialog = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!orgDialog) return;
+    const name = orgDialog.name.trim();
+    if (!name) {
+      showToast("请填写组织名称");
+      return;
+    }
+
+    if (orgDialog.mode === "add") {
+      const child = createNode(name, orgDialog.nodeType);
+      void setOrgData((current) => addNode(current, orgDialog.parentId, child));
+      setExpandedNodes(prev => new Set(prev).add(orgDialog.parentId));
+      setSelectedNodeId(child.id);
+      setOrgDialog(null);
+      showToast(`${getTypeLabel(orgDialog.nodeType)}已新增`);
+      return;
+    }
+
+    void setOrgData((current) => renameNode(current, orgDialog.nodeId, name));
+    if (orgDialog.originalName !== name) {
+      void setPersonnelData((prev: any[]) => prev.map((person) => person.team === orgDialog.originalName ? { ...person, team: name } : person));
+    }
+    setOrgDialog(null);
+    showToast("组织名称已更新");
+  };
+
+  const handleDeleteNode = (node: OrgNode) => {
+    if (node.type === "company") {
+      showToast("公司根节点不能删除");
+      return;
+    }
+    const teamNames = getTeamNames(node);
+    const memberCount = personnelData.filter((person: any) => teamNames.includes(person.team)).length;
+    const childCount = (node.children || []).length;
+    const message = `确定删除“${node.name}”吗？${childCount ? `将同时删除 ${childCount} 个下级组织。` : ""}${memberCount ? `相关 ${memberCount} 名成员会变为未分配。` : ""}`;
+    if (!window.confirm(message)) return;
+
+    void setOrgData((current) => removeNode(current, node.id));
+    void setPersonnelData((prev: any[]) => prev.map((person) => teamNames.includes(person.team) ? { ...person, team: "" } : person));
+    if (selectedNodeId === node.id || teamNames.includes(selectedNode?.name || "")) setSelectedNodeId("org-1");
+    setOrgDialog(null);
+    showToast("组织已删除");
+  };
+
+  const renderTree = (node: OrgNode, level: number = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const isSelected = selectedNodeId === node.id;
     const hasChildren = node.children && node.children.length > 0;
@@ -165,12 +263,15 @@ export function Organization() {
             <span className="truncate">{node.name}</span>
           </div>
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0">
-            <button className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('show-toast', { detail: '添加子部门/班组' })); }}>
+            <button className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors" title={`新增${getTypeLabel(getChildType(node))}`} onClick={(e) => { e.stopPropagation(); openAddDialog(node); }}>
               <Plus className="w-3.5 h-3.5" />
             </button>
+            <button className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors" title="重命名" onClick={(e) => { e.stopPropagation(); openEditDialog(node); }}>
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
             {node.type !== 'company' && (
-              <button className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('show-toast', { detail: '编辑节点' })); }}>
-                <MoreVertical className="w-3.5 h-3.5" />
+              <button className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors" title="删除" onClick={(e) => { e.stopPropagation(); handleDeleteNode(node); }}>
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -184,7 +285,7 @@ export function Organization() {
               transition={{ duration: 0.2 }}
               className="mt-0.5 overflow-hidden"
             >
-              {node.children.map((child: any) => renderTree(child, level + 1))}
+              {node.children.map((child: OrgNode) => renderTree(child, level + 1))}
             </motion.div>
           )}
         </AnimatePresence>
@@ -201,7 +302,7 @@ export function Organization() {
             <FolderTree className="w-5 h-5 text-indigo-600" />
             组织架构
           </h2>
-          <button className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="添加顶级部门">
+          <button onClick={() => openAddDialog(orgData)} className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="添加顶级部门">
             <Plus className="w-4 h-4" />
           </button>
         </div>
@@ -334,6 +435,40 @@ export function Organization() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {orgDialog && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <form onSubmit={handleSaveOrgDialog} className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{orgDialog.mode === "add" ? `新增${getTypeLabel(orgDialog.nodeType)}` : "重命名组织"}</h3>
+                <p className="mt-1 text-xs text-slate-500">{orgDialog.mode === "add" ? `上级：${orgDialog.parentName}` : `原名称：${orgDialog.originalName}`}</p>
+              </div>
+              <button type="button" onClick={() => setOrgDialog(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <label className="block text-sm font-medium text-slate-700 mb-2">组织名称</label>
+              <input
+                autoFocus
+                type="text"
+                value={orgDialog.name}
+                onChange={(event) => setOrgDialog({ ...orgDialog, name: event.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                placeholder="请输入部门或班组名称"
+              />
+              {orgDialog.mode === "edit" && (
+                <p className="mt-2 text-xs text-slate-400">如果已有人员挂在该班组/部门名下，保存后会同步更新人员所属组织。</p>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button type="button" onClick={() => setOrgDialog(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900">取消</button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">保存</button>
+            </div>
+          </form>
         </div>
       )}
     </div>

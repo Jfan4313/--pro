@@ -1,7 +1,7 @@
 import React from "react";
 import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient } from "@/src/lib/apiClient";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
@@ -26,9 +26,9 @@ const defaultSettings = {
 };
 
 export function Settings() {
-  const [settings, setSettings] = useFirebaseSync("appSettings", defaultSettings);
+  const [settings, setSettings] = useSyncedAppData("appSettings", defaultSettings);
   const [boardData] = useProjectBoardData();
-  const [lifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [fileRootInput, setFileRootInput] = React.useState("");
   const [defaultFileRoot, setDefaultFileRoot] = React.useState("");
   const [isSavingFileRoot, setIsSavingFileRoot] = React.useState(false);

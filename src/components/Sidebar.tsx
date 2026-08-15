@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LayoutDashboard, KanbanSquare, CalendarDays, Users, Package, Truck, Settings, Building2, MessageSquare, FileText, LogOut, DollarSign, Plus, Network, Handshake, FolderOpen, Grid2X2, X, Camera, UserCog } from "lucide-react";
+import { LayoutDashboard, KanbanSquare, CalendarDays, Users, Package, Truck, Settings, Building2, MessageSquare, FileText, LogOut, DollarSign, Plus, Network, Handshake, FolderOpen, Grid2X2, X, Camera, UserCog, FileCheck2, ClipboardList } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useAuth } from "@/src/lib/auth";
 
@@ -17,6 +17,8 @@ const navItems = [
   { id: "files", label: "项目资料", icon: FolderOpen, permission: "files" },
   { id: "contracts", label: "合同管理", icon: FileText, permission: "contracts" },
   { id: "schedule", label: "施工日程", icon: CalendarDays, permission: "schedule" },
+  { id: "work-memo", label: "工作备忘", icon: ClipboardList, permission: "schedule" },
+  { id: "acceptance", label: "项目验收", icon: FileCheck2, permission: "acceptance" },
   { id: "materials", label: "材料与供应链", icon: Package, permission: "materials" },
   { id: "supply", label: "供应链订单", icon: Truck, permission: "supply" },
   { id: "cost", label: "成本与预算", icon: DollarSign, permission: "cost" },

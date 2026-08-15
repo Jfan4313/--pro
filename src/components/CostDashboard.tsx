@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Download, PieChart as PieChartIcon, BarChart3, Wallet, Receipt, Edit2, X, Save, Plus, Calendar, CheckCircle, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { useFirebaseSync } from '../hooks/useFirebaseSync';
+import { useSyncedAppData } from '../hooks/useSyncedAppData';
 import { useProjectBoardData } from '../hooks/useProjectBoardData';
 import { cn } from '../lib/utils';
 
@@ -67,7 +67,7 @@ const typeLabels: Record<string, string> = {
 };
 
 export function CostDashboard() {
-  const [costData, setCostData] = useFirebaseSync("costDataV2", initialCostData);
+  const [costData, setCostData] = useSyncedAppData("costDataV2", initialCostData);
   const [projectBoardData] = useProjectBoardData();
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
 

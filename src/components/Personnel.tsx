@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from "react";
 import { Users, UserCheck, ShieldAlert, Search, Filter, MoreHorizontal, CheckCircle2, AlertCircle, X, Download, UploadCloud, FileBadge, Image as ImageIcon, Edit, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 
 const personnelDataInitial = [
@@ -15,7 +15,7 @@ const personnelDataInitial = [
 ];
 
 export function Personnel() {
-  const [data, setData] = useFirebaseSync("personnelData", personnelDataInitial);
+  const [data, setData] = useSyncedAppData("personnelData", personnelDataInitial);
   const [boardData] = useProjectBoardData();
 
   const dynamicProjects = React.useMemo(() => {
@@ -80,6 +80,7 @@ export function Personnel() {
       specialCertsImage: p.specialCertsImage || null
     }));
   }, [data]);
+  const deleteTarget = useMemo(() => normalizedData.find((person: any) => person.id === deleteConfirmId), [normalizedData, deleteConfirmId]);
 
   const filteredData = useMemo(() => {
     return normalizedData.filter(p => {
@@ -169,8 +170,8 @@ export function Personnel() {
 
   const confirmDelete = () => {
     if (deleteConfirmId) {
-      setData(data.filter(p => p.id !== deleteConfirmId));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '人员已删除' }));
+      void setData((current: any[]) => current.filter((person: any) => person.id !== deleteConfirmId));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `${deleteTarget?.name || '人员'}已删除` }));
       setDeleteConfirmId(null);
     }
   };
@@ -637,7 +638,7 @@ export function Personnel() {
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[90] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 p-6">
             <div className="flex items-center gap-3 text-rose-600 mb-4">
               <div className="p-2 bg-rose-100 rounded-full">
@@ -646,7 +647,7 @@ export function Personnel() {
               <h3 className="text-lg font-bold text-slate-900">确认删除</h3>
             </div>
             <p className="text-slate-600 text-sm mb-6">
-              您确定要删除该人员信息吗？此操作无法撤销。
+              确定要删除{deleteTarget ? `“${deleteTarget.name}”` : "该人员"}吗？此操作无法撤销。
             </p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">

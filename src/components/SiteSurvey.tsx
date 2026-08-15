@@ -1,246 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { ArrowLeft, Building2, Camera, CheckCircle2, Clock3, Cloud, CloudOff, Edit2, FileDown, FileImage, ImagePlus, Loader2, MapPin, Plus, RefreshCw, Save, X } from "lucide-react";
-import { API_BASE_URL, apiClient } from "@/src/lib/apiClient";
+import { apiClient } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
-import { flattenProjects, formatLocalDate } from "@/src/lib/management";
+import { flattenProjects } from "@/src/lib/management";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { queueEntityOperation } from "@/src/lib/syncEngine";
 import { STAGES } from "./ProjectLifecycle";
-
-interface SurveyPhoto {
-  id: string;
-  name: string;
-  url: string;
-  createdAt: string;
-  category?: string;
-  categoryLabel?: string;
-  categoryGroup?: string;
-}
-
-interface SurveyRecord {
-  id?: string;
-  projectId: string;
-  projectName: string;
-  surveyDate: string;
-  surveyor: string;
-  surveyScope: "building" | "electrical";
-  roomId: string;
-  roomType: string;
-  roomName: string;
-  address: string;
-  voltageLevel: string;
-  transformerCapacity: string;
-  meterPosition: string;
-  accessCondition: string;
-  networkSignal: string;
-  notes: string;
-  photos: SurveyPhoto[];
-  status: "completed" | "pending";
-  createdAt: string;
-}
-
-interface DraftPhoto {
-  id: string;
-  name: string;
-  preview: string;
-  category: string;
-}
-
-interface SurveyForm {
-  projectId: string;
-  surveyDate: string;
-  surveyor: string;
-  surveyScope: "building" | "electrical";
-  roomId: string;
-  roomType: string;
-  roomName: string;
-  address: string;
-  voltageLevel: string;
-  transformerCapacity: string;
-  meterPosition: string;
-  accessCondition: string;
-  networkSignal: string;
-  notes: string;
-}
-
-interface PendingSurveyPhoto {
-  id: string;
-  name: string;
-  dataUrl: string;
-  category: string;
-  uploaded?: SurveyPhoto;
-}
-
-interface PendingSurvey {
-  id: string;
-  form: SurveyForm;
-  projectName: string;
-  createdAt: string;
-  photos: PendingSurveyPhoto[];
-}
-
-interface SurveyRoom {
-  id: string;
-  name: string;
-  type: string;
-}
-
-const CURRENT_DRAFT_KEY = "site-survey-current-draft";
-const PENDING_SURVEYS_RESOURCE = "site-survey-pending-uploads";
-
-const MAX_SURVEY_PHOTOS = 30;
-const PROJECT_TYPES = ["绿色建筑", "市政景观", "储能系统", "智能微电网", "光伏发电", "风力发电", "综合能源"];
-const ROOM_TYPES = [
-  { id: "high-voltage", label: "高压电房" },
-  { id: "low-voltage", label: "低压电房" },
-];
-
-function getRoomTypeLabel(roomType?: string) {
-  return ROOM_TYPES.find((type) => type.id === roomType)?.label || "未分类电房";
-}
-
-function getSurveySubject(record: Pick<SurveyRecord, "surveyScope" | "roomType" | "roomName">) {
-  return record.surveyScope === "building" || record.roomType === "building-structure"
-    ? `天面/建筑结构 · ${record.roomName || "未命名区域"}`
-    : `${getRoomTypeLabel(record.roomType)} · ${record.roomName || "未命名电房"}`;
-}
-
-interface PhotoCategory {
-  id: string;
-  label: string;
-  hint: string;
-}
-
-const photoCategoryGroups: Array<{ name: string; categories: PhotoCategory[] }> = [
-  {
-    name: "现场与结构",
-    categories: [
-      { id: "site-overview", label: "现场全景", hint: "建筑外观及周边环境" },
-      { id: "building-structure", label: "建筑结构", hint: "墙体、楼板、门窗与基础" },
-      { id: "access-route", label: "进场通道", hint: "车辆道路、吊装及搬运路线" },
-      { id: "room-layout", label: "空间布局", hint: "电房尺寸、通道与设备位置" },
-    ],
-  },
-  {
-    name: "电房内部与设备",
-    categories: [
-      { id: "room-overview", label: "电房内部", hint: "室内整体环境与设备分布" },
-      { id: "high-voltage-cabinet", label: "高压柜", hint: "柜体正面、内部及状态" },
-      { id: "low-voltage-cabinet", label: "低压柜", hint: "柜体、开关及母排" },
-      { id: "metering-cabinet", label: "计量/仪表柜", hint: "仪表、计量装置及读数" },
-      { id: "wiring-diagram", label: "仪表接线图", hint: "二次接线、图纸与端子" },
-      { id: "transformer", label: "变压器", hint: "本体、铭牌、进出线及温控" },
-      { id: "cable-system", label: "电缆沟/桥架", hint: "电缆走向、沟槽及桥架" },
-      { id: "grounding-safety", label: "接地与安全", hint: "接地、消防及安全设施" },
-      { id: "nameplate", label: "设备铭牌", hint: "型号、参数与设备细节" },
-      { id: "other", label: "其他", hint: "其他需要补充的现场信息" },
-    ],
-  },
-];
-
-const photoCategories = photoCategoryGroups.flatMap((group) =>
-  group.categories.map((category) => ({ ...category, group: group.name })),
-);
-
-function getPhotoCategory(categoryId?: string) {
-  return photoCategories.find((category) => category.id === categoryId)
-    || { id: "other", label: "其他/未分类", hint: "历史照片或其他现场信息", group: "其他" };
-}
-
-function getPhotoCategoryCount(photos: Array<Pick<SurveyPhoto, "category">>) {
-  return new Set(photos.map((photo) => getPhotoCategory(photo.category).id)).size;
-}
-
-const emptyForm: SurveyForm = {
-  projectId: "",
-  surveyDate: formatLocalDate(),
-  surveyor: "项目经理",
-  surveyScope: "electrical",
-  roomId: "",
-  roomType: "high-voltage",
-  roomName: "",
-  address: "",
-  voltageLevel: "10kV",
-  transformerCapacity: "",
-  meterPosition: "",
-  accessCondition: "车辆可达",
-  networkSignal: "良好",
-  notes: "",
-};
-
-function uploadedUrl(url: string) {
-  return url.startsWith("http") || url.startsWith("data:") ? url : `${API_BASE_URL}${url}`;
-}
-
-async function compressPhoto(file: File): Promise<File> {
-  if (!file.type.startsWith("image/")) return file;
-  const source = URL.createObjectURL(file);
-  try {
-    const image = await new Promise<HTMLImageElement | null>((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = source;
-    });
-    if (!image) return file;
-    const renderJpeg = async (maxSide: number, quality: number) => {
-      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-      const context = canvas.getContext("2d");
-      if (!context) return null;
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-    };
-    let blob = await renderJpeg(1440, 0.72);
-    if (blob && blob.size > 650 * 1024) blob = await renderJpeg(1080, 0.62);
-    if (!blob) return file;
-    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg", lastModified: Date.now() });
-  } finally {
-    URL.revokeObjectURL(source);
-  }
-}
-
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function isStorageQuotaError(error: unknown) {
-  return error instanceof DOMException
-    ? error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED"
-    : String((error as any)?.name || "").includes("Quota");
-}
-
-function pendingToRecord(pending: PendingSurvey): SurveyRecord {
-  return {
-    id: pending.id,
-    ...pending.form,
-    projectName: pending.projectName,
-    createdAt: pending.createdAt,
-    status: "pending",
-    photos: pending.photos.map((photo) => {
-      const category = getPhotoCategory(photo.category);
-      return photo.uploaded || {
-        id: photo.id,
-        name: photo.name,
-        url: photo.dataUrl,
-        createdAt: pending.createdAt,
-        category: category.id,
-        categoryLabel: category.label,
-        categoryGroup: category.group,
-      };
-    }),
-  };
-}
+import {
+  CURRENT_DRAFT_KEY,
+  MAX_SURVEY_PHOTOS,
+  PENDING_SURVEYS_RESOURCE,
+  PROJECT_TYPES,
+  ROOM_TYPES,
+  emptyForm,
+  getPhotoCategory,
+  getPhotoCategoryCount,
+  getRoomTypeLabel,
+  getSurveySubject,
+  photoCategories,
+  photoCategoryGroups,
+} from "@/src/features/siteSurvey/siteSurveyConfig";
+import { fileToDataUrl, isStorageQuotaError, pendingToRecord, uploadedUrl } from "@/src/features/siteSurvey/siteSurveyUtils";
+import { compressPhoto } from "@/src/features/siteSurvey/photoProcessing";
+import type { DraftPhoto, PendingSurvey, SurveyForm, SurveyPhoto, SurveyRecord, SurveyRoom } from "@/src/features/siteSurvey/types";
 
 export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => void; initialProjectId?: string | null }) {
   const [boardData, setBoardData, , boardSeed] = useProjectBoardData();

@@ -1,167 +1,27 @@
-import { useState, useEffect, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Brush } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, Zap, AlertTriangle, Save, Download, Upload, Briefcase, CheckCircle2, Users, Package, FileText, ChevronRight } from 'lucide-react';
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from '../hooks/useFirebaseSync';
-import { useProjectBoardData } from '../hooks/useProjectBoardData';
-import { STAGES, getProjectCurrentStageInfo } from './ProjectLifecycle';
-import { appendTaskToSchedule, buildTaskFromQuickIntake, deriveRisks, flattenProjects, flattenTasks, formatLocalDate } from '@/src/lib/management';
+import { STAGES } from './ProjectLifecycle';
 import { MobileHome } from './MobileHome';
-
-const progressTrendData = [
-  { month: '1月', planned: 10, actual: 12 },
-  { month: '2月', planned: 25, actual: 23 },
-  { month: '3月', planned: 40, actual: 38 },
-  { month: '4月', planned: 55, actual: 50 },
-  { month: '5月', planned: 70, actual: 68 },
-  { month: '6月', planned: 85, actual: 82 },
-  { month: '7月', planned: 90, actual: 88 },
-  { month: '8月', planned: 95, actual: 92 },
-  { month: '9月', planned: 100, actual: 98 },
-  { month: '10月', planned: 100, actual: 100 },
-  { month: '11月', planned: 100, actual: 100 },
-  { month: '12月', planned: 100, actual: 100 },
-];
-
-const recentAnnouncements = [
-  {
-    id: 1,
-    title: "关于国庆期间施工安排的通知",
-    content: "各项目部：为确保国庆期间施工安全与进度，请于本周五前提交假期值班表及施工计划...",
-    date: "2026-03-16 09:00",
-    author: "总经办",
-    isUrgent: true,
-  },
-  {
-    id: 2,
-    title: "A区地基浇筑完成验收",
-    content: "经监理单位及甲方联合验收，A区地基浇筑质量达标，同意进行下一道工序...",
-    date: "2026-03-15 14:30",
-    author: "工程部",
-    isUrgent: false,
-  },
-  {
-    id: 3,
-    title: "新增塔吊设备进场安全规范",
-    content: "鉴于近期多雨天气，所有新进场的大型起重设备必须进行二次防滑防雷检查...",
-    date: "2026-03-14 11:15",
-    author: "安监部",
-    isUrgent: false,
-  }
-];
+import { useDashboardOverview } from '@/src/features/dashboard/useDashboardOverview';
+import { progressTrendData, recentAnnouncements } from '@/src/features/dashboard/dashboardContent';
 
 export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
-  const [projects] = useProjectBoardData();
-  const [tasks, setTasks] = useFirebaseSync<any[]>('scheduleData', []);
-  const [personnel] = useFirebaseSync<any[]>('personnelData', []);
-  const [materials] = useFirebaseSync<any[]>('materialsData', []);
-  const [lifecycleStates] = useFirebaseSync<Record<string, any>>('projectLifecycleStates', {});
-  const [quickIntakeItems, setQuickIntakeItems] = useFirebaseSync<any[]>('quickIntakeItems', []);
-  const [supplyOrders] = useFirebaseSync<any[]>('supplyOrders', []);
-  const [contracts] = useFirebaseSync<any[]>('project_contracts', []);
-  const [costData] = useFirebaseSync<any[]>('costDataV2', []);
-  const [externalPartners] = useFirebaseSync<any[]>('externalPartners', []);
-
-  const allFlatProjects = useMemo(() => {
-    return flattenProjects(projects);
-  }, [projects]);
-
-  const allTasks = useMemo(() => flattenTasks(tasks), [tasks]);
-  const today = formatLocalDate();
-  const todayTasks = useMemo(() => allTasks.filter((task: any) => task.deadline === today && task.status !== 'completed'), [allTasks, today]);
-  const overdueTasks = useMemo(() => allTasks.filter((task: any) => task.deadline && task.deadline < today && task.status !== 'completed'), [allTasks, today]);
-  const pendingQuickIntakes = useMemo(() => (Array.isArray(quickIntakeItems) ? quickIntakeItems : []).filter((item: any) => item.status === 'pending'), [quickIntakeItems]);
-  const risks = useMemo(() => deriveRisks({ projects: allFlatProjects, tasks: allTasks, supplyOrders, contracts, costData, personnel, externalPartners }), [allFlatProjects, allTasks, supplyOrders, contracts, costData, personnel, externalPartners]);
-
-  const lifecycleSummary = useMemo(() => {
-    const counts: Record<string, number> = {};
-    const recentProjects: any[] = [];
-
-    allFlatProjects.forEach(proj => {
-      const info = getProjectCurrentStageInfo(proj.id, lifecycleStates);
-      counts[info.stage.id] = (counts[info.stage.id] || 0) + 1;
-      
-      recentProjects.push({
-        ...proj,
-        stageName: info.stage.name,
-        progressPercent: info.progressPercent,
-      });
-    });
-
-    // Optionally sort by something if we have a timestamp
-    return { counts, recentProjects };
-  }, [allFlatProjects, lifecycleStates]);
-
-  const stats = useMemo(() => {
-    let totalProjects = 0;
-    projects.forEach(col => {
-      totalProjects += col.projects?.length || 0;
-    });
-
-    let delayedTasks = 0;
-    tasks.forEach(proj => {
-      proj.tasks?.forEach((task: any) => {
-        if (task.status === 'delayed') delayedTasks++;
-      });
-    });
-
-    let lowStockMaterials = 0;
-    materials.forEach(mat => {
-      if (mat.status !== 'sufficient') lowStockMaterials++;
-    });
-
-    return {
-      totalProjects,
-      delayedTasks: overdueTasks.length,
-      totalPersonnel: personnel.length,
-      lowStockMaterials
-    };
-  }, [projects, overdueTasks.length, personnel, materials]);
-
-  const pendingApprovals = useMemo(() => {
-    const pendingContracts = contracts.filter((item: any) => item.status === 'pending' || item.status === 'draft').length;
-    const pendingOrders = supplyOrders.filter((item: any) => item.approvalStatus === 'pending' || item.status === 'production').length;
-    const pendingCollections = costData.reduce((count: number, project: any) => count + (project.collection?.records || []).filter((record: any) => record.status === 'pending').length, 0);
-    return pendingContracts + pendingOrders + pendingCollections;
-  }, [contracts, supplyOrders, costData]);
-
-  const financeSummary = useMemo(() => {
-    return costData.reduce((acc: any, project: any) => {
-      const budget = (project.budget?.material || 0) + (project.budget?.labor || 0) + (project.budget?.management || 0) + (project.budget?.risk || 0);
-      const actual = (project.actualLedger || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
-      acc.budget += budget;
-      acc.actual += actual;
-      return acc;
-    }, { budget: 0, actual: 0 });
-  }, [costData]);
-  const acceptedProjects = allFlatProjects.filter((project: any) => project.status === 'success' || project.constructProgress >= 100).length;
-  const fundUsage = financeSummary.budget > 0 ? Math.round((financeSummary.actual / financeSummary.budget) * 100) : 0;
-
-  const confirmQuickIntake = async (item: any) => {
-    const project = allFlatProjects.find((p: any) => p.id === item.projectId || p.name === item.projectName);
-    if (!project) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请先为该待办选择有效项目' }));
-      return;
-    }
-    const task = buildTaskFromQuickIntake(item);
-    await setTasks((prev: any[]) => appendTaskToSchedule(prev, project, task));
-    await setQuickIntakeItems((prev: any[]) => (Array.isArray(prev) ? prev : []).map((entry: any) => entry.id === item.id ? {
-      ...entry,
-      status: 'confirmed',
-      confirmedAt: new Date().toISOString(),
-      auditTrail: [...(entry.auditTrail || []), { action: 'confirmed', actor: '项目经理', at: new Date().toISOString(), note: '写入施工日程' }]
-    } : entry));
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: '待办已确认并写入施工日程' }));
-  };
-
-  const rejectQuickIntake = async (item: any) => {
-    await setQuickIntakeItems((prev: any[]) => (Array.isArray(prev) ? prev : []).map((entry: any) => entry.id === item.id ? {
-      ...entry,
-      status: 'rejected',
-      rejectedAt: new Date().toISOString(),
-      auditTrail: [...(entry.auditTrail || []), { action: 'rejected', actor: '项目经理', at: new Date().toISOString(), note: '从待确认池驳回' }]
-    } : entry));
-  };
+  const {
+    acceptedProjects,
+    allFlatProjects,
+    confirmQuickIntake,
+    financeSummary,
+    fundUsage,
+    lifecycleSummary,
+    overdueTasks,
+    pendingApprovals,
+    pendingQuickIntakes,
+    rejectQuickIntake,
+    risks,
+    stats,
+    todayTasks,
+  } = useDashboardOverview();
 
   const handleAction = (action: string) => {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: `${action} 操作已执行` }));

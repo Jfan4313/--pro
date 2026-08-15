@@ -4,7 +4,7 @@ const KEY_LENGTH = 64;
 
 export const ROLE_PERMISSIONS = {
   admin: ["*"],
-  project_manager: ["dashboard", "projects", "lifecycle", "survey", "files", "schedule", "contracts", "materials", "supply", "cost", "personnel", "partners", "collaboration", "organization"],
+  project_manager: ["dashboard", "projects", "lifecycle", "survey", "files", "schedule", "acceptance", "contracts", "materials", "supply", "cost", "personnel", "partners", "collaboration", "organization"],
   surveyor: ["dashboard", "projects", "survey", "files", "schedule", "collaboration"],
   designer: ["dashboard", "projects", "lifecycle", "survey", "files", "collaboration"],
   finance: ["dashboard", "projects", "contracts", "cost", "supply", "files"],

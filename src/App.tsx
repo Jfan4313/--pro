@@ -24,17 +24,20 @@ import { ProjectDetail } from "./components/ProjectDetail";
 import { ExternalPartners } from "./components/ExternalPartners";
 import { ProjectFiles } from "./components/ProjectFiles";
 import { SiteSurvey } from "./components/SiteSurvey";
+import { ProjectAcceptance } from "./components/ProjectAcceptance";
 import { MobileProjects } from "./components/MobileProjects";
 import { MobileCollaboration } from "./components/MobileCollaboration";
 import { MobileWorkspace } from "./components/MobileWorkspace";
 import { AccountManagement } from "./components/AccountManagement";
+import { WorkMemo } from "./components/WorkMemo";
 import { LoginScreen, PasswordChangeScreen } from "./components/LoginScreen";
 import { useAuth } from "./lib/auth";
 
 const tabPermissions: Record<string, string> = {
   dashboard: "dashboard", board: "projects", "project-detail": "projects", lifecycle: "lifecycle", "site-survey": "survey",
-  files: "files", contracts: "contracts", schedule: "schedule", materials: "materials", supply: "supply", cost: "cost",
+  files: "files", contracts: "contracts", schedule: "schedule", acceptance: "acceptance", materials: "materials", supply: "supply", cost: "cost",
   chat: "collaboration", personnel: "personnel", partners: "partners", organization: "organization", settings: "settings", accounts: "accounts",
+  "work-memo": "schedule",
 };
 
 export default function App() {
@@ -109,6 +112,8 @@ export default function App() {
           {activeTab === "lifecycle" && <><div className="md:hidden min-h-full"><MobileWorkspace module="lifecycle" setActiveTab={navigateToTab} onOpenProject={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectLifecycle onOpenSiteSurvey={(projectId) => openProjectSurvey(projectId, "lifecycle")} /></div></>}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} onBack={() => { setActiveTab(surveyContext.returnTab); setSurveyContext({ projectId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
+          {activeTab === "work-memo" && <WorkMemo />}
+          {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}
           {activeTab === "organization" && <><div className="md:hidden min-h-full"><MobileWorkspace module="organization" setActiveTab={setActiveTab} /></div><div className="hidden md:block h-full"><Organization /></div></>}
           {activeTab === "personnel" && <><div className="md:hidden min-h-full"><MobileWorkspace module="personnel" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Personnel /></div></>}

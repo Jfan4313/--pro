@@ -1,4 +1,4 @@
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useAuth } from "@/src/lib/auth";
 import { emptyBoardData, initialBoardData } from "@/src/data/initialBoardData";
 
@@ -9,7 +9,7 @@ export function useProjectBoardData() {
     ? "projectBoardData"
     : `projectBoardData:${user?.id || "anonymous"}`;
   const seed = isDemoAccount ? initialBoardData : emptyBoardData;
-  const syncedData = useFirebaseSync<any[]>(dataKey, seed);
+  const syncedData = useSyncedAppData<any[]>(dataKey, seed);
 
   return [...syncedData, seed] as const;
 }

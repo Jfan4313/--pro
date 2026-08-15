@@ -1,92 +1,29 @@
 import React, { useState, useMemo, useRef } from "react";
 import { Package, AlertTriangle, CheckCircle, Search, Filter, Plus, X, Download, Upload, History, FileSpreadsheet, ListTodo, TrendingUp, DollarSign, Users, Truck, Camera, Trash2, ArrowUpFromLine, ArrowDownToLine, ClipboardList } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient, API_BASE_URL } from "@/src/lib/apiClient";
-import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SupplyChain } from "./SupplyChain";
-
-type InventoryStatus = "sufficient" | "warning" | "critical";
-
-interface InventoryMaterial {
-  id: string;
-  name: string;
-  spec: string;
-  stock: number;
-  unit: string;
-  location: string;
-  status: InventoryStatus;
-  supplier: string;
-  project: string;
-  type: string;
-  sourceProject?: string;
-  inboundAt?: string;
-  photos?: string[];
-  sourceType?: "project" | "purchase" | "other";
-}
-
-interface WarehouseTransaction {
-  id: string;
-  direction: "inbound" | "outbound";
-  materialId: string;
-  materialName: string;
-  spec: string;
-  quantity: number;
-  unit: string;
-  occurredAt: string;
-  sourceProject?: string;
-  destinationProject?: string;
-  location: string;
-  supplier?: string;
-  photos: string[];
-  remark?: string;
-  sourceType?: "project" | "purchase" | "other";
-}
-
-const materialsDataInitial: InventoryMaterial[] = [
-  { id: "M-001", name: "单晶硅光伏组件", spec: "550Wp", stock: 1200, unit: "块", location: "A区露天堆场", status: "sufficient", supplier: "隆基绿能", project: "A区商业综合体", type: "光伏组件" },
-  { id: "M-002", name: "磷酸铁锂电池簇", spec: "280Ah/1P52S", stock: 4, unit: "套", location: "B区恒温库", status: "warning", supplier: "宁德时代", project: "B区住宅一期", type: "储能设备" },
-  { id: "M-003", name: "热镀锌钢支架", spec: "C型钢 41x41x2.0", stock: 500, unit: "米", location: "A区钢材库", status: "sufficient", supplier: "宝钢股份", project: "A区商业综合体", type: "钢材构件" },
-  { id: "M-004", name: "交联聚乙烯电缆", spec: "YJV22-8.7/15kV 3x70", stock: 150, unit: "米", location: "C区线缆库", status: "critical", supplier: "远东电缆", project: "C区地下车库", type: "线缆" },
-  { id: "M-005", name: "智能逆变器", spec: "100kW 组串式", stock: 12, unit: "台", location: "B区设备库", status: "sufficient", supplier: "华为技术", project: "B区住宅一期", type: "逆变设备" },
-  { id: "M-006", name: "高强度螺栓", spec: "M12x40 8.8级", stock: 5000, unit: "套", location: "A区五金库", status: "sufficient", supplier: "晋亿实业", project: "市政道路标段", type: "五金辅材" },
-];
-
-const initialBomData = [
-  { id: "BOM-001", name: "单晶硅光伏组件", spec: "550Wp", plannedQty: 2000, procuredQty: 1200, unit: "块", project: "A区商业综合体" },
-  { id: "BOM-002", name: "热镀锌钢支架", spec: "C型钢 41x41x2.0", plannedQty: 1000, procuredQty: 500, unit: "米", project: "A区商业综合体" },
-];
-
-const initialBomHistory = [
-  { id: "H-001", date: "2026-03-01 10:00", user: "张工 (技术部)", action: "初始导入", details: "导入了A区商业综合体初始材料清单 (BOM v1.0)" },
-  { id: "H-002", date: "2026-03-10 14:30", user: "李工 (采购部)", action: "采购单导入", details: "导入采购单 PO-2026-001，更新光伏组件已采购数量 +1200" },
-];
-
-const initialPriceData = [
-  { id: "M-001", name: "单晶硅光伏组件", spec: "550Wp", price: 0.95, unit: "元/W", date: "2026-03-01", supplier: "隆基绿能" },
-  { id: "M-003", name: "热镀锌钢支架", spec: "C型钢 41x41x2.0", price: 5200, unit: "元/吨", date: "2026-02-15", supplier: "宝钢股份" },
-];
-
-const initialPriceHistory = [
-  { id: "M-001", price: 0.98, unit: "元/W", date: "2026-01-15", supplier: "隆基绿能" },
-  { id: "M-001", price: 0.95, unit: "元/W", date: "2026-03-01", supplier: "隆基绿能" },
-  { id: "M-003", price: 5000, unit: "元/吨", date: "2026-01-10", supplier: "宝钢股份" },
-  { id: "M-003", price: 5200, unit: "元/吨", date: "2026-02-15", supplier: "宝钢股份" },
-];
-
-const materialTypes = ["全部类型", "光伏组件", "储能设备", "钢材构件", "线缆", "逆变设备", "五金辅材"];
+import { buildInventoryCsvRows, filterBomMaterials, filterInventoryMaterials, filterPriceMaterials } from "@/src/features/materials/materialFilters";
+import { createEmptyInboundForm, createEmptyOutboundForm } from "@/src/features/materials/materialForms";
+import { downloadMaterialTemplate, readMaterialImportFile } from "@/src/features/materials/materialImport";
+import { initialBomData, initialBomHistory, initialPriceData, initialPriceHistory, materialsDataInitial, materialTypes } from "@/src/features/materials/materialSeeds";
+import type { InventoryMaterial, InventoryStatus, MaterialImportPreview, MaterialImportType, WarehouseOutboundOrder, WarehouseOutboundOrderItem, WarehouseOutboundOrderStatus, WarehouseTransaction } from "@/src/features/materials/types";
+import { useAuth } from "@/src/lib/auth";
+import * as XLSX from "xlsx";
 
 export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTab?: string) => void }) {
-  const [data, setData] = useFirebaseSync("materialsData", materialsDataInitial);
-  const [warehouseTransactions, setWarehouseTransactions] = useFirebaseSync<WarehouseTransaction[]>("warehouseTransactions", []);
-  const [bomData, setBomData] = useFirebaseSync("bomData", initialBomData);
-  const [bomHistory, setBomHistory] = useFirebaseSync("bomHistory", initialBomHistory);
-  const [currentBomVersion, setCurrentBomVersion] = useFirebaseSync("bomVersion", "v1.0");
-  const [priceData, setPriceData] = useFirebaseSync("materialPrices", initialPriceData);
-  const [priceHistory, setPriceHistory] = useFirebaseSync("materialPriceHistory", initialPriceHistory);
+  const [data, setData] = useSyncedAppData("materialsData", materialsDataInitial);
+  const [warehouseTransactions, setWarehouseTransactions] = useSyncedAppData<WarehouseTransaction[]>("warehouseTransactions", []);
+  const [outboundOrders, setOutboundOrders] = useSyncedAppData<WarehouseOutboundOrder[]>("warehouseOutboundOrders", []);
+  const [appNotifications, setAppNotifications] = useSyncedAppData<any[]>("appNotifications", []);
+  const [bomData, setBomData] = useSyncedAppData("bomData", initialBomData);
+  const [bomHistory, setBomHistory] = useSyncedAppData("bomHistory", initialBomHistory);
+  const [currentBomVersion, setCurrentBomVersion] = useSyncedAppData("bomVersion", "v1.0");
+  const [priceData, setPriceData] = useSyncedAppData("materialPrices", initialPriceData);
+  const [priceHistory, setPriceHistory] = useSyncedAppData("materialPriceHistory", initialPriceHistory);
   
   const [projectBoardData] = useProjectBoardData();
   const allProjects = useMemo(() => {
@@ -107,9 +44,12 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
   const [isPriceHistoryModalOpen, setIsPriceHistoryModalOpen] = useState(false);
   const [selectedMaterialForHistory, setSelectedMaterialForHistory] = useState<any>(null);
   const [editingBomItem, setEditingBomItem] = useState<any>(null);
-  const [importPreview, setImportPreview] = useState<{isOpen: boolean, type: 'BOM' | 'PO' | 'INVENTORY' | 'PRICE', data: any[], file: File | null, addToInventory: boolean}>({isOpen: false, type: 'BOM', data: [], file: null, addToInventory: false});
+  const [importPreview, setImportPreview] = useState<MaterialImportPreview>({isOpen: false, type: 'BOM', data: [], file: null, addToInventory: false});
   const [showAlertsOnly, setShowAlertsOnly] = useState(false);
   const [supplyTabContext, setSupplyTabContext] = useState<"orders" | "reconciliation">("orders");
+  const [isOutboundOrdersOpen, setIsOutboundOrdersOpen] = useState(false);
+  const [outboundOrderFilters, setOutboundOrderFilters] = useState({ project: "全部项目", material: "", status: "全部状态", startDate: "", endDate: "" });
+  const { user } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const poFileInputRef = useRef<HTMLInputElement>(null);
@@ -118,76 +58,123 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
   const inboundPhotoInputRef = useRef<HTMLInputElement>(null);
   const outboundPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  const emptyInboundForm = () => ({
-    sourceType: "project" as "project" | "purchase" | "other",
-    sourceProject: selectedProject !== "全部项目" ? selectedProject : "",
-    name: "",
-    spec: "",
-    quantity: "",
-    unit: "",
-    location: "",
-    supplier: "",
-    type: "",
-    inboundAt: new Date().toISOString().slice(0, 16),
-    photos: [] as string[],
-    remark: "",
-  });
-  const emptyOutboundForm = () => ({
-    materialId: "",
-    quantity: "",
-    destinationProject: "",
-    outboundAt: new Date().toISOString().slice(0, 16),
-    photos: [] as string[],
-    remark: "",
-  });
-  const [inboundForm, setInboundForm] = useState(emptyInboundForm);
-  const [outboundForm, setOutboundForm] = useState(emptyOutboundForm);
+  const [inboundForm, setInboundForm] = useState(() => createEmptyInboundForm(selectedProject));
+  const [outboundForm, setOutboundForm] = useState(createEmptyOutboundForm);
+
+  const currentUser = {
+    id: user?.id || "guest-local",
+    name: user?.name || user?.username || "当前用户",
+  };
+
+  const outboundStatusMeta: Record<WarehouseOutboundOrderStatus, { label: string; className: string }> = {
+    draft: { label: "草稿", className: "bg-slate-100 text-slate-600 border-slate-200" },
+    pending: { label: "待审核", className: "bg-amber-50 text-amber-700 border-amber-200" },
+    approved: { label: "已通过", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    cancelled: { label: "已撤销", className: "bg-rose-50 text-rose-700 border-rose-200" },
+  };
 
   const filteredData = useMemo(() => {
-    return data.filter(m => {
-      const matchesProject = selectedProject === "全部项目" || (m.sourceProject || m.project) === selectedProject;
-      const matchesType = selectedType === "全部类型" || m.type === selectedType;
-      const matchesSearch = m.name.includes(searchQuery) || m.id.toLowerCase().includes(searchQuery.toLowerCase()) || m.spec.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesAlerts = showAlertsOnly ? m.status !== 'sufficient' : true;
-      return matchesProject && matchesType && matchesSearch && matchesAlerts;
-    });
+    return filterInventoryMaterials({ data, selectedProject, selectedType, searchQuery, showAlertsOnly });
   }, [data, selectedProject, selectedType, searchQuery, showAlertsOnly]);
 
   const filteredBomData = useMemo(() => {
-    return bomData.filter((m: any) => {
-      const matchesProject = selectedProject === "全部项目" || m.project === selectedProject;
-      const matchesSearch = m.name.includes(searchQuery) || m.id.toLowerCase().includes(searchQuery.toLowerCase()) || m.spec.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesProject && matchesSearch;
-    });
+    return filterBomMaterials(bomData, selectedProject, searchQuery);
   }, [bomData, selectedProject, searchQuery]);
 
   const filteredPriceData = useMemo(() => {
-    return priceData.filter((m: any) => {
-      const matchesSearch = m.name.includes(searchQuery) || m.id.toLowerCase().includes(searchQuery.toLowerCase()) || m.spec.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesSearch;
-    });
+    return filterPriceMaterials(priceData, searchQuery);
   }, [priceData, searchQuery]);
 
-  const handleExportCSV = () => {
-    const headers = ["物资编号", "物资名称", "规格型号", "来源项目", "当前库存", "单位", "存放位置", "供应商", "最近入库时间", "照片数量", "状态"];
-    const rows = filteredData.map(m => [
-      m.id,
-      m.name,
-      m.spec,
-      m.sourceProject || m.project,
-      m.stock.toString(),
-      m.unit,
-      m.location,
-      m.supplier,
-      m.inboundAt || "",
-      String(m.photos?.length || 0),
-      m.status === 'sufficient' ? '充足' : m.status === 'warning' ? '预警' : '短缺'
-    ]);
+  const filteredOutboundOrders = useMemo(() => {
+    return outboundOrders.filter((order) => {
+      const matchesProject = outboundOrderFilters.project === "全部项目" || order.destinationProject === outboundOrderFilters.project;
+      const materialQuery = outboundOrderFilters.material.trim().toLowerCase();
+      const matchesMaterial = !materialQuery || order.items.some((item) => `${item.materialName}${item.materialId}${item.spec}${item.batch}`.toLowerCase().includes(materialQuery));
+      const matchesStatus = outboundOrderFilters.status === "全部状态" || order.status === outboundOrderFilters.status;
+      const date = (order.submittedAt || order.createdAt || "").slice(0, 10);
+      const matchesStart = !outboundOrderFilters.startDate || date >= outboundOrderFilters.startDate;
+      const matchesEnd = !outboundOrderFilters.endDate || date <= outboundOrderFilters.endDate;
+      return matchesProject && matchesMaterial && matchesStatus && matchesStart && matchesEnd;
+    });
+  }, [outboundOrders, outboundOrderFilters]);
 
-    const csvContent = [
-      headers.join(","),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
-    ].join("\n");
+  const createNotification = (message: string, order: WarehouseOutboundOrder, type: "approval" | "cancel") => {
+    const notice = {
+      id: `N-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: `warehouse-outbound-${type}`,
+      title: type === "approval" ? "出库单审核通过" : "出库单已撤销",
+      message,
+      relatedId: order.id,
+      relatedNo: order.orderNo,
+      createdAt: new Date().toISOString(),
+      read: false,
+    };
+    void setAppNotifications((current: any[]) => [notice, ...current]);
+  };
+
+  const getStockAfterDeduction = (stock: number): InventoryStatus => {
+    if (stock <= 0) return "critical";
+    if (stock <= 5) return "warning";
+    return "sufficient";
+  };
+
+  const buildOrderItems = (): WarehouseOutboundOrderItem[] | null => {
+    const prepared: WarehouseOutboundOrderItem[] = [];
+    for (const line of outboundForm.items) {
+      const material = data.find(item => item.id === line.materialId);
+      const quantity = Number(line.quantity);
+      if (!material || quantity <= 0) return null;
+      prepared.push({
+        id: line.id,
+        materialId: material.id,
+        materialName: material.name,
+        spec: material.spec,
+        batch: line.batch.trim() || material.inboundAt || material.id,
+        location: material.location,
+        quantity,
+        unit: material.unit,
+        stockAtSubmit: Number(material.stock || 0),
+      });
+    }
+    return prepared;
+  };
+
+  const exportOutboundOrdersExcel = () => {
+    const rows = filteredOutboundOrders.flatMap((order) => order.items.map((item) => ({
+      单号: order.orderNo,
+      状态: outboundStatusMeta[order.status]?.label || order.status,
+      创建人: order.createdByName,
+      创建时间: order.createdAt.replace("T", " ").slice(0, 16),
+      提交时间: order.submittedAt.replace("T", " ").slice(0, 16),
+      目标项目: order.destinationProject,
+      接收人: order.receiver,
+      材料编号: item.materialId,
+      材料名称: item.materialName,
+      规格: item.spec,
+      批次: item.batch,
+      仓库位置: item.location,
+      数量: item.quantity,
+      单位: item.unit,
+      提交时库存: item.stockAtSubmit,
+      照片数量: order.photos.length,
+      审核人: order.auditRecord?.userName || "",
+      审核时间: order.auditRecord?.actionAt?.replace("T", " ").slice(0, 16) || "",
+      撤销人: order.cancelRecord?.userName || "",
+      撤销时间: order.cancelRecord?.actionAt?.replace("T", " ").slice(0, 16) || "",
+      备注: order.remark,
+      撤销原因: order.cancelRecord?.reason || "",
+    })));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "出库单");
+    XLSX.writeFile(workbook, `出库单_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '已导出出库单 Excel' }));
+  };
+
+  const handleExportCSV = () => {
+    const csvContent = buildInventoryCsvRows(filteredData)
+      .map(row => row.map(cell => `"${cell}"`).join(","))
+      .join("\n");
 
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
@@ -298,184 +285,137 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
       photos: inboundForm.photos,
       remark: inboundForm.remark.trim(),
     }, ...warehouseTransactions]);
-    setInboundForm(emptyInboundForm());
+    setInboundForm(createEmptyInboundForm(selectedProject));
     setIsModalOpen(false);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '入库登记成功' }));
   };
 
   const handleOutboundSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const material = data.find(item => item.id === outboundForm.materialId);
-    const quantity = Number(outboundForm.quantity);
-    if (!material || quantity <= 0 || !outboundForm.destinationProject || !outboundForm.outboundAt) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请完整填写出库必填信息' }));
+    const items = buildOrderItems();
+    if (!items?.length || !outboundForm.destinationProject.trim() || !outboundForm.receiver.trim() || !outboundForm.outboundAt) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请完整填写出库单必填信息' }));
       return;
     }
-    if (quantity > material.stock) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `出库数量不能超过当前库存 ${material.stock} ${material.unit}` }));
+    if (outboundForm.photos.length === 0) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '出库单必须上传至少 1 张照片' }));
       return;
     }
 
-    const remaining = material.stock - quantity;
-    setData(data.map(item => item.id === material.id ? {
-      ...item,
-      stock: remaining,
-      status: remaining === 0 ? "critical" : remaining <= Math.max(5, quantity * 0.2) ? "warning" : item.status,
-    } : item));
-    setWarehouseTransactions([{
-      id: `WOUT-${Date.now()}`,
-      direction: "outbound",
-      materialId: material.id,
-      materialName: material.name,
-      spec: material.spec,
-      quantity,
-      unit: material.unit,
-      occurredAt: outboundForm.outboundAt,
-      sourceProject: material.sourceProject || material.project,
-      destinationProject: outboundForm.destinationProject,
-      location: material.location,
-      photos: outboundForm.photos,
+    const orderNo = `CK-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(outboundOrders.length + 1).padStart(4, "0")}`;
+    const order: WarehouseOutboundOrder = {
+      id: `WO-${Date.now()}`,
+      orderNo,
+      createdBy: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: new Date().toISOString(),
+      submittedAt: outboundForm.outboundAt,
+      status: "pending",
+      destinationProject: outboundForm.destinationProject.trim(),
+      receiver: outboundForm.receiver.trim(),
       remark: outboundForm.remark.trim(),
-    }, ...warehouseTransactions]);
-    setOutboundForm(emptyOutboundForm());
+      photos: outboundForm.photos,
+      items,
+    };
+    void setOutboundOrders((current) => [order, ...current]);
+    setOutboundForm(createEmptyOutboundForm());
     setIsOutboundModalOpen(false);
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: '出库登记成功，库存已同步扣减' }));
+    const hasShortage = items.some(item => item.quantity > item.stockAtSubmit);
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: hasShortage ? '出库单已提交审核，存在库存不足材料' : '出库单已提交审核' }));
   };
 
-  const handleImportBOM = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const approveOutboundOrder = (order: WarehouseOutboundOrder) => {
+    if (order.status !== "pending") return;
+    const approvedAt = new Date().toISOString();
+    const approvedOrder: WarehouseOutboundOrder = {
+      ...order,
+      status: "approved",
+      auditRecord: {
+        userId: currentUser.id,
+        userName: currentUser.name,
+        actionAt: approvedAt,
+        remark: "审核通过",
+      },
+    };
+
+    void setData((current) => current.map((material) => {
+      const lines = order.items.filter(item => item.materialId === material.id);
+      if (!lines.length) return material;
+      const total = lines.reduce((sum, item) => sum + item.quantity, 0);
+      const nextStock = Number(material.stock || 0) - total;
+      return { ...material, stock: nextStock, status: getStockAfterDeduction(nextStock) };
+    }));
+    void setWarehouseTransactions((current) => [
+      ...order.items.map((item) => ({
+        id: `WOUT-${Date.now()}-${item.id}`,
+        direction: "outbound" as const,
+        materialId: item.materialId,
+        materialName: item.materialName,
+        spec: item.spec,
+        quantity: item.quantity,
+        unit: item.unit,
+        occurredAt: order.submittedAt,
+        destinationProject: order.destinationProject,
+        location: item.location,
+        photos: order.photos,
+        remark: order.remark,
+        orderId: order.id,
+        orderNo: order.orderNo,
+        batch: item.batch,
+      })),
+      ...current,
+    ]);
+    void setOutboundOrders((current) => current.map((item) => item.id === order.id ? approvedOrder : item));
+    createNotification(`出库单 ${order.orderNo} 已审核通过，库存已扣减。`, approvedOrder, "approval");
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '出库单已审核通过，库存已扣减' }));
+  };
+
+  const cancelOutboundOrder = (order: WarehouseOutboundOrder) => {
+    if (order.status === "cancelled") return;
+    const reason = window.prompt("请输入撤销原因", order.status === "approved" ? "审核后撤销，库存恢复" : "撤销待审核单据") || "";
+    if (!reason.trim()) return;
+    const cancelledAt = new Date().toISOString();
+    const cancelledOrder: WarehouseOutboundOrder = {
+      ...order,
+      status: "cancelled",
+      cancelRecord: {
+        userId: currentUser.id,
+        userName: currentUser.name,
+        actionAt: cancelledAt,
+        reason: reason.trim(),
+      },
+    };
+    if (order.status === "approved") {
+      void setData((current) => current.map((material) => {
+        const lines = order.items.filter(item => item.materialId === material.id);
+        if (!lines.length) return material;
+        const total = lines.reduce((sum, item) => sum + item.quantity, 0);
+        const nextStock = Number(material.stock || 0) + total;
+        return { ...material, stock: nextStock, status: getStockAfterDeduction(nextStock) };
+      }));
+    }
+    void setOutboundOrders((current) => current.map((item) => item.id === order.id ? cancelledOrder : item));
+    createNotification(`出库单 ${order.orderNo} 已撤销${order.status === "approved" ? "，库存已恢复" : ""}。`, cancelledOrder, "cancel");
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: order.status === "approved" ? '出库单已撤销，库存已恢复' : '出库单已撤销' }));
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>, type: MaterialImportType, addToInventory = false) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws);
-          
-          const parsedData = data.map((row: any, index) => {
-            let errors = [];
-            if (!row['材料编号']) errors.push('缺少材料编号');
-            if (!row['方案计划数量'] || isNaN(Number(row['方案计划数量']))) errors.push('计划数量无效');
-            return { ...row, _errors: errors, _rowIndex: index + 1 };
-          });
-          setImportPreview({ isOpen: true, type: 'BOM', data: parsedData, file, addToInventory: false });
-        } catch (error) {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件解析失败，请确保格式正确' }));
-        }
-      };
-      reader.readAsBinaryString(file);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+    try {
+      const parsedData = await readMaterialImportFile(file, type);
+      setImportPreview({ isOpen: true, type, data: parsedData, file, addToInventory });
+    } catch {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件解析失败，请确保格式正确' }));
     }
+    e.target.value = '';
   };
 
-  const handleImportPO = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws);
-
-          const parsedData = data.map((row: any, index) => {
-            let errors = [];
-            if (!row['材料编号']) errors.push('缺少材料编号');
-            if (!row['采购数量'] || isNaN(Number(row['采购数量']))) errors.push('采购数量无效');
-            return { ...row, _errors: errors, _rowIndex: index + 1 };
-          });
-          setImportPreview({ isOpen: true, type: 'PO', data: parsedData, file, addToInventory: true });
-        } catch (error) {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件解析失败，请确保格式正确' }));
-        }
-      };
-      reader.readAsBinaryString(file);
-      if (poFileInputRef.current) poFileInputRef.current.value = '';
-    }
-  };
-
-  const handleImportInventory = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws);
-          
-          const parsedData = data.map((row: any, index) => {
-            let errors = [];
-            if (!row['材料编号']) errors.push('缺少材料编号');
-            if (!row['入库数量'] || isNaN(Number(row['入库数量']))) errors.push('入库数量无效');
-            return { ...row, _errors: errors, _rowIndex: index + 1 };
-          });
-          setImportPreview({ isOpen: true, type: 'INVENTORY', data: parsedData, file, addToInventory: false });
-        } catch (error) {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件解析失败，请确保格式正确' }));
-        }
-      };
-      reader.readAsBinaryString(file);
-      if (inventoryFileInputRef.current) inventoryFileInputRef.current.value = '';
-    }
-  };
-
-  const handleImportPrice = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws);
-          
-          const parsedData = data.map((row: any, index) => {
-            let errors = [];
-            if (!row['材料编号']) errors.push('缺少材料编号');
-            if (!row['单价'] || isNaN(Number(row['单价']))) errors.push('单价无效');
-            return { ...row, _errors: errors, _rowIndex: index + 1 };
-          });
-          setImportPreview({ isOpen: true, type: 'PRICE', data: parsedData, file, addToInventory: false });
-        } catch (error) {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件解析失败，请确保格式正确' }));
-        }
-      };
-      reader.readAsBinaryString(file);
-      if (priceFileInputRef.current) priceFileInputRef.current.value = '';
-    }
-  };
-
-  const downloadTemplate = (type: 'BOM' | 'PO' | 'INVENTORY' | 'PRICE') => {
-    let headers = [];
-    let filename = '';
-    if (type === 'BOM') {
-      headers = ['材料编号', '材料名称', '规格型号', '方案计划数量', '单位', '所属项目'];
-      filename = '材料清单(BOM)导入模板.xlsx';
-    } else if (type === 'PO') {
-      headers = ['材料编号', '采购数量', '供应商'];
-      filename = '采购单导入模板.xlsx';
-    } else if (type === 'INVENTORY') {
-      headers = ['材料编号', '材料名称', '规格型号', '入库数量', '单位', '存放区域', '供应商', '来源项目', '材料类型', '入库时间'];
-      filename = '入库登记导入模板.xlsx';
-    } else if (type === 'PRICE') {
-      headers = ['材料编号', '材料名称', '规格型号', '单价', '单位', '登记日期', '供应商'];
-      filename = '价格登记导入模板.xlsx';
-    }
-    
-    const ws = XLSX.utils.aoa_to_sheet([headers]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-    XLSX.writeFile(wb, filename);
-  };
+  const handleImportBOM = (e: React.ChangeEvent<HTMLInputElement>) => void handleImportFile(e, 'BOM');
+  const handleImportPO = (e: React.ChangeEvent<HTMLInputElement>) => void handleImportFile(e, 'PO', true);
+  const handleImportInventory = (e: React.ChangeEvent<HTMLInputElement>) => void handleImportFile(e, 'INVENTORY');
+  const handleImportPrice = (e: React.ChangeEvent<HTMLInputElement>) => void handleImportFile(e, 'PRICE');
+  const downloadTemplate = (type: MaterialImportType) => downloadMaterialTemplate(type);
 
   const confirmImport = () => {
     const { type, data: parsedData, addToInventory, file } = importPreview;
@@ -762,6 +702,11 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
               <button onClick={() => setIsWarehouseHistoryOpen(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm flex items-center">
                 <ClipboardList className="w-4 h-4 mr-2" />
                 出入库记录
+              </button>
+              <button onClick={() => setIsOutboundOrdersOpen(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm flex items-center">
+                <ListTodo className="w-4 h-4 mr-2" />
+                出库单
+                {outboundOrders.filter(order => order.status === "pending").length > 0 && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{outboundOrders.filter(order => order.status === "pending").length}</span>}
               </button>
               <button onClick={() => setIsOutboundModalOpen(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm flex items-center">
                 <ArrowUpFromLine className="w-4 h-4 mr-2" />
@@ -1456,36 +1401,78 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-slate-100">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">出库登记</h3>
-                <p className="text-sm text-slate-500 mt-1">登记出库时间和去向项目，提交后自动扣减库存</p>
+                <h3 className="text-lg font-bold text-slate-900">创建出库单</h3>
+                <p className="text-sm text-slate-500 mt-1">一张单可包含多种材料，提交审核后暂不扣减库存</p>
               </div>
               <button onClick={() => setIsOutboundModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleOutboundSubmit} className="p-6 space-y-4 overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">选择在库材料 <span className="text-rose-500">*</span></label>
-                <select required value={outboundForm.materialId} onChange={(e) => setOutboundForm({...outboundForm, materialId: e.target.value, quantity: ""})} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                  <option value="">请选择材料</option>
-                  {data.filter(item => item.stock > 0).map(item => <option key={item.id} value={item.id}>{item.name}｜{item.spec}｜库存 {item.stock} {item.unit}｜{item.location}</option>)}
-                </select>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-slate-700">材料明细 <span className="text-rose-500">*</span></label>
+                  <button
+                    type="button"
+                    onClick={() => setOutboundForm(prev => ({ ...prev, items: [...prev.items, { id: `line-${Date.now()}`, materialId: "", quantity: "", batch: "" }] }))}
+                    className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+                  >
+                    + 添加材料
+                  </button>
+                </div>
+                {outboundForm.items.map((line, index) => {
+                  const material = data.find(item => item.id === line.materialId);
+                  const quantity = Number(line.quantity);
+                  const shortage = material && quantity > Number(material.stock || 0);
+                  return (
+                    <div key={line.id} className={cn("rounded-xl border p-4", shortage ? "border-amber-200 bg-amber-50/50" : "border-slate-100 bg-slate-50")}>
+                      <div className="grid grid-cols-12 gap-3">
+                        <div className="col-span-12 md:col-span-5">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">材料名称/规格</label>
+                          <select required value={line.materialId} onChange={(e) => {
+                            const next = outboundForm.items.map(item => item.id === line.id ? { ...item, materialId: e.target.value, batch: data.find(material => material.id === e.target.value)?.inboundAt || "" } : item);
+                            setOutboundForm({ ...outboundForm, items: next });
+                          }} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            <option value="">请选择材料</option>
+                            {data.map(item => <option key={item.id} value={item.id}>{item.name}｜{item.spec}｜库存 {item.stock} {item.unit}｜{item.location}</option>)}
+                          </select>
+                        </div>
+                        <div className="col-span-6 md:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">批次</label>
+                          <input value={line.batch} onChange={(e) => setOutboundForm({ ...outboundForm, items: outboundForm.items.map(item => item.id === line.id ? { ...item, batch: e.target.value } : item) })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="批次/入库时间" />
+                        </div>
+                        <div className="col-span-6 md:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">数量</label>
+                          <input type="number" min="0.0001" step="any" required value={line.quantity} onChange={(e) => setOutboundForm({ ...outboundForm, items: outboundForm.items.map(item => item.id === line.id ? { ...item, quantity: e.target.value } : item) })} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="0" />
+                        </div>
+                        <div className="col-span-10 md:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-500">仓库位置</label>
+                          <div className="truncate rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600" title={material?.location}>{material?.location || "选择材料后带出"}</div>
+                        </div>
+                        <div className="col-span-2 md:col-span-1 flex items-end justify-end">
+                          <button type="button" disabled={outboundForm.items.length === 1} onClick={() => setOutboundForm({ ...outboundForm, items: outboundForm.items.filter(item => item.id !== line.id) })} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      {material && (
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                          <span>规格：{material.spec}</span>
+                          <span>当前库存：<b className={shortage ? "text-amber-700" : "text-slate-700"}>{material.stock} {material.unit}</b></span>
+                          <span>来源：{material.sourceProject || material.project || "未填写"}</span>
+                          {shortage && <span className="inline-flex items-center font-medium text-amber-700"><AlertTriangle className="mr-1 h-3.5 w-3.5" />库存不足，允许提交审核</span>}
+                        </div>
+                      )}
+                      <p className="mt-2 text-[11px] text-slate-400">第 {index + 1} 项</p>
+                    </div>
+                  );
+                })}
               </div>
-              {outboundForm.materialId && (() => {
-                const material = data.find(item => item.id === outboundForm.materialId);
-                return material ? (
-                  <div className="grid grid-cols-3 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-100 text-sm">
-                    <div><p className="text-slate-400 text-xs mb-1">材料规格</p><p className="font-medium text-slate-700">{material.spec}</p></div>
-                    <div><p className="text-slate-400 text-xs mb-1">当前库存</p><p className="font-medium text-slate-700">{material.stock} {material.unit}</p></div>
-                    <div><p className="text-slate-400 text-xs mb-1">材料来源</p><p className="font-medium text-slate-700">{material.sourceProject || material.project}</p></div>
-                  </div>
-                ) : null;
-              })()}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">出库数量 <span className="text-rose-500">*</span></label>
-                  <input type="number" min="0.0001" step="any" required value={outboundForm.quantity} onChange={(e) => setOutboundForm({...outboundForm, quantity: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="0" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">接收人 <span className="text-rose-500">*</span></label>
+                  <input required value={outboundForm.receiver} onChange={(e) => setOutboundForm({...outboundForm, receiver: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="项目现场接收人" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">出库时间 <span className="text-rose-500">*</span></label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">创建/出库时间 <span className="text-rose-500">*</span></label>
                   <input type="datetime-local" required value={outboundForm.outboundAt} onChange={(e) => setOutboundForm({...outboundForm, outboundAt: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
                 </div>
               </div>
@@ -1496,8 +1483,8 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-700">出库照片</label>
-                  <span className="text-xs text-slate-400">最多 3 张，单张不超过 5MB</span>
+                  <label className="block text-sm font-medium text-slate-700">出库照片 <span className="text-rose-500">*</span></label>
+                  <span className="text-xs text-slate-400">至少 1 张，最多 3 张，单张不超过 5MB</span>
                 </div>
                 <div className="flex flex-wrap gap-3">
                   {outboundForm.photos.map((photo, index) => (
@@ -1520,9 +1507,107 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
               </div>
               <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsOutboundModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
-                <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">确认出库</button>
+                <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">提交审核</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 出库单 Modal */}
+      {isOutboundOrdersOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-6xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">出库单审核与查询</h3>
+                <p className="text-sm text-slate-500 mt-1">共 {filteredOutboundOrders.length} 张单据，审核通过后扣减库存，撤销后恢复库存</p>
+              </div>
+              <button onClick={() => setIsOutboundOrdersOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="border-b border-slate-100 bg-slate-50/60 p-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
+                <select value={outboundOrderFilters.project} onChange={(e) => setOutboundOrderFilters(prev => ({ ...prev, project: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
+                  {allProjects.map(project => <option key={project} value={project}>{project}</option>)}
+                </select>
+                <input value={outboundOrderFilters.material} onChange={(e) => setOutboundOrderFilters(prev => ({ ...prev, material: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500 md:col-span-2" placeholder="搜索材料、规格、批次" />
+                <select value={outboundOrderFilters.status} onChange={(e) => setOutboundOrderFilters(prev => ({ ...prev, status: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
+                  <option value="全部状态">全部状态</option>
+                  <option value="pending">待审核</option>
+                  <option value="approved">已通过</option>
+                  <option value="cancelled">已撤销</option>
+                </select>
+                <input type="date" value={outboundOrderFilters.startDate} onChange={(e) => setOutboundOrderFilters(prev => ({ ...prev, startDate: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500" />
+                <input type="date" value={outboundOrderFilters.endDate} onChange={(e) => setOutboundOrderFilters(prev => ({ ...prev, endDate: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500" />
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button onClick={exportOutboundOrdersExcel} className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+                  <Download className="mr-2 h-4 w-4" />导出 Excel
+                </button>
+              </div>
+            </div>
+            <div className="overflow-auto flex-1">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 border-b border-slate-200 bg-white text-slate-500">
+                  <tr>
+                    <th className="px-5 py-3">单据</th>
+                    <th className="px-5 py-3">去向</th>
+                    <th className="px-5 py-3">材料明细</th>
+                    <th className="px-5 py-3">凭证</th>
+                    <th className="px-5 py-3">审核/撤销记录</th>
+                    <th className="px-5 py-3 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredOutboundOrders.map(order => {
+                    const meta = outboundStatusMeta[order.status];
+                    const hasShortage = order.items.some(item => item.quantity > item.stockAtSubmit);
+                    return (
+                      <tr key={order.id} className="align-top hover:bg-slate-50">
+                        <td className="px-5 py-4">
+                          <p className="font-mono text-xs font-bold text-slate-700">{order.orderNo}</p>
+                          <span className={cn("mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-medium", meta.className)}>{meta.label}</span>
+                          {hasShortage && <span className="ml-2 mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"><AlertTriangle className="mr-1 h-3 w-3" />库存不足</span>}
+                          <p className="mt-2 text-xs text-slate-500">创建人：{order.createdByName}</p>
+                          <p className="mt-1 font-mono text-xs text-slate-400">{order.submittedAt.replace("T", " ")}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="font-medium text-slate-900">{order.destinationProject}</p>
+                          <p className="mt-1 text-xs text-slate-500">接收人：{order.receiver}</p>
+                          <p className="mt-2 max-w-44 truncate text-xs text-slate-400" title={order.remark}>{order.remark || "无备注"}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-2">
+                            {order.items.map(item => (
+                              <div key={item.id} className="rounded-lg bg-slate-50 px-3 py-2">
+                                <p className="font-medium text-slate-800">{item.materialName} <span className="text-xs font-normal text-slate-400">{item.materialId}</span></p>
+                                <p className="mt-1 text-xs text-slate-500">{item.spec} · 批次 {item.batch || "-"} · {item.location}</p>
+                                <p className={cn("mt-1 font-mono text-xs", item.quantity > item.stockAtSubmit ? "text-amber-700" : "text-slate-600")}>出库 {item.quantity} {item.unit} / 提交时库存 {item.stockAtSubmit} {item.unit}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex -space-x-2">{order.photos.map((photo, index) => <a key={index} href={photo} target="_blank" rel="noreferrer"><img src={photo} alt="出库凭证" className="h-9 w-9 rounded-lg border-2 border-white object-cover shadow-sm" /></a>)}</div>
+                        </td>
+                        <td className="px-5 py-4 text-xs text-slate-500">
+                          {order.auditRecord ? <p>审核：{order.auditRecord.userName} · {order.auditRecord.actionAt.replace("T", " ").slice(0, 16)}</p> : <p>审核：待处理</p>}
+                          {order.cancelRecord && <p className="mt-2 text-rose-600">撤销：{order.cancelRecord.userName} · {order.cancelRecord.actionAt.replace("T", " ").slice(0, 16)}<br />原因：{order.cancelRecord.reason}</p>}
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex flex-col items-end gap-2">
+                            {order.status === "pending" && <button onClick={() => approveOutboundOrder(order)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">审核通过</button>}
+                            {(order.status === "pending" || order.status === "approved") && <button onClick={() => cancelOutboundOrder(order)} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50">撤销</button>}
+                            {order.status === "approved" && <p className="text-[11px] text-slate-400">审核后不可修改</p>}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredOutboundOrders.length === 0 && <tr><td colSpan={6} className="px-6 py-16 text-center text-slate-500"><ListTodo className="mx-auto mb-3 h-9 w-9 text-slate-300" />暂无匹配的出库单</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

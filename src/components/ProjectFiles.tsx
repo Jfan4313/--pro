@@ -1,7 +1,7 @@
 import React from "react";
 import { Download, FileText, FolderOpen, RefreshCw, Settings, UploadCloud } from "lucide-react";
 import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
@@ -9,7 +9,7 @@ import { cn } from "@/src/lib/utils";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData] = useProjectBoardData();
-  const [lifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const projects = React.useMemo(() => flattenProjects(boardData), [boardData]);
   const [selectedProjectId, setSelectedProjectId] = React.useState("");
   const [fileRoot, setFileRoot] = React.useState("");

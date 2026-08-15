@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, Clock3, FolderKanban, Search, UserRound } from "lucide-react";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { cn } from "@/src/lib/utils";
@@ -16,8 +16,8 @@ const filterLabels: Array<{ id: ProjectFilter; label: string }> = [
 
 export function MobileProjects({ onOpenProject }: { onOpenProject?: (projectId: string) => void }) {
   const [boardData] = useProjectBoardData();
-  const [scheduleData] = useFirebaseSync<any[]>("scheduleData", []);
-  const [lifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const [scheduleData] = useSyncedAppData<any[]>("scheduleData", []);
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ProjectFilter>("all");
 

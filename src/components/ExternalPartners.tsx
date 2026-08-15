@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Building2, CheckCircle2, FileWarning, Phone, Plus, Search, ShieldCheck, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects } from "@/src/lib/management";
 
@@ -64,9 +64,9 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 export function ExternalPartners() {
-  const [partners, setPartners] = useFirebaseSync<any[]>("externalPartners", initialPartners);
+  const [partners, setPartners] = useSyncedAppData<any[]>("externalPartners", initialPartners);
   const [boardData] = useProjectBoardData();
-  const [contracts] = useFirebaseSync<any[]>("project_contracts", []);
+  const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
 

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Send, Paperclip, Search, MoreVertical, FileText, Image as ImageIcon, Megaphone, Users, Plus, X, Building2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 
 const initialChannels = [
@@ -41,11 +41,11 @@ const initialPosts = [
 ];
 
 export function Chat() {
-  const [channels, setChannels] = useFirebaseSync("chatChannels", initialChannels);
+  const [channels, setChannels] = useSyncedAppData("chatChannels", initialChannels);
   const [activeChannelId, setActiveChannelId] = useState(channels[0]?.id || "1");
   const [postText, setPostText] = useState("");
-  const [posts, setPosts] = useFirebaseSync("chatPosts", initialPosts);
-  const [personnelData] = useFirebaseSync("personnelData", []);
+  const [posts, setPosts] = useSyncedAppData("chatPosts", initialPosts);
+  const [personnelData] = useSyncedAppData("personnelData", []);
   const [projectBoardData] = useProjectBoardData();
 
   const [isCreateChannelModalOpen, setIsCreateChannelModalOpen] = useState(false);

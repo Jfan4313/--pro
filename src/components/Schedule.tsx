@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenTasks, formatLocalDate } from "@/src/lib/management";
 import * as XLSX from "xlsx";
@@ -84,9 +84,9 @@ const projectTemplates = [
 ];
 
 export function Schedule() {
-  const [data, setData] = useFirebaseSync("scheduleData", initialScheduleData);
+  const [data, setData] = useSyncedAppData("scheduleData", initialScheduleData);
   const [boardData] = useProjectBoardData();
-  const [externalPartners] = useFirebaseSync<any[]>("externalPartners", []);
+  const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   
   // 动态获取项目列表，合并 scheduleData 和 boardData 中的项目名称，以便新建项目能够显示
   const projects = React.useMemo(() => {

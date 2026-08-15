@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Building2, FileText, Image as ImageIcon, Megaphone, MoreHorizontal, Paperclip, Plus, Search, Send, Users } from "lucide-react";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { cn } from "@/src/lib/utils";
 
 const initialChannels = [
@@ -16,8 +16,8 @@ const initialPosts = [
 ];
 
 export function MobileCollaboration() {
-  const [channels] = useFirebaseSync<any[]>("chatChannels", initialChannels);
-  const [posts, setPosts] = useFirebaseSync<any[]>("chatPosts", initialPosts);
+  const [channels] = useSyncedAppData<any[]>("chatChannels", initialChannels);
+  const [posts, setPosts] = useSyncedAppData<any[]>("chatPosts", initialPosts);
   const [activeChannelId, setActiveChannelId] = useState(channels[0]?.id || "1");
   const [postText, setPostText] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);

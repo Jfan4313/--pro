@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, CalendarDays, Camera, DollarSign, FileText, Handshake, Package, Truck, Users } from "lucide-react";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { deriveRisks, flattenProjects, flattenTasks } from "@/src/lib/management";
 import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
@@ -10,14 +10,14 @@ import { offlineDb } from "@/src/lib/offlineDb";
 
 export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenSurvey }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenSurvey?: (projectId: string) => void }) {
   const [projectBoardData] = useProjectBoardData();
-  const [scheduleData] = useFirebaseSync<any[]>("scheduleData", []);
-  const [contracts] = useFirebaseSync<any[]>("project_contracts", []);
-  const [supplyOrders] = useFirebaseSync<any[]>("supplyOrders", []);
-  const [materials] = useFirebaseSync<any[]>("materialsData", []);
-  const [costData] = useFirebaseSync<any[]>("costDataV2", []);
-  const [personnel] = useFirebaseSync<any[]>("personnelData", []);
-  const [externalPartners] = useFirebaseSync<any[]>("externalPartners", []);
-  const [lifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const [scheduleData] = useSyncedAppData<any[]>("scheduleData", []);
+  const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
+  const [supplyOrders] = useSyncedAppData<any[]>("supplyOrders", []);
+  const [materials] = useSyncedAppData<any[]>("materialsData", []);
+  const [costData] = useSyncedAppData<any[]>("costDataV2", []);
+  const [personnel] = useSyncedAppData<any[]>("personnelData", []);
+  const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   const [pendingSurveys, setPendingSurveys] = useState<any[]>([]);
 

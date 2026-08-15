@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { FileText, Upload, Search, Filter, MoreHorizontal, Download, Eye, FileSignature, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects } from "@/src/lib/management";
 
@@ -13,8 +13,8 @@ const initialContracts = [
 ];
 
 export function Contracts() {
-  const [contracts, setContracts] = useFirebaseSync("project_contracts", initialContracts);
-  const [externalPartners] = useFirebaseSync<any[]>("externalPartners", []);
+  const [contracts, setContracts] = useSyncedAppData("project_contracts", initialContracts);
+  const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   const [projectBoardData] = useProjectBoardData();
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);

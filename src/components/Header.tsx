@@ -1,8 +1,9 @@
 import { Bell, Search, Briefcase, Users, Package, Building2, X, LogOut } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import { useFirebaseSync } from "../hooks/useFirebaseSync";
+import { useSyncedAppData } from "../hooks/useSyncedAppData";
 import { useProjectBoardData } from "../hooks/useProjectBoardData";
 import { useAuth } from "@/src/lib/auth";
+import { formatLocalDate } from "@/src/lib/management";
 
 export function Header({ setActiveTab }: { setActiveTab?: (tab: string) => void }) {
   const { user, logout } = useAuth();
@@ -14,8 +15,10 @@ export function Header({ setActiveTab }: { setActiveTab?: (tab: string) => void 
   const searchRef = useRef<HTMLDivElement>(null);
 
   const [projectBoardData] = useProjectBoardData();
-  const [personnelData] = useFirebaseSync<any[]>("personnelData", []);
-  const [materialsData] = useFirebaseSync<any[]>("materialsData", []);
+  const [personnelData] = useSyncedAppData<any[]>("personnelData", []);
+  const [materialsData] = useSyncedAppData<any[]>("materialsData", []);
+  const [workMemos] = useSyncedAppData<any[]>("workMemos", []);
+  const reminderCount = workMemos.filter((item: any) => item.status !== "confirmed" && (item.status === "feedback" || item.dueDate <= formatLocalDate())).length;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -141,9 +144,9 @@ export function Header({ setActiveTab }: { setActiveTab?: (tab: string) => void 
         >
           <Search className="w-5 h-5" />
         </button>
-        <button className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-full hover:bg-slate-100">
+        <button onClick={() => setActiveTab?.("work-memo")} className="relative rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600" aria-label={`工作提醒${reminderCount ? `，${reminderCount}条` : ""}`}>
           <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+          {reminderCount > 0 && <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">{reminderCount > 99 ? "99+" : reminderCount}</span>}
         </button>
         <div className="relative">
           <button onClick={() => setIsAccountOpen(!isAccountOpen)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-xs font-bold text-white" aria-label="帐号菜单">{user?.name?.slice(0, 1) || "我"}</button>

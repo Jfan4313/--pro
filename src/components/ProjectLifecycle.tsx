@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
@@ -220,7 +220,7 @@ function formatUploadTime(value: string) {
 
 export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (projectId: string) => void }) {
   const [boardData] = useProjectBoardData();
-  const [lifecycleStates, setLifecycleStates] = useFirebaseSync<Record<string, any>>("projectLifecycleStates", {});
+  const [lifecycleStates, setLifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   
   const allProjects = Array.isArray(boardData) 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText } from "lucide-react";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { apiClient } from "@/src/lib/apiClient";
@@ -25,10 +25,10 @@ const typeColors: Record<string, string> = {
 
 export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: string) => void }) {
   const [data, setData, , boardSeed] = useProjectBoardData();
-  const [supplyOrders] = useFirebaseSync("supplyOrders", []);
-  const [personnelData] = useFirebaseSync("personnelData", []);
-  const [scheduleData] = useFirebaseSync("scheduleData", []);
-  const [lifecycleStates] = useFirebaseSync("projectLifecycleStates", {});
+  const [supplyOrders] = useSyncedAppData("supplyOrders", []);
+  const [personnelData] = useSyncedAppData("personnelData", []);
+  const [scheduleData] = useSyncedAppData("scheduleData", []);
+  const [lifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
 
   const getConstructProgress = (project: any) => {
     const projectSchedule = scheduleData.find((s: any) => s.id === project.id || s.name === project.name || (project.name && s.name && s.name.includes(project.name)));

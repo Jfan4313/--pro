@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { AudioLines, CalendarDays, CheckCircle2, ClipboardList, FileUp, Image as ImageIcon, Loader2, Mic, Send, Sparkles, Type, X } from "lucide-react";
 import { apiClient } from "@/src/lib/apiClient";
 import { cn } from "@/src/lib/utils";
-import { useFirebaseSync } from "@/src/hooks/useFirebaseSync";
+import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { formatLocalDate } from "@/src/lib/management";
 
@@ -44,8 +44,8 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
   const [error, setError] = useState("");
 
   const [projectBoardData] = useProjectBoardData();
-  const [personnelData] = useFirebaseSync<any[]>("personnelData", []);
-  const [quickIntakeItems, setQuickIntakeItems] = useFirebaseSync<any[]>("quickIntakeItems", []);
+  const [personnelData] = useSyncedAppData<any[]>("personnelData", []);
+  const [quickIntakeItems, setQuickIntakeItems] = useSyncedAppData<any[]>("quickIntakeItems", []);
 
   const allProjects = useMemo(() => {
     return Array.isArray(projectBoardData) ? projectBoardData.flatMap((col: any) => col.projects || []) : [];
