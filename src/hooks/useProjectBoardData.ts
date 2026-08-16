@@ -1,6 +1,5 @@
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useAuth } from "@/src/lib/auth";
-import { initialBoardData } from "@/src/data/initialBoardData";
 
 export function useProjectBoardData() {
   const { user } = useAuth();
