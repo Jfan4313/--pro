@@ -47,11 +47,7 @@ cd "$release_dir"
 mkdir -p "$stage_dir/npm-home"
 chown -R www-data:www-data "$stage_dir/npm-home"
 chown -R www-data:www-data "$release_dir"
-  if [[ -f package-lock.json ]]; then
-    runuser -u www-data -- env HOME="$stage_dir/npm-home" npm ci --omit=dev --no-audit --no-fund
-  else
-    runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
-  fi
+  runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
 chown -R root:root "$release_dir"
 
 if [[ -e "$backup_dir" || -e "$failed_dir" ]]; then
