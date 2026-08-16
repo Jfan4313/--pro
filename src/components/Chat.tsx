@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, type ChangeEvent } from "react";
 import { Send, Paperclip, Search, MoreVertical, FileText, Image as ImageIcon, Megaphone, Users, Plus, X, Building2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
@@ -54,6 +54,8 @@ export function Chat() {
   const [newChannelName, setNewChannelName] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
+  const [postAttachments, setPostAttachments] = useState<any[]>([]);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const activeChannel = channels.find((c: any) => c.id === activeChannelId) || channels[0] || { id: "empty", name: "暂无协作群组", type: "announcement", unread: 0, members: [] };
   const activePosts = posts.filter((p: any) => p.channelId === activeChannelId);
@@ -87,7 +89,7 @@ export function Chat() {
   };
 
   const handlePost = () => {
-    if (!postText.trim()) return;
+    if (!postText.trim() && postAttachments.length === 0) return;
     
     const newPost = {
       id: Date.now(),
@@ -96,12 +98,30 @@ export function Chat() {
       time: "刚刚",
       content: postText,
       type: "update",
-      attachments: []
+      attachments: postAttachments
     };
     
     setPosts([newPost, ...posts]);
     setPostText("");
+    setPostAttachments([]);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '发布动态成功' }));
+  };
+
+  const handleAttachmentChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = (Array.from(event.target.files || []) as File[]).slice(0, 3 - postAttachments.length);
+    event.target.value = "";
+    if (files.length === 0) return;
+    const next = await Promise.all(files.map((file) => new Promise<any>((resolve, reject) => {
+      if (file.size > 8 * 1024 * 1024) { reject(new Error(`${file.name} 超过 8MB`)); return; }
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, type: file.type.startsWith("image/") ? "image" : "file", dataUrl: reader.result });
+      reader.onerror = () => reject(new Error(`读取 ${file.name} 失败`));
+      reader.readAsDataURL(file);
+    }))).catch((error) => {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: error.message || '附件读取失败' }));
+      return [];
+    });
+    setPostAttachments((current) => [...current, ...next]);
   };
 
   const handleCreateChannel = () => {
@@ -216,18 +236,20 @@ export function Chat() {
                   placeholder="发布项目动态、通知或共享文件..."
                   className="w-full bg-transparent border-none outline-none resize-none min-h-[80px] text-sm text-slate-700 placeholder:text-slate-400"
                 />
+                {postAttachments.length > 0 && <div className="mb-3 flex flex-wrap gap-2">{postAttachments.map((file, index) => <span key={`${file.name}-${index}`} className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600"><span className="max-w-40 truncate">{file.name}</span><button type="button" onClick={() => setPostAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="text-slate-400 hover:text-rose-600" aria-label={`移除${file.name}`}>×</button></span>)}</div>}
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100 mt-2">
                   <div className="flex items-center gap-1">
-                    <button onClick={() => handleAction('上传图片')} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors rounded-lg flex items-center gap-1.5 text-xs font-medium">
+                    <button onClick={() => attachmentInputRef.current?.click()} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors rounded-lg flex items-center gap-1.5 text-xs font-medium">
                       <ImageIcon className="w-4 h-4" /> 图片
                     </button>
-                    <button onClick={() => handleAction('上传文件')} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors rounded-lg flex items-center gap-1.5 text-xs font-medium">
+                    <button onClick={() => attachmentInputRef.current?.click()} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors rounded-lg flex items-center gap-1.5 text-xs font-medium">
                       <Paperclip className="w-4 h-4" /> 文件
                     </button>
+                    <input ref={attachmentInputRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.xlsx,.zip" className="hidden" onChange={handleAttachmentChange} />
                   </div>
                   <button 
                     onClick={handlePost}
-                    disabled={!postText.trim()}
+                    disabled={!postText.trim() && postAttachments.length === 0}
                     className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
                     <Send className="w-3.5 h-3.5" /> 发布

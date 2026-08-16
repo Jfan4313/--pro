@@ -31,6 +31,9 @@ export function Personnel() {
   const filterOptions = [...dynamicProjects, "已归档人员"];
 
   const [selectedProject, setSelectedProject] = useState("全部项目");
+  const [selectedStatus, setSelectedStatus] = useState("全部状态");
+  const [selectedTeam, setSelectedTeam] = useState("全部班组");
+  const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -72,6 +75,7 @@ export function Personnel() {
       specialCertsImage: p.specialCertsImage || null
     }));
   }, [data]);
+  const teamOptions = useMemo(() => ["全部班组", ...Array.from(new Set(normalizedData.map((person: any) => person.team).filter(Boolean)))], [normalizedData]);
   const deleteTarget = useMemo(() => normalizedData.find((person: any) => person.id === deleteConfirmId), [normalizedData, deleteConfirmId]);
 
   const filteredData = useMemo(() => {
@@ -87,9 +91,11 @@ export function Personnel() {
       }
       
       const matchesSearch = p.name.includes(searchQuery) || p.id.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesProject && matchesSearch;
+      const matchesStatus = selectedStatus === "全部状态" || (selectedStatus === "在场" ? p.status === "on-site" : p.status !== "on-site");
+      const matchesTeam = selectedTeam === "全部班组" || p.team === selectedTeam;
+      return matchesProject && matchesSearch && matchesStatus && matchesTeam;
     });
-  }, [normalizedData, selectedProject, searchQuery]);
+  }, [normalizedData, selectedProject, searchQuery, selectedStatus, selectedTeam]);
 
   const handleExportCSV = () => {
     const headers = ["工号", "姓名", "所属项目", "职务", "班组", "入场时间", "安全培训", "状态"];
@@ -120,10 +126,6 @@ export function Personnel() {
     document.body.removeChild(link);
     
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '已导出人员名单' }));
-  };
-
-  const handleAction = (action: string) => {
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: `${action} 操作已执行` }));
   };
 
   const openAddModal = () => {
@@ -282,9 +284,7 @@ export function Personnel() {
               className="bg-transparent border-none outline-none text-sm w-full text-slate-700"
             />
           </div>
-          <button onClick={() => handleAction('筛选')} className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
-            <Filter className="w-4 h-4" />
-          </button>
+          <div className="relative"><button onClick={() => setShowFilters((current) => !current)} title="打开筛选" className={cn("p-2 rounded-md transition-colors", showFilters || selectedStatus !== "全部状态" || selectedTeam !== "全部班组" ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100")}><Filter className="w-4 h-4" /></button>{showFilters && <div className="absolute right-0 top-10 z-20 w-56 space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-xl"><label className="block text-xs font-semibold text-slate-500">人员状态<select value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-700"><option>全部状态</option><option>在场</option><option>离场</option></select></label><label className="block text-xs font-semibold text-slate-500">所属班组<select value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-700">{teamOptions.map((team) => <option key={team}>{team}</option>)}</select></label><button onClick={() => { setSelectedProject("全部项目"); setSelectedStatus("全部状态"); setSelectedTeam("全部班组"); }} className="w-full rounded-lg bg-slate-100 py-2 text-xs font-semibold text-slate-600">重置筛选</button></div>}</div>
         </div>
         
         <div className="overflow-x-auto">

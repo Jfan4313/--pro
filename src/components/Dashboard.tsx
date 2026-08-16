@@ -1,10 +1,12 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Brush } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, Zap, AlertTriangle, Save, Download, Upload, Briefcase, CheckCircle2, Users, Package, FileText, ChevronRight } from 'lucide-react';
+import { useRef, type ChangeEvent } from 'react';
 import { cn } from "@/src/lib/utils";
 import { STAGES } from './ProjectLifecycle';
 import { MobileHome } from './MobileHome';
 import { useDashboardOverview } from '@/src/features/dashboard/useDashboardOverview';
 import { progressTrendData, recentAnnouncements } from '@/src/features/dashboard/dashboardContent';
+import { exportWorkspaceSnapshot, importWorkspaceSnapshot } from '@/src/features/dashboard/dashboardTools';
 
 export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
   const {
@@ -23,8 +25,17 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
     todayTasks,
   } = useDashboardOverview();
 
-  const handleAction = (action: string) => {
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: `${action} 操作已执行` }));
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const count = await importWorkspaceSnapshot(file);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `已导入 ${count} 类工作区数据，刷新后生效` }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.message || '配置文件导入失败' }));
+    }
   };
 
   return (
@@ -44,15 +55,16 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">项目汇总</h2>
         <div className="flex gap-3">
-          <button onClick={() => handleAction('快速保存')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
+          <button onClick={() => { localStorage.setItem('zhijian-last-quick-save', new Date().toISOString()); window.dispatchEvent(new CustomEvent('show-toast', { detail: '已记录当前工作区保存点' })); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
             <Save className="w-4 h-4" /> 快速保存
           </button>
-          <button onClick={() => handleAction('导出配置')} className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors">
+          <button onClick={() => void exportWorkspaceSnapshot().then(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: '工作区配置已导出' })))} className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors">
             <Download className="w-4 h-4" /> 导出配置
           </button>
-          <button onClick={() => handleAction('导入配置')} className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
+          <button onClick={() => importInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
             <Upload className="w-4 h-4" /> 导入配置
           </button>
+          <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImport} />
         </div>
       </div>
 

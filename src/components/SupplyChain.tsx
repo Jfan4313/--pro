@@ -34,6 +34,8 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
   const [bomData] = useSyncedAppData("bomData", []);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
   const [activeTab, setActiveTab] = useState<"orders" | "reconciliation">(defaultTab);
 
   useEffect(() => {
@@ -67,7 +69,8 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
       order.supplier.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.items.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesProject = selectedProjectId === "all" || order.projectId === selectedProjectId;
-    return matchesSearch && matchesProject;
+    const matchesStatus = statusFilter === "all" || order.status === statusFilter;
+    return matchesSearch && matchesProject && matchesStatus;
   });
 
   const handleCreateOrder = (e: React.FormEvent) => {
@@ -218,9 +221,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
                   ))}
                 </select>
               </div>
-              <button className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
-                <Filter className="w-4 h-4" />
-              </button>
+              <div className="relative"><button onClick={() => setShowFilters((current) => !current)} title="打开筛选" className={cn("p-2 rounded-md transition-colors", showFilters || statusFilter !== "all" ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100")}><Filter className="w-4 h-4" /></button>{showFilters && <div className="absolute right-0 top-10 z-20 w-52 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"><label className="block text-xs font-semibold text-slate-500">订单状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-700"><option value="all">全部状态</option>{Object.entries(statusConfig).map(([value, config]) => <option key={value} value={value}>{config.label}</option>)}</select></label><button onClick={() => { setStatusFilter("all"); setSelectedProjectId("all"); }} className="mt-3 w-full rounded-lg bg-slate-100 py-2 text-xs font-semibold text-slate-600">重置筛选</button></div>}</div>
             </div>
             
             <table className="w-full text-left text-sm">
