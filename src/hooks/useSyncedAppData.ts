@@ -3,10 +3,16 @@ import { apiClient } from "@/src/lib/apiClient";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
 
-function isEmptySeed(value: unknown) {
-  if (Array.isArray(value)) return value.length === 0;
-  if (value && typeof value === "object") return Object.keys(value).length === 0;
-  return value === "" || value === null || value === undefined;
+const EMPTY_WORKSPACE_KEYS = new Set([
+  "projectBoardData", "personnelData", "scheduleData", "project_contracts", "costDataV2",
+  "materialsData", "bomData", "bomHistory", "bomVersion", "materialPrices", "materialPriceHistory",
+  "supplyOrders", "suppliers", "externalPartners", "organizationData", "chatChannels", "chatPosts",
+  "workMemos", "quickIntakeItems", "appNotifications", "warehouseTransactions", "warehouseOutboundOrders",
+]);
+
+function emptyWorkspaceValue<T>(key: string, fallback: T): T {
+  if (!EMPTY_WORKSPACE_KEYS.has(key)) return fallback;
+  return (key === "organizationData" ? {} : []) as T;
 }
 
 export function useSyncedAppData<T>(key: string, initialValue: T) {
@@ -27,20 +33,12 @@ export function useSyncedAppData<T>(key: string, initialValue: T) {
 
       try {
         const remote = await apiClient.getAppData<T>(key);
-        const shouldPromoteLocalSeed = isEmptySeed(remote.value) && !isEmptySeed(initialValue);
-        const value = shouldPromoteLocalSeed ? initialValue : remote.value;
-        if (shouldPromoteLocalSeed) {
-          await queueAppDataUpdate(key, value);
-        } else {
-          await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
-        }
+        const value = remote.value;
+        await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
         if (!cancelled) setData(value);
       } catch (error: any) {
         if (error?.status === 404) {
-          const seedValue = cached !== undefined && !isEmptySeed(cached) ? cached : initialValue;
-          if (!isEmptySeed(seedValue)) {
-            await queueAppDataUpdate(key, seedValue);
-          }
+          const seedValue = cached !== undefined ? cached : emptyWorkspaceValue(key, initialValue);
           if (!cancelled) setData(seedValue);
         }
       } finally {

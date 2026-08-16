@@ -4,15 +4,7 @@ import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 
-const personnelDataInitial = [
-  { id: "W001", name: "张伟", role: "项目经理", team: "管理组", entryDate: "2025-10-01", status: "on-site", safetyTrained: true, sourceType: "内部", companyName: "智建建筑工程有限公司", projects: [{ name: "A区商业综合体", status: "active" }], idCardNumber: "110105198508123456", specialCerts: "无", idCardImage: null, specialCertsImage: null },
-  { id: "W002", name: "李娜", role: "安全员", team: "管理组", entryDate: "2025-10-05", status: "on-site", safetyTrained: true, projects: [{ name: "A区商业综合体", status: "active" }], idCardNumber: "310104199203157890", specialCerts: "安全员C证", idCardImage: null, specialCertsImage: null },
-  { id: "W003", name: "王强", role: "高级电工", team: "电气一班", entryDate: "2026-01-15", status: "on-site", safetyTrained: true, projects: [{ name: "B区住宅一期", status: "active" }], idCardNumber: "420102198811224567", specialCerts: "高压电工作业证", idCardImage: null, specialCertsImage: null },
-  { id: "W004", name: "赵敏", role: "结构工程师", team: "土建组", entryDate: "2025-11-20", status: "off-site", safetyTrained: true, projects: [{ name: "C区地下车库", status: "archived" }], idCardNumber: "440305199506081234", specialCerts: "无", idCardImage: null, specialCertsImage: null },
-  { id: "W005", name: "陈杰", role: "焊工", team: "安装二班", entryDate: "2026-02-10", status: "on-site", safetyTrained: false, projects: [{ name: "B区住宅一期", status: "active" }], idCardNumber: "510108199012123456", specialCerts: "熔化焊接与热切割作业证", idCardImage: null, specialCertsImage: null },
-  { id: "W006", name: "刘洋", role: "普工", team: "土建组", entryDate: "2026-03-01", status: "on-site", safetyTrained: true, projects: [{ name: "市政道路标段", status: "active" }], idCardNumber: "320102199805207890", specialCerts: "无", idCardImage: null, specialCertsImage: null },
-  { id: "W007", name: "孙宇", role: "吊车司机", team: "机械组", entryDate: "2026-02-28", status: "on-site", safetyTrained: true, projects: [{ name: "市政道路标段", status: "active" }], idCardNumber: "130104198709154567", specialCerts: "起重机驾驶证", idCardImage: null, specialCertsImage: null },
-];
+const personnelDataInitial: any[] = [];
 
 export function Personnel() {
   const [data, setData] = useSyncedAppData("personnelData", personnelDataInitial);

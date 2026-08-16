@@ -7,6 +7,7 @@ import { createAuthMiddleware } from "./middleware/auth.js";
 import { registerAuthRoutes } from "./routes/authRoutes.js";
 import { registerDataRoutes } from "./routes/dataRoutes.js";
 import { registerUtilityRoutes } from "./routes/utilityRoutes.js";
+import { createWecomNotifier } from "./services/wecomNotifier.js";
 
 const app = express();
 const port = Number(process.env.LOCAL_API_PORT || 8787);
@@ -16,6 +17,7 @@ const appOrigin = String(process.env.APP_ORIGIN || "").replace(/\/+$/, "");
 const clients = new Set();
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(rootDir, "dist");
+const wecomNotifier = createWecomNotifier({ nowIso: () => new Date().toISOString() });
 
 function nowIso() {
   return new Date().toISOString();
@@ -64,6 +66,7 @@ const routeContext = {
   nowIso,
   clientId,
   userId,
+  wecomNotifier,
 };
 
 app.get("/api/health", (_req, res) => {
@@ -74,6 +77,11 @@ registerAuthRoutes(app, { ...routeContext, ...auth });
 app.use("/api", auth.requireApiAuth);
 registerUtilityRoutes(app, routeContext);
 registerDataRoutes(app, routeContext);
+
+wecomNotifier.startDailyReminder(() => {
+  const row = db.prepare("SELECT value FROM app_data WHERE key = ?").get("workMemos");
+  return parseJson(row?.value, []);
+});
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "api_not_found" });
@@ -90,4 +98,5 @@ app.listen(port, host, () => {
   console.log(`Local backend listening on http://${host}:${port}`);
   console.log(`SQLite database: ${dbPath}`);
   if (fs.existsSync(path.join(distDir, "index.html"))) console.log(`Web app served from ${distDir}`);
+  console.log(`Enterprise WeChat notifications: ${wecomNotifier.enabled ? `enabled (daily ${wecomNotifier.dailyHour}:00)` : "disabled; set WECOM_WEBHOOK_URL to enable"}`);
 });

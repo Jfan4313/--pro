@@ -6,7 +6,7 @@ import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenTasks, formatLocalDate } from "@/src/lib/management";
 import * as XLSX from "xlsx";
 
-const initialScheduleData = [
+const initialScheduleData: any[] = [
   {
     id: "p1",
     name: "一、前期准备阶段",
@@ -84,7 +84,7 @@ const projectTemplates = [
 ];
 
 export function Schedule() {
-  const [data, setData] = useSyncedAppData("scheduleData", initialScheduleData);
+  const [data, setData] = useSyncedAppData("scheduleData", []);
   const [boardData] = useProjectBoardData();
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   

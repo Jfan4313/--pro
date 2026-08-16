@@ -15,15 +15,15 @@ import { useAuth } from "@/src/lib/auth";
 import * as XLSX from "xlsx";
 
 export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTab?: string) => void }) {
-  const [data, setData] = useSyncedAppData("materialsData", materialsDataInitial);
+  const [data, setData] = useSyncedAppData("materialsData", []);
   const [warehouseTransactions, setWarehouseTransactions] = useSyncedAppData<WarehouseTransaction[]>("warehouseTransactions", []);
   const [outboundOrders, setOutboundOrders] = useSyncedAppData<WarehouseOutboundOrder[]>("warehouseOutboundOrders", []);
   const [appNotifications, setAppNotifications] = useSyncedAppData<any[]>("appNotifications", []);
-  const [bomData, setBomData] = useSyncedAppData("bomData", initialBomData);
-  const [bomHistory, setBomHistory] = useSyncedAppData("bomHistory", initialBomHistory);
-  const [currentBomVersion, setCurrentBomVersion] = useSyncedAppData("bomVersion", "v1.0");
-  const [priceData, setPriceData] = useSyncedAppData("materialPrices", initialPriceData);
-  const [priceHistory, setPriceHistory] = useSyncedAppData("materialPriceHistory", initialPriceHistory);
+  const [bomData, setBomData] = useSyncedAppData("bomData", []);
+  const [bomHistory, setBomHistory] = useSyncedAppData("bomHistory", []);
+  const [currentBomVersion, setCurrentBomVersion] = useSyncedAppData("bomVersion", "");
+  const [priceData, setPriceData] = useSyncedAppData("materialPrices", []);
+  const [priceHistory, setPriceHistory] = useSyncedAppData("materialPriceHistory", []);
   
   const [projectBoardData] = useProjectBoardData();
   const allProjects = useMemo(() => {

@@ -64,7 +64,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 export function ExternalPartners() {
-  const [partners, setPartners] = useSyncedAppData<any[]>("externalPartners", initialPartners);
+  const [partners, setPartners] = useSyncedAppData<any[]>("externalPartners", []);
   const [boardData] = useProjectBoardData();
   const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
   const [searchQuery, setSearchQuery] = useState("");

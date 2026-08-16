@@ -67,7 +67,7 @@ const typeLabels: Record<string, string> = {
 };
 
 export function CostDashboard() {
-  const [costData, setCostData] = useSyncedAppData("costDataV2", initialCostData);
+  const [costData, setCostData] = useSyncedAppData("costDataV2", []);
   const [projectBoardData] = useProjectBoardData();
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
 

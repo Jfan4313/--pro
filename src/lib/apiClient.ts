@@ -44,6 +44,12 @@ export const apiClient = {
   login(username: string, password: string) {
     return request<{ token: string; expiresAt: string; user: any }>("/api/auth/login", { method: "POST", body: { username, password } });
   },
+  requestOtp(phone: string) {
+    return request<{ ok: boolean; expiresIn: number; devCode?: string; delivery: string }>("/api/auth/request-otp", { method: "POST", body: { phone } });
+  },
+  loginWithOtp(phone: string, code: string) {
+    return request<{ token: string; expiresAt: string; user: any }>("/api/auth/login-otp", { method: "POST", body: { phone, code } });
+  },
   register(payload: { username: string; password: string; name: string; email?: string; phone?: string }) {
     return request<{ token: string; expiresAt: string; user: any }>("/api/auth/register", { method: "POST", body: payload });
   },

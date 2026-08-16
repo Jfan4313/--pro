@@ -4,13 +4,40 @@ import App from './App.tsx';
 import { MobilePreviewFrame } from './components/MobilePreviewFrame.tsx';
 import './index.css';
 import { startRealtimeSync } from './lib/syncEngine';
+import { offlineDb } from './lib/offlineDb';
 import { AuthProvider } from './lib/auth.tsx';
 
 const viteEnv = (import.meta as any).env || {};
 
-startRealtimeSync();
+const EMPTY_WORKSPACE_VERSION = "2026-08-16-empty-business-data-v2";
+const businessDataKeys = ["projectBoardData", "personnelData", "scheduleData", "project_contracts", "costDataV2", "materialsData", "bomData", "bomHistory", "bomVersion", "materialPrices", "materialPriceHistory", "supplyOrders", "suppliers", "externalPartners", "organizationData", "chatChannels", "chatPosts", "workMemos"];
+void offlineDb.getMeta<string>("workspace-data-version").then(async (version) => {
+  if (version === EMPTY_WORKSPACE_VERSION) return;
+  await Promise.all(businessDataKeys.map((key) => offlineDb.deleteAppData(key)));
+  const pending = await offlineDb.getOutbox();
+  await Promise.all(pending.map((item: any) => offlineDb.deleteOutbox(item.id)));
+  await offlineDb.setMeta("workspace-data-version", EMPTY_WORKSPACE_VERSION);
+}).catch(() => undefined).finally(() => startRealtimeSync());
 
-if (!viteEnv.DEV && "serviceWorker" in navigator) {
+if (viteEnv.DEV && "serviceWorker" in navigator) {
+  // A production PWA service worker can remain registered on localhost and
+  // mix cached React chunks with the Vite development graph, causing a blank
+  // screen and "Invalid hook call" errors. Keep development completely fresh.
+  void navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+    const reloadKey = "zhijian-dev-cache-cleared";
+    if (!window.sessionStorage.getItem(reloadKey)) {
+      window.sessionStorage.setItem(reloadKey, "1");
+      window.location.reload();
+    }
+  }).catch(() => {
+    // The app can still run if the browser blocks service-worker cleanup.
+  });
+} else if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {
       // The app still runs normally if PWA registration is unavailable.

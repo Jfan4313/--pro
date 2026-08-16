@@ -11,6 +11,11 @@ type WorkMemoRecord = {
   title: string;
   detail: string;
   assignee: string;
+  projectName: string;
+  targetType: "internal" | "crew";
+  crewName: string;
+  crewContact: string;
+  progress: number;
   creator: string;
   dueDate: string;
   priority: "normal" | "high";
@@ -40,7 +45,7 @@ export function WorkMemo() {
   const [filter, setFilter] = useState<"all" | "mine" | "unconfirmed" | "overdue">("all");
   const [isOpen, setIsOpen] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState<WorkMemoRecord | null>(null);
-  const [form, setForm] = useState({ title: "", detail: "", assignee: "", dueDate: formatLocalDate(), priority: "normal" as "normal" | "high" });
+  const [form, setForm] = useState({ title: "", detail: "", projectName: "", targetType: "internal" as "internal" | "crew", crewName: "", crewContact: "", assignee: "", dueDate: formatLocalDate(), priority: "normal" as "normal" | "high" });
   const [feedback, setFeedback] = useState("");
   const today = formatLocalDate();
 
@@ -66,6 +71,11 @@ export function WorkMemo() {
       id: `memo-${Date.now()}`,
       title: form.title.trim(),
       detail: form.detail.trim(),
+      projectName: form.projectName.trim(),
+      targetType: form.targetType,
+      crewName: form.crewName.trim(),
+      crewContact: form.crewContact.trim(),
+      progress: 0,
       assignee: form.assignee.trim(),
       creator: user?.name || user?.username || "系统用户",
       status: "pending",
@@ -73,7 +83,7 @@ export function WorkMemo() {
       createdAt: new Date().toISOString(),
     };
     setRecords(current => [record, ...current]);
-    setForm({ title: "", detail: "", assignee: "", dueDate: today, priority: "normal" });
+    setForm({ title: "", detail: "", projectName: "", targetType: "internal", crewName: "", crewContact: "", assignee: "", dueDate: today, priority: "normal" });
     setIsOpen(false);
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "工作安排已发布，负责人可以开始执行" }));
   };
@@ -95,7 +105,7 @@ export function WorkMemo() {
   return <div className="mx-auto max-w-[1500px] space-y-6 p-4 md:p-8">
     <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
       <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Company workflow</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">工作备忘</h2><p className="mt-1 text-sm text-slate-500">每日安排、执行反馈和完成确认，所有成员都能看到进度。</p></div>
-      <button onClick={() => setIsOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"><Plus className="h-4 w-4" />新建工作安排</button>
+      <div className="flex flex-wrap gap-2"><button onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">快速创建</button><button onClick={() => setIsOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"><Plus className="h-4 w-4" />新建工作安排</button></div>
     </div>
 
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

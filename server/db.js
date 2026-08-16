@@ -104,6 +104,18 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(userId, expiresAt);
+CREATE TABLE IF NOT EXISTS auth_otp_codes (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  codeHash TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  consumedAt TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_auth_otp_phone_created ON auth_otp_codes(phone, createdAt);
 `);
 
 const now = new Date().toISOString();

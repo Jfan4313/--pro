@@ -41,10 +41,10 @@ const initialPosts = [
 ];
 
 export function Chat() {
-  const [channels, setChannels] = useSyncedAppData("chatChannels", initialChannels);
+  const [channels, setChannels] = useSyncedAppData("chatChannels", []);
   const [activeChannelId, setActiveChannelId] = useState(channels[0]?.id || "1");
   const [postText, setPostText] = useState("");
-  const [posts, setPosts] = useSyncedAppData("chatPosts", initialPosts);
+  const [posts, setPosts] = useSyncedAppData("chatPosts", []);
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [projectBoardData] = useProjectBoardData();
 
@@ -55,7 +55,7 @@ export function Chat() {
   const [selectedProject, setSelectedProject] = useState("");
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
 
-  const activeChannel = channels.find((c: any) => c.id === activeChannelId) || channels[0];
+  const activeChannel = channels.find((c: any) => c.id === activeChannelId) || channels[0] || { id: "empty", name: "暂无协作群组", type: "announcement", unread: 0, members: [] };
   const activePosts = posts.filter((p: any) => p.channelId === activeChannelId);
 
   const allProjects = useMemo(() => {

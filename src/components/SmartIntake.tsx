@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { AudioLines, CalendarDays, CheckCircle2, ClipboardList, FileUp, Image as ImageIcon, Loader2, Mic, Send, Sparkles, Type, X } from "lucide-react";
 import { apiClient } from "@/src/lib/apiClient";
 import { cn } from "@/src/lib/utils";
@@ -46,6 +46,38 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
   const [projectBoardData] = useProjectBoardData();
   const [personnelData] = useSyncedAppData<any[]>("personnelData", []);
   const [quickIntakeItems, setQuickIntakeItems] = useSyncedAppData<any[]>("quickIntakeItems", []);
+  const [workMemos, setWorkMemos] = useSyncedAppData<any[]>("workMemos", []);
+
+  useEffect(() => {
+    const legacyItems = Array.isArray(quickIntakeItems) ? quickIntakeItems : [];
+    if (legacyItems.length === 0) return;
+    const existingIds = new Set((Array.isArray(workMemos) ? workMemos : []).map((item: any) => item.id));
+    const migrated = legacyItems.filter((item: any) => !existingIds.has(item.id)).map((item: any) => ({
+      id: item.id,
+      title: item.title || "未命名工作安排",
+      detail: item.summary || "",
+      projectId: item.projectId || "",
+      projectName: item.projectName || "",
+      assignee: item.assignee || "待指派",
+      creator: item.createdBy || "系统用户",
+      dueDate: item.deadline || today(),
+      priority: "normal",
+      status: item.status === "confirmed" ? "confirmed" : "pending",
+      feedback: "",
+      source: "quick-intake",
+      sourceType: item.sourceType,
+      attachmentUrl: item.attachmentUrl || "",
+      createdAt: item.createdAt || new Date().toISOString(),
+    }));
+    if (migrated.length > 0) void setWorkMemos([...(Array.isArray(workMemos) ? workMemos : []), ...migrated]);
+    void setQuickIntakeItems([]);
+  }, [quickIntakeItems, workMemos, setQuickIntakeItems, setWorkMemos]);
+
+  useEffect(() => {
+    const open = () => setIsOpen(true);
+    window.addEventListener("open-smart-intake", open);
+    return () => window.removeEventListener("open-smart-intake", open);
+  }, []);
 
   const allProjects = useMemo(() => {
     return Array.isArray(projectBoardData) ? projectBoardData.flatMap((col: any) => col.projects || []) : [];
@@ -133,8 +165,8 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
   };
 
   const confirmTask = async () => {
-    if (!analysis?.title.trim() || !analysis.projectName) {
-      setError("请填写待办标题并选择所属项目。");
+    if (!analysis?.title.trim()) {
+      setError("请填写待办标题。");
       return;
     }
 
@@ -143,40 +175,33 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
     const item = {
       id: `qi-${Date.now()}`,
       title: analysis.title.trim(),
+      detail: analysis.summary || attachment?.name || rawText,
       projectId: analysis.projectId,
       projectName: analysis.projectName,
       assignee: analysis.assignee || "待指派",
-      deadline: analysis.deadline || today(),
+      creator: "快速创建",
+      dueDate: analysis.deadline || today(),
+      priority: "normal",
       status: "pending",
+      feedback: "",
+      source: "quick-intake",
       sourceType: inputType,
       summary: analysis.summary || attachment?.name || rawText,
       attachmentUrl: attachment?.url || "",
       createdAt: new Date().toISOString(),
-      createdBy: "项目经理",
-      auditTrail: [
-        { action: "created", actor: "项目经理", at: new Date().toISOString(), note: "快速待办采集" }
-      ],
     };
-    await setQuickIntakeItems([item, ...(Array.isArray(quickIntakeItems) ? quickIntakeItems : [])]);
+    await setWorkMemos([item, ...(Array.isArray(workMemos) ? workMemos : [])]);
 
     setIsSaving(false);
-    window.dispatchEvent(new CustomEvent("show-toast", { detail: "快速待办已进入待确认池" }));
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "快速创建已加入工作备忘" }));
     close();
-    setActiveTab("dashboard");
+    setActiveTab("work-memo");
   };
 
   const selectedProjectValue = analysis?.projectId || analysis?.projectName || "";
 
   return (
     <>
-      <button
-        onClick={() => setIsOpen(true)}
-        className="fixed right-4 bottom-28 md:bottom-6 md:right-6 z-40 h-12 md:h-14 px-4 md:px-5 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 hover:bg-indigo-700 transition-colors flex items-center gap-2 font-semibold"
-      >
-        <ClipboardList className="w-5 h-5" />
-        <span className="hidden sm:inline">快速待办</span>
-      </button>
-
       {isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl max-h-[92vh] flex flex-col overflow-hidden">
@@ -184,9 +209,9 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
               <div>
                 <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-indigo-600" />
-                  快速待办采集
+                  快速创建工作备忘
                 </h3>
-                <p className="text-sm text-slate-500 mt-1">先采集来源，进入待确认池后再写入日程。</p>
+                <p className="text-sm text-slate-500 mt-1">从文字、截图或语音快速生成工作备忘。</p>
               </div>
               <button onClick={close} className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                 <X className="w-5 h-5" />
@@ -339,11 +364,11 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
                     </button>
                     <button
                       onClick={confirmTask}
-                      disabled={isSaving || !analysis.title.trim() || !analysis.projectName}
+                      disabled={isSaving || !analysis.title.trim()}
                       className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
-                      加入待确认池
+                      加入工作备忘
                     </button>
                   </div>
                 </div>

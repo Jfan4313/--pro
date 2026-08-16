@@ -1,6 +1,6 @@
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useAuth } from "@/src/lib/auth";
-import { emptyBoardData, initialBoardData } from "@/src/data/initialBoardData";
+import { initialBoardData } from "@/src/data/initialBoardData";
 
 export function useProjectBoardData() {
   const { user } = useAuth();
@@ -8,7 +8,8 @@ export function useProjectBoardData() {
   const dataKey = isDemoAccount
     ? "projectBoardData"
     : `projectBoardData:${user?.id || "anonymous"}`;
-  const seed = isDemoAccount ? initialBoardData : emptyBoardData;
+  // A new workspace must remain empty; do not promote the stage layout as demo project data.
+  const seed: any[] = [];
   const syncedData = useSyncedAppData<any[]>(dataKey, seed);
 
   return [...syncedData, seed] as const;

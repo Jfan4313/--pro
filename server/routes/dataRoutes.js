@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { saveEntity } from "../services/entityStore.js";
 
 export function registerDataRoutes(app, context) {
-  const { db, parseJson, toEntity, insertSyncEvent, getServerVersion, emitEvent, nowIso, clientId, userId } = context;
+  const { db, parseJson, toEntity, insertSyncEvent, getServerVersion, emitEvent, nowIso, clientId, userId, wecomNotifier } = context;
   const persistEntity = (options) => saveEntity({ ...context, ...options });
 
   app.get("/api/events", (req, res) => {
@@ -24,7 +24,7 @@ export function registerDataRoutes(app, context) {
 
   app.put("/api/app-data/:key", (req, res) => {
     const timestamp = nowIso();
-    const existing = db.prepare("SELECT version FROM app_data WHERE key = ?").get(req.params.key);
+    const existing = db.prepare("SELECT version, value FROM app_data WHERE key = ?").get(req.params.key);
     const version = (existing?.version || 0) + 1;
     db.prepare(`
       INSERT INTO app_data (key, value, createdAt, updatedAt, version, clientId, updatedBy)
@@ -45,6 +45,9 @@ export function registerDataRoutes(app, context) {
       updatedBy: userId(req),
     });
     emitEvent({ type: "app_data_changed", key: req.params.key, value: req.body.value, version, serverVersion });
+    if (req.params.key === "workMemos") {
+      wecomNotifier?.notifyMemoChange(parseJson(existing?.value, []), req.body.value);
+    }
     res.json({ key: req.params.key, value: req.body.value, updatedAt: timestamp, version });
   });
 

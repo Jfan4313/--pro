@@ -28,13 +28,10 @@ const statusConfig = {
 };
 
 export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { defaultTab?: "orders" | "reconciliation", hideHeader?: boolean }) {
-  const [orders, setOrders] = useSyncedAppData("supplyOrders", initialSupplyData);
-  const [suppliers, setSuppliers] = useSyncedAppData("suppliers", initialSupplierData);
+  const [orders, setOrders] = useSyncedAppData("supplyOrders", []);
+  const [suppliers, setSuppliers] = useSyncedAppData("suppliers", []);
   const [projectBoardData] = useProjectBoardData();
-  const [bomData] = useSyncedAppData("bomData", [
-    { id: "BOM-001", name: "单晶硅光伏组件", spec: "550Wp", plannedQty: 2000, procuredQty: 1200, unit: "块", project: "A区商业综合体" },
-    { id: "BOM-002", name: "热镀锌钢支架", spec: "C型钢 41x41x2.0", plannedQty: 1000, procuredQty: 500, unit: "米", project: "A区商业综合体" },
-  ]);
+  const [bomData] = useSyncedAppData("bomData", []);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<"orders" | "reconciliation">(defaultTab);
