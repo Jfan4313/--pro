@@ -48,7 +48,9 @@ done
   chmod 755 "$stage_dir" "$release_dir" "$stage_dir/npm-home"
   chown -R www-data:www-data "$stage_dir/npm-home"
   chown -R www-data:www-data "$release_dir"
-  runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
+  if [[ ! -d node_modules ]]; then
+    runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
+  fi
 chown -R root:root "$release_dir"
 
 if [[ -e "$backup_dir" || -e "$failed_dir" ]]; then

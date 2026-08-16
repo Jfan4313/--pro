@@ -39,7 +39,7 @@ jobs:
       - name: Package release
         run: |
           tar -czf zhijian-pro-release.tgz \
-            dist server shared src public deploy \
+            dist server shared src public deploy node_modules \
             package.json package-lock.json
           sha256sum zhijian-pro-release.tgz > zhijian-pro-release.sha256
 
