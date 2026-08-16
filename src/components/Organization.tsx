@@ -65,6 +65,7 @@ export function Organization() {
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
   const [orgDialog, setOrgDialog] = useState<OrgDialogState | null>(null);
+  const [selectedMember, setSelectedMember] = useState<any | null>(null);
 
   const showToast = (detail: string) => window.dispatchEvent(new CustomEvent('show-toast', { detail }));
 
@@ -373,7 +374,7 @@ export function Organization() {
                       )}
                     </div>
                   </div>
-                  <button className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all shrink-0">
+                  <button onClick={() => setSelectedMember(person)} title="查看成员详情" className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all shrink-0">
                     <MoreVertical className="w-4 h-4" />
                   </button>
                 </div>
@@ -433,6 +434,20 @@ export function Organization() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedMember && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setSelectedMember(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <div><p className="text-xs font-bold text-indigo-600">成员详情</p><h3 className="mt-1 text-lg font-bold text-slate-900">{selectedMember.name}</h3></div>
+              <button onClick={() => setSelectedMember(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 p-6 text-sm">
+              {[['工号', selectedMember.id], ['职务', selectedMember.role], ['所属组织', selectedMember.team], ['状态', selectedMember.status === 'on-site' ? '在场' : '离场'], ['手机号', selectedMember.phone || '未填写'], ['备注', selectedMember.note || '暂无']].map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-400">{label}</p><p className="mt-1 break-words font-medium text-slate-800">{value}</p></div>)}
             </div>
           </div>
         </div>

@@ -201,7 +201,7 @@ export function Chat() {
               <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">内部公开</span>
             </div>
             <div className="flex items-center gap-4 text-slate-400">
-              <button onClick={() => handleAction('群组设置')} className="hover:text-indigo-600 transition-colors"><MoreVertical className="w-5 h-5" /></button>
+              <button onClick={() => setIsAddMemberModalOpen(true)} title="管理群成员" className="hover:text-indigo-600 transition-colors"><MoreVertical className="w-5 h-5" /></button>
             </div>
           </div>
 

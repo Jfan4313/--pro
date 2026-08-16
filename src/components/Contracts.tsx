@@ -18,6 +18,8 @@ export function Contracts() {
   const [projectBoardData] = useProjectBoardData();
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [menuContractId, setMenuContractId] = useState<string | null>(null);
+  const [previewContract, setPreviewContract] = useState<any | null>(null);
   const projects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
 
   const filteredContracts = useMemo(() => {
@@ -72,6 +74,13 @@ export function Contracts() {
     } else {
       handleAction('下载合同');
     }
+  };
+
+  const handleDelete = (contract: any) => {
+    if (!window.confirm(`确定删除合同“${contract.name}”吗？删除后无法恢复。`)) return;
+    setContracts((current: any[]) => current.filter((item) => item.id !== contract.id));
+    setMenuContractId(null);
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '合同已删除' }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -214,15 +223,22 @@ export function Contracts() {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => handleAction('预览合同')} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded transition-colors">
+                    <button onClick={() => setPreviewContract(contract)} title="查看合同" className="p-1.5 text-slate-400 hover:text-indigo-600 rounded transition-colors">
                       <Eye className="w-4 h-4" />
                     </button>
                     <button onClick={() => handleDownload(contract)} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded transition-colors">
                       <Download className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleAction('更多操作')} className="p-1.5 text-slate-400 hover:text-slate-600 rounded transition-colors">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </button>
+                    <div className="relative">
+                      <button onClick={() => setMenuContractId((current) => current === contract.id ? null : contract.id)} title="更多操作" className="p-1.5 text-slate-400 hover:text-slate-600 rounded transition-colors">
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+                      {menuContractId === contract.id && <div className="absolute right-0 top-8 z-20 w-32 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-xl">
+                        <button onClick={() => { setPreviewContract(contract); setMenuContractId(null); }} className="block w-full px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">查看详情</button>
+                        <button onClick={() => { handleDownload(contract); setMenuContractId(null); }} className="block w-full px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">下载合同</button>
+                        <button onClick={() => handleDelete(contract)} className="block w-full px-3 py-2 text-xs text-rose-600 hover:bg-rose-50">删除合同</button>
+                      </div>}
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -230,6 +246,14 @@ export function Contracts() {
           </tbody>
         </table>
       </div>
+
+      {previewContract && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setPreviewContract(null)}>
+        <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+          <div className="flex items-center justify-between border-b border-slate-100 p-5"><div><p className="text-xs font-bold text-indigo-600">合同详情</p><h3 className="mt-1 text-lg font-bold text-slate-900">{previewContract.name}</h3></div><button onClick={() => setPreviewContract(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
+          <div className="grid grid-cols-2 gap-3 p-5 text-sm"><Detail label="合同编号" value={previewContract.id} /><Detail label="类型" value={previewContract.type} /><Detail label="甲方" value={previewContract.partyA} /><Detail label="乙方" value={previewContract.partyB} /><Detail label="金额" value={previewContract.amount} /><Detail label="签订日期" value={previewContract.date} /><Detail label="状态" value={previewContract.status === 'active' ? '执行中' : previewContract.status === 'pending' ? '待签批' : previewContract.status === 'draft' ? '草稿/模板' : '已归档'} /></div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 p-5"><button onClick={() => handleDownload(previewContract)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">下载合同</button></div>
+        </div>
+      </div>}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -317,4 +341,8 @@ export function Contracts() {
       )}
     </div>
   );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-400">{label}</p><p className="mt-1 break-words font-medium text-slate-800">{value || "未填写"}</p></div>;
 }
