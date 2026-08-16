@@ -51,6 +51,7 @@ done
   if [[ ! -d node_modules ]]; then
     runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
   fi
+  runuser -u www-data -- env HOME="$stage_dir/npm-home" npm rebuild better-sqlite3 --build-from-source --no-audit --no-fund
 chown -R root:root "$release_dir"
 
 if [[ -e "$backup_dir" || -e "$failed_dir" ]]; then
