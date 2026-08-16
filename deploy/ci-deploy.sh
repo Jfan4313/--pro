@@ -43,10 +43,11 @@ for required in dist/index.html server/index.js package.json package-lock.json; 
   test -f "$release_dir/$required"
 done
 
-cd "$release_dir"
-mkdir -p "$stage_dir/npm-home"
-chown -R www-data:www-data "$stage_dir/npm-home"
-chown -R www-data:www-data "$release_dir"
+  cd "$release_dir"
+  mkdir -p "$stage_dir/npm-home"
+  chmod 755 "$stage_dir" "$release_dir" "$stage_dir/npm-home"
+  chown -R www-data:www-data "$stage_dir/npm-home"
+  chown -R www-data:www-data "$release_dir"
   runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
 chown -R root:root "$release_dir"
 
