@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LayoutDashboard, KanbanSquare, CalendarDays, Users, Package, Truck, Settings, Building2, MessageSquare, FileText, LogOut, DollarSign, Plus, Network, Handshake, FolderOpen, Grid2X2, X, Camera, UserCog, FileCheck2, ClipboardList } from "lucide-react";
+import { LayoutDashboard, KanbanSquare, CalendarDays, Users, Package, Truck, Settings, Building2, MessageSquare, FileText, LogOut, DollarSign, Plus, Network, Handshake, FolderOpen, Grid2X2, X, Camera, UserCog, FileCheck2, ClipboardList, History } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useAuth } from "@/src/lib/auth";
 
@@ -56,6 +56,7 @@ const navGroups = [
     items: [
       { id: "accounts", label: "帐号与权限", icon: UserCog, permission: "accounts" },
       { id: "settings", label: "系统设置", icon: Settings, permission: "settings" },
+      { id: "version-management", label: "版本管理", icon: History, permission: "settings" },
     ],
   },
 ];

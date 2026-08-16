@@ -30,6 +30,7 @@ import { MobileCollaboration } from "./components/MobileCollaboration";
 import { MobileWorkspace } from "./components/MobileWorkspace";
 import { AccountManagement } from "./components/AccountManagement";
 import { WorkMemo } from "./components/WorkMemo";
+import { VersionManagement } from "./components/VersionManagement";
 import { LoginScreen, PasswordChangeScreen } from "./components/LoginScreen";
 import { useAuth } from "./lib/auth";
 
@@ -38,6 +39,7 @@ const tabPermissions: Record<string, string> = {
   files: "files", contracts: "contracts", schedule: "schedule", acceptance: "acceptance", materials: "materials", supply: "supply", cost: "cost",
   chat: "collaboration", personnel: "personnel", partners: "partners", organization: "organization", settings: "settings", accounts: "accounts",
   "work-memo": "schedule",
+  "version-management": "settings",
 };
 
 export default function App() {
@@ -125,6 +127,7 @@ export default function App() {
           {activeTab === "contracts" && <><div className="md:hidden min-h-full"><MobileWorkspace module="contracts" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Contracts /></div></>}
           {activeTab === "settings" && <><div className="md:hidden min-h-full"><MobileWorkspace module="settings" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Settings /></div></>}
           {activeTab === "accounts" && <AccountManagement />}
+          {activeTab === "version-management" && <VersionManagement />}
         </main>
 
         {isProcurementModalOpen && (
