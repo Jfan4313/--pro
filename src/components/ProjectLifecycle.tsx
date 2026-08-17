@@ -380,7 +380,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
           </h2>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">项目阶段筛选</div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">项目列表筛选（当前工作阶段）</div>
           <div className="flex flex-wrap gap-1.5 mb-3 px-1">
             <button onClick={() => setStageFilter("all")} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === "all" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>全部项目</button>
             {STAGES.slice(0, 4).map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === stage.id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
@@ -437,7 +437,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
             <div className="flex-1 flex flex-col md:flex-row md:overflow-hidden">
               {/* Stages Timeline */}
               <div className="w-full md:w-64 bg-slate-50/80 border-b md:border-b-0 md:border-r border-slate-200 p-3 md:p-4 overflow-x-auto md:overflow-y-auto shrink-0 flex flex-row md:flex-col gap-2 md:gap-1 custom-scrollbar">
-                <div className="hidden md:block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 pt-2">归档七阶段 (EPC流程)</div>
+                <div className="hidden md:block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 pt-2">项目流程进度（归档清单）</div>
                 {STAGES.map((stage, idx) => {
                   const isActive = activeStage === stage.id;
                   const isCompleted = STAGES.findIndex(s => s.id === activeStage) > idx;

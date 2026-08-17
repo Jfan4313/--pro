@@ -75,6 +75,7 @@ export function CostDashboard() {
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [supplyOrders] = useSyncedAppData<any[]>("supplyOrders", []);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
+  const [summaryProjectId, setSummaryProjectId] = useState<string>("all");
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
@@ -104,7 +105,7 @@ export function CostDashboard() {
       });
       return changed ? next : current;
     });
-  }, [supplyOrders, setCostData]);
+  }, [supplyOrders]);
 
   useEffect(() => {
     const handleFocusRisk = (event: Event) => {
@@ -448,8 +449,12 @@ export function CostDashboard() {
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100">
-          <h3 className="text-lg font-bold text-slate-900">项目汇总明细</h3>
+        <div className="p-6 border-b border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div><h3 className="text-lg font-bold text-slate-900">项目汇总明细</h3><p className="mt-1 text-xs text-slate-500">可单独选择项目查看预算、已发生成本和预计成本</p></div>
+          <select value={summaryProjectId} onChange={(event) => setSummaryProjectId(event.target.value)} className="w-full sm:w-64 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
+            <option value="all">全部项目</option>
+            {globalStats.summaryData.map((project: any) => <option key={project.id} value={project.id}>{project.project}</option>)}
+          </select>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -465,7 +470,7 @@ export function CostDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {globalStats.summaryData.map((project: any) => {
+              {globalStats.summaryData.filter((project: any) => summaryProjectId === "all" || project.id === summaryProjectId).map((project: any) => {
                 const totalEstimated = project.actual + project.expected;
                 const utilization = project.budget > 0 ? (totalEstimated / project.budget) * 100 : 0;
                 const isOverrun = utilization > 100;

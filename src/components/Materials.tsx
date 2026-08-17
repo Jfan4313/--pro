@@ -670,20 +670,6 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
               <FileSpreadsheet className="w-4 h-4 mr-2" />
               材料台账 (BOM)
             </button>
-            <button 
-              onClick={() => setActiveView('pricing')} 
-              className={cn("px-4 py-2 rounded-lg text-sm font-medium flex items-center transition-all duration-200", activeView === 'pricing' ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50")}
-            >
-              <TrendingUp className="w-4 h-4 mr-2" />
-              价格追踪
-            </button>
-            <button 
-              onClick={() => setActiveView('supply')} 
-              className={cn("px-4 py-2 rounded-lg text-sm font-medium flex items-center transition-all duration-200", activeView === 'supply' ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50")}
-            >
-              <Truck className="w-4 h-4 mr-2" />
-              供应链管理
-            </button>
           </div>
 
           {activeView !== 'pricing' && activeView !== 'supply' && (
@@ -746,8 +732,7 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => {
-                  setSupplyTabContext('reconciliation');
-                  setActiveView('supply');
+                  if (setActiveTab) setActiveTab('supply', 'reconciliation');
                 }} 
                 className="px-4 py-2 bg-white border border-slate-200 text-indigo-600 rounded-xl text-sm font-medium hover:bg-indigo-50 transition-colors shadow-sm flex items-center"
               >

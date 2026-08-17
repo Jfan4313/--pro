@@ -28,6 +28,9 @@ export interface SurveyRecord {
   photos: SurveyPhoto[];
   status: "completed" | "pending";
   createdAt: string;
+  /** 项目综合档案中的原始电房/建筑子档案，保留每个对象的独立信息。 */
+  archiveType?: "subject" | "project";
+  childRecords?: SurveyRecord[];
 }
 
 export interface DraftPhoto {

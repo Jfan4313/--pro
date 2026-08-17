@@ -49,7 +49,7 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [isProcurementModalOpen, setIsProcurementModalOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
-  const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation") || "orders");
+  const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices") || "orders");
   const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; returnTab: string }>({ projectId: null, returnTab: "dashboard" });
 
   const navigateToTab = (tab: string) => {
@@ -149,7 +149,7 @@ export default function App() {
           {activeTab === "partners" && <><div className="md:hidden min-h-full"><MobileWorkspace module="partners" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ExternalPartners /></div></>}
           {activeTab === "files" && <><div className="md:hidden min-h-full"><MobileWorkspace module="files" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectFiles setActiveTab={setActiveTab} /></div></>}
           {activeTab === "materials" && <><div className="md:hidden min-h-full"><MobileWorkspace module="materials" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Materials setActiveTab={handleMaterialsNavigate} /></div></>}
-          {activeTab === "supply" && <><div className="md:hidden min-h-full"><MobileWorkspace module="supply" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><SupplyChain defaultTab={supplyChainTab} /></div></>}
+          {activeTab === "supply" && <><div className="md:hidden min-h-full"><MobileWorkspace module="supply" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><SupplyChain defaultTab={supplyChainTab} onOpenProcurement={() => setIsProcurementModalOpen(true)} /></div></>}
           {activeTab === "chat" && <><div className="md:hidden min-h-full"><MobileCollaboration /></div><div className="hidden md:block h-full"><Chat /></div></>}
           {activeTab === "contracts" && <><div className="md:hidden min-h-full"><MobileWorkspace module="contracts" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Contracts /></div></>}
           {activeTab === "settings" && <><div className="md:hidden min-h-full"><MobileWorkspace module="settings" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Settings /></div></>}
@@ -166,7 +166,7 @@ export default function App() {
 
         {/* Global Toast */}
         {toastMsg && (
-          <div className="app-toast absolute bottom-6 right-6 bg-slate-800 text-white px-6 py-3 rounded-xl shadow-lg shadow-slate-800/20 animate-in slide-in-from-bottom-5 fade-in duration-300 z-[70] flex items-center gap-2">
+          <div className="app-toast fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl shadow-slate-800/30 animate-in zoom-in-95 fade-in duration-200 z-[120] flex items-center justify-center gap-2 max-w-[min(90vw,32rem)] text-center">
             <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
             {toastMsg}
           </div>

@@ -36,7 +36,7 @@ const navGroups = [
     items: [
       { id: "contracts", label: "合同管理", icon: FileText, permission: "contracts" },
       { id: "materials", label: "材料库存管理", icon: Package, permission: "materials" },
-      { id: "supply", label: "供应链订单与价格", icon: Truck, permission: "supply" },
+      { id: "supply", label: "供应链管理", icon: Truck, permission: "supply" },
       { id: "cost", label: "成本与预算", icon: DollarSign, permission: "cost" },
     ],
   },
@@ -119,7 +119,6 @@ export function Sidebar({ activeTab, setActiveTab, onOpenProcurement }: SidebarP
                 const isActive = activeTab === item.id;
                 return <button key={item.id} onClick={() => setActiveTab(item.id)} className={cn("flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all", isActive ? "bg-slate-900 text-white shadow-md shadow-slate-900/20" : "text-slate-600 hover:bg-white hover:text-slate-900")}><Icon className="h-4.5 w-4.5" />{item.label}</button>;
               })}
-              {group.id === "supply" && can("materials") && <button onClick={onOpenProcurement} className="mt-1 flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-50"><Plus className="h-4 w-4" />采购材料录入</button>}
             </div>}
           </section>;
         })}
@@ -201,7 +200,7 @@ export function Sidebar({ activeTab, setActiveTab, onOpenProcurement }: SidebarP
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return <button key={item.id} onClick={() => navigate(item.id)} className="flex min-w-0 flex-col items-center gap-2 text-center"><span className={cn("flex h-12 w-12 items-center justify-center rounded-2xl border transition-colors", isActive ? "border-slate-900 bg-slate-900 text-white" : "border-slate-100 bg-slate-50 text-slate-600")}><Icon className="h-5 w-5" /></span><span className={cn("w-full truncate text-[11px]", isActive ? "font-semibold text-slate-900" : "text-slate-600")}>{item.label}</span></button>;
-            })}{group.id === "supply" && can("materials") && <button onClick={() => { onOpenProcurement?.(); setIsWorkbenchOpen(false); }} className="flex min-w-0 flex-col items-center gap-2 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-indigo-100 bg-indigo-50 text-indigo-600"><Plus className="h-5 w-5" /></span><span className="w-full truncate text-[11px] font-semibold text-indigo-600">采购录入</span></button>}</div></section>)}
+            })}</div></section>)}
           </div>
         </section>
       </div>

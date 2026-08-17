@@ -4,6 +4,7 @@ import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { getProjectNumber } from "@/src/lib/management";
+import { SupplyPriceTracking } from "./SupplyPriceTracking";
 
 const initialSupplyData = [
   { id: "PO-2026-001", projectId: "p5", supplier: "隆基绿能科技股份有限公司", items: "单晶硅光伏组件 550Wp", amount: "¥1,250,000", orderDate: "2026-02-15", expectedDate: "2026-03-20", status: "in-transit" },
@@ -28,7 +29,7 @@ const statusConfig = {
   "delayed": { label: "逾期风险", color: "text-rose-700 bg-rose-100" },
 };
 
-export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { defaultTab?: "orders" | "reconciliation", hideHeader?: boolean }) {
+export function SupplyChain({ defaultTab = "orders", hideHeader = false, onOpenProcurement }: { defaultTab?: "orders" | "reconciliation" | "prices", hideHeader?: boolean; onOpenProcurement?: () => void }) {
   const [orders, setOrders] = useSyncedAppData("supplyOrders", []);
   const [suppliers, setSuppliers] = useSyncedAppData("suppliers", []);
   const [projectBoardData] = useProjectBoardData();
@@ -37,7 +38,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState<"orders" | "reconciliation">(defaultTab);
+  const [activeTab, setActiveTab] = useState<"orders" | "reconciliation" | "prices">(defaultTab);
   const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -179,6 +180,12 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
               >
                 清单核对
               </button>
+              <button
+                onClick={() => setActiveTab("prices")}
+                className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors", activeTab === "prices" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}
+              >
+                价格追踪
+              </button>
             </div>
             <button 
               onClick={() => setIsSupplierModalOpen(true)}
@@ -194,6 +201,13 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
               <Plus className="w-4 h-4 mr-2" />
               新建采购单
             </button>
+            {onOpenProcurement && <button
+              onClick={onOpenProcurement}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              采购材料录入
+            </button>}
           </div>
         </div>
 
@@ -317,6 +331,8 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
             </table>
           </div>
         </>
+      ) : activeTab === "prices" ? (
+        <SupplyPriceTracking />
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 bg-slate-50/50">

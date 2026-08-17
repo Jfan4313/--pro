@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload, Edit2, Trash2 } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload, Edit2, Trash2, Save } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -83,22 +83,30 @@ const projectTemplates = [
   }
 ];
 
+const schedulePhasePattern = /^(?:[一二三四五六七八九十]+、)?(?:前期准备阶段|项目实施阶段|验收并网阶段)$/;
+const schedulePhaseLabels: Record<string, string> = {
+  "一、前期准备阶段": "前期准备",
+  "二、项目实施阶段": "项目实施",
+  "三、验收并网阶段": "验收并网",
+};
+
 export function Schedule() {
   const [data, setData] = useSyncedAppData("scheduleData", []);
   const [boardData] = useProjectBoardData();
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   const [projectMeta, setProjectMeta] = useSyncedAppData<Record<string, any>>("scheduleProjectMeta", {});
+  const [savedTemplates, setSavedTemplates] = useSyncedAppData<any[]>("scheduleTemplates", projectTemplates);
   
   // 动态获取项目列表，合并 scheduleData 和 boardData 中的项目名称，以便新建项目能够显示
   const projects = React.useMemo(() => {
     const list = new Set<string>();
     if (Array.isArray(data)) {
-        data.forEach((p: any) => p.name && list.add(p.name));
+        data.forEach((p: any) => p.name && !schedulePhasePattern.test(p.name) && list.add(p.name));
     }
     if (Array.isArray(boardData)) {
         boardData.forEach((col: any) => {
             if (Array.isArray(col.projects)) {
-                col.projects.forEach((p: any) => p.name && list.add(p.name));
+                col.projects.forEach((p: any) => p.name && !schedulePhasePattern.test(p.name) && list.add(p.name));
             }
         });
     }
@@ -116,6 +124,39 @@ export function Schedule() {
   const [newTaskProject, setNewTaskProject] = useState<string>("");
   const [taskFilter, setTaskFilter] = useState<"project" | "mine" | "overdue" | "unassigned" | "external" | "externalOverdue" | "quick">("project");
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+
+  // 旧版本把三个施工阶段存成了三个“项目”。迁移到真实项目下的阶段任务组，避免阶段出现在项目筛选中。
+  useEffect(() => {
+    const phaseProjects = data.filter((item: any) => schedulePhasePattern.test(item.name || ""));
+    if (phaseProjects.length < 2) return;
+    const realProjects = boardData.flatMap((column: any) => Array.isArray(column.projects) ? column.projects : [])
+      .filter((project: any) => project.name && !schedulePhasePattern.test(project.name));
+    const target = realProjects[0];
+    if (!target) return;
+
+    void setData((current: any[]) => {
+      const rows = current.filter((item: any) => schedulePhasePattern.test(item.name || ""));
+      if (rows.length < 2) return current;
+      const existing = current.find((item: any) => item.id === target.id || item.name === target.name);
+      const mergedTasks = rows.flatMap((row: any) => (row.tasks || []).map((task: any) => ({
+        ...task,
+        phase: task.phase || schedulePhaseLabels[row.name] || "项目阶段",
+      })));
+      const allTasks = [...(existing?.tasks || []), ...mergedTasks];
+      const dates = allTasks.map((task: any) => task.deadline).filter(Boolean).sort();
+      const merged = {
+        ...(existing || {}),
+        id: existing?.id || target.id,
+        name: existing?.name || target.name,
+        startDate: existing?.startDate || rows.map((row: any) => row.startDate).filter(Boolean).sort()[0],
+        endDate: dates.at(-1) || existing?.endDate || rows.map((row: any) => row.endDate).filter(Boolean).sort().at(-1),
+        progress: existing?.progress || 0,
+        status: existing?.status || "pending",
+        tasks: allTasks,
+      };
+      return [merged, ...current.filter((item: any) => !schedulePhasePattern.test(item.name || "") && item.id !== merged.id)];
+    });
+  }, [boardData, data, setData]);
 
   useEffect(() => {
     const handleFocusRisk = (event: Event) => {
@@ -162,7 +203,8 @@ export function Schedule() {
   // 当 data 更新时，如果 newTaskProject 为空且有项目，则默认选中第一个
   React.useEffect(() => {
     if ((!newTaskProject || !data.find((p: any) => p.name === newTaskProject)) && data.length > 0) {
-      setNewTaskProject(data[0].name);
+      const firstProject = data.find((item: any) => !schedulePhasePattern.test(item.name || ""));
+      if (firstProject) setNewTaskProject(firstProject.name);
     }
   }, [data, newTaskProject]);
 
@@ -317,8 +359,8 @@ export function Schedule() {
   };
 
   const filteredData = selectedProject === "全部项目" 
-    ? data 
-    : data.filter(p => p.name === selectedProject);
+    ? data.filter((p: any) => !schedulePhasePattern.test(p.name || ""))
+    : data.filter((p: any) => p.name === selectedProject && !schedulePhasePattern.test(p.name || ""));
 
   const allFlatTasks = React.useMemo(() => flattenTasks(data), [data]);
   const todayStr = formatLocalDate();
@@ -402,10 +444,12 @@ export function Schedule() {
     const startDateRaw = (form.elements.namedItem('startDate') as HTMLInputElement).value;
     
     if (creationMode === "template") {
-      const template = projectTemplates.find(t => t.id === selectedTemplate);
+      const template = savedTemplates.find(t => t.id === selectedTemplate);
       if (!template) return;
       
       let currentDate = new Date(startDateRaw);
+      const generationId = Date.now();
+      const generatedIds = template.tasks.map((_: any, index: number) => `t_${generationId}_${index}`);
       const generatedTasks = template.tasks.map((t, index) => {
         const taskStart = new Date(currentDate);
         const taskEnd = new Date(currentDate);
@@ -419,14 +463,14 @@ export function Schedule() {
         currentDate.setDate(currentDate.getDate() + t.days);
         
         return {
-          id: `t_${Date.now()}_${index}`,
+          id: generatedIds[index],
           name: t.name,
           start: startStr,
           end: endStr,
           deadline: deadline,
           status: "pending",
           assignee: "待指派",
-          predecessorId: index > 0 ? `t_${Date.now()}_${index - 1}` : null
+          predecessorId: index > 0 ? generatedIds[index - 1] : null
         };
       });
       
@@ -545,6 +589,25 @@ export function Schedule() {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '新建排期计划成功' }));
   };
 
+  const saveCurrentAsTemplate = () => {
+    const source = data.find((project: any) => project.name === newTaskProject);
+    if (!source?.tasks?.length) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请先选择一个已有任务的项目' }));
+      return;
+    }
+    const name = window.prompt('请输入排期模板名称', `${source.name}排期模板`);
+    if (!name?.trim()) return;
+    const tasks = source.tasks.map((task: any, index: number) => {
+      const previous = source.tasks[index - 1];
+      const gap = previous?.deadline && task.deadline
+        ? Math.round((new Date(task.deadline).getTime() - new Date(previous.deadline).getTime()) / 86400000)
+        : 1;
+      return { name: task.name, days: Math.max(1, gap) };
+    });
+    void setSavedTemplates((current) => [{ id: `custom-${Date.now()}`, name: name.trim(), tasks }, ...current]);
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '排期模板已保存，可在“从模板生成”中复用' }));
+  };
+
   const handleDeadlineSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTask) return;
@@ -659,6 +722,10 @@ export function Schedule() {
             <Download className="w-4 h-4 mr-2" />
             导出
           </button>
+          <button onClick={saveCurrentAsTemplate} className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-50 transition-colors shadow-sm flex items-center" title="将当前项目的任务顺序保存为可复用模板">
+            <Save className="w-4 h-4 mr-2" />
+            保存为模板
+          </button>
           <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center">
             <Plus className="w-4 h-4 mr-2" />
             排期计划
@@ -673,7 +740,8 @@ export function Schedule() {
             const meta = projectMeta[project.id] || {};
             const targetEnd = meta.targetEnd || project.endDate;
             const variance = daysBetween(project.endDate, targetEnd);
-            return <article key={project.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-start justify-between gap-3"><div><h4 className="font-semibold text-slate-900">{project.name}</h4><p className="mt-1 text-xs text-slate-500">计划：{project.startDate || "未设置"} 至 {project.endDate || "未设置"}</p></div><button onClick={() => addProjectTarget(project)} className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-600 ring-1 ring-slate-200 hover:bg-indigo-50">新增/调整目标</button></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg bg-white p-2"><span className="text-slate-400">现场目标</span><p className="mt-1 font-semibold text-slate-700">{targetEnd || "未设置"}</p></div><div className="rounded-lg bg-white p-2"><span className="text-slate-400">计划偏差</span><p className={cn("mt-1 font-semibold", variance && variance > 0 ? "text-rose-600" : variance && variance < 0 ? "text-emerald-600" : "text-slate-700")}>{variance === null ? "待补充" : variance === 0 ? "无偏差" : `${variance > 0 ? "+" : ""}${variance} 天`}</p></div></div>{meta.varianceReason && <p className="mt-3 text-xs text-amber-700">偏差原因：{meta.varianceReason}</p>}</article>;
+            const phases = Array.from(new Set((project.tasks || []).map((task: any) => task.phase).filter(Boolean)));
+            return <article key={project.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-start justify-between gap-3"><div><h4 className="font-semibold text-slate-900">{project.name}</h4><p className="mt-1 text-xs text-slate-500">计划：{project.startDate || "未设置"} 至 {project.endDate || "未设置"}</p>{phases.length > 0 && <div className="mt-2 flex flex-wrap gap-1"><span className="text-[11px] text-slate-400">阶段组</span>{phases.map((phase: any) => <span key={phase} className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-600">{phase}</span>)}</div>}</div><button onClick={() => addProjectTarget(project)} className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-600 ring-1 ring-slate-200 hover:bg-indigo-50">新增/调整目标</button></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg bg-white p-2"><span className="text-slate-400">现场目标</span><p className="mt-1 font-semibold text-slate-700">{targetEnd || "未设置"}</p></div><div className="rounded-lg bg-white p-2"><span className="text-slate-400">计划偏差</span><p className={cn("mt-1 font-semibold", variance && variance > 0 ? "text-rose-600" : variance && variance < 0 ? "text-emerald-600" : "text-slate-700")}>{variance === null ? "待补充" : variance === 0 ? "无偏差" : `${variance > 0 ? "+" : ""}${variance} 天`}</p></div></div>{meta.varianceReason && <p className="mt-3 text-xs text-amber-700">偏差原因：{meta.varianceReason}</p>}</article>;
           })}
           {filteredData.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">暂无项目排期，请先创建项目或导入计划</div>}
         </div>
@@ -1002,7 +1070,7 @@ export function Schedule() {
                       onChange={(e) => setSelectedTemplate(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
                     >
-                      {projectTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      {savedTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
                   <div>
