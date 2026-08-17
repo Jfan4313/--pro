@@ -378,6 +378,26 @@ export function Schedule() {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "整份排期已移入回收站，30天内可恢复" }));
   };
 
+  const editWholeSchedule = () => {
+    const project = data.find((item: any) => item.name === selectedProject);
+    if (!project || !canManageSchedule) return;
+    const name = window.prompt("排期名称", project.name);
+    if (!name?.trim()) return;
+    const startDate = window.prompt("计划开始日期（YYYY-MM-DD）", project.startDate || "");
+    if (!startDate) return;
+    const endDate = window.prompt("计划结束日期（YYYY-MM-DD）", project.endDate || "");
+    if (!endDate) return;
+    void setData((current: any[]) => current.map((item: any) => item.id === project.id ? { ...item, name: name.trim(), startDate, endDate, updatedAt: new Date().toISOString() } : item));
+    setSelectedProject(name.trim());
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "整份排期已更新" }));
+  };
+
+  useEffect(() => {
+    const now = Date.now();
+    const expired = scheduleTrash.filter((item: any) => item.expiresAt && new Date(item.expiresAt).getTime() <= now);
+    if (expired.length) void setScheduleTrash((current: any[]) => current.filter((item: any) => !item.expiresAt || new Date(item.expiresAt).getTime() > now));
+  }, [scheduleTrash, setScheduleTrash]);
+
   const restoreSchedule = (schedule: any) => {
     if (!canManageSchedule) return;
     void setData((current: any[]) => [...current, { ...schedule, deletedAt: undefined, deletedBy: undefined, expiresAt: undefined }]);
@@ -717,7 +737,7 @@ export function Schedule() {
           >
             {projects.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          {canManageSchedule && selectedProject !== "全部项目" && <button type="button" onClick={deleteWholeSchedule} className="px-3 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-sm font-medium hover:bg-rose-50"><Trash2 className="mr-1 inline h-4 w-4" />删除整份排期</button>}
+          {canManageSchedule && selectedProject !== "全部项目" && <><button type="button" onClick={editWholeSchedule} className="px-3 py-2 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-50"><Edit2 className="mr-1 inline h-4 w-4" />编辑整份排期</button><button type="button" onClick={deleteWholeSchedule} className="px-3 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-sm font-medium hover:bg-rose-50"><Trash2 className="mr-1 inline h-4 w-4" />删除整份排期</button></>}
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button 
               onClick={() => setViewMode('gantt')} 

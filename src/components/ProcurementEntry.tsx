@@ -3,7 +3,7 @@ import { Plus, Save, X, Building2, Package, DollarSign, Calendar, Truck } from "
 import { useSyncedAppData } from "../hooks/useSyncedAppData";
 import { useProjectBoardData } from "../hooks/useProjectBoardData";
 
-export function ProcurementEntry({ onClose }: { onClose: () => void }) {
+export function ProcurementEntry({ onClose, inline = false }: { onClose: () => void; inline?: boolean }) {
   const [projectBoardData] = useProjectBoardData();
   const [supplyOrders, setSupplyOrders] = useSyncedAppData("supplyOrders", []);
   const [costData, setCostData] = useSyncedAppData("costDataV2", []);
@@ -52,6 +52,8 @@ export function ProcurementEntry({ onClose }: { onClose: () => void }) {
     // 2. Add to Cost Data (actualLedger)
     const amountInWan = form.totalAmount / 10000;
     const newCostRecord = {
+      id: `PO-COST-${newOrderId}`,
+      sourceOrderId: newOrderId,
       date: form.orderDate,
       type: "material",
       amount: amountInWan,
@@ -63,7 +65,9 @@ export function ProcurementEntry({ onClose }: { onClose: () => void }) {
     if (costExists) {
       setCostData(costData.map((p: any) => {
         if (p.id === form.projectId) {
-          return { ...p, actualLedger: [newCostRecord, ...(p.actualLedger || [])] };
+          const alreadyTracked = [...(p.actualLedger || []), ...(p.expectedLedger || [])].some((item: any) => item.sourceOrderId === newOrderId);
+          if (alreadyTracked) return p;
+          return { ...p, expectedLedger: [newCostRecord, ...(p.expectedLedger || [])] };
         }
         return p;
       }));
@@ -72,8 +76,8 @@ export function ProcurementEntry({ onClose }: { onClose: () => void }) {
         id: form.projectId,
         project: projectName,
         budget: { material: 0, labor: 0, management: 0, risk: 0 },
-        actualLedger: [newCostRecord],
-        expectedLedger: [],
+        actualLedger: [],
+        expectedLedger: [newCostRecord],
         collection: { totalExpected: 0, records: [] }
       }]);
     }
@@ -128,8 +132,8 @@ export function ProcurementEntry({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl flex flex-col max-h-[90vh]">
+    <div className={inline ? "w-full" : "fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"}>
+      <div className={inline ? "bg-white rounded-2xl w-full shadow-sm border border-slate-200 flex flex-col" : "bg-white rounded-2xl w-full max-w-2xl shadow-xl flex flex-col max-h-[90vh]"}>
         <div className="flex items-center justify-between p-6 border-b border-slate-100">
           <div>
             <h3 className="text-xl font-bold text-slate-900">录入采购单</h3>

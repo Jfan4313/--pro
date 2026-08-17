@@ -211,7 +211,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
           </div>
         </div>
 
-      {activeTab === "procurement" ? <ProcurementEntry onClose={() => setActiveTab("orders")} /> : activeTab === "orders" ? (
+      {activeTab === "procurement" ? <ProcurementEntry inline onClose={() => setActiveTab("orders")} /> : activeTab === "orders" ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center">
