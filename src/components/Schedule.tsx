@@ -5,6 +5,8 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenTasks, formatLocalDate } from "@/src/lib/management";
 import * as XLSX from "xlsx";
+import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { useAuth } from "@/src/lib/auth";
 
 const initialScheduleData: any[] = [
   {
@@ -91,11 +93,15 @@ const schedulePhaseLabels: Record<string, string> = {
 };
 
 export function Schedule() {
+  const { user, can } = useAuth();
   const [data, setData] = useSyncedAppData("scheduleData", []);
   const [boardData] = useProjectBoardData();
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   const [projectMeta, setProjectMeta] = useSyncedAppData<Record<string, any>>("scheduleProjectMeta", {});
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [savedTemplates, setSavedTemplates] = useSyncedAppData<any[]>("scheduleTemplates", projectTemplates);
+  const [scheduleTrash, setScheduleTrash] = useSyncedAppData<any[]>("scheduleTrash", []);
+  const canManageSchedule = Boolean(user?.role === "admin" || user?.role === "project_manager" || can("accounts"));
   
   // 动态获取项目列表，合并 scheduleData 和 boardData 中的项目名称，以便新建项目能够显示
   const projects = React.useMemo(() => {
@@ -112,6 +118,9 @@ export function Schedule() {
     }
     return ["全部项目", ...Array.from(list)];
   }, [data, boardData]);
+
+  const eligibleProjectIds = React.useMemo(() => new Set(boardData.flatMap((column: any) => (column.projects || []).filter((project: any) => getProjectCurrentStageInfo(project.id, lifecycleStates).index >= 6).map((project: any) => project.id))), [boardData, lifecycleStates]);
+  const allProjectsForSchedule = React.useMemo(() => boardData.flatMap((column: any) => column.projects || []), [boardData]);
   
   const [selectedProject, setSelectedProject] = useState("全部项目");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -358,9 +367,31 @@ export function Schedule() {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "任务已删除" }));
   };
 
+  const deleteWholeSchedule = () => {
+    const project = data.find((item: any) => item.name === selectedProject);
+    if (!project || !canManageSchedule || !window.confirm(`确定将“${project.name}”整份排期移入回收站吗？`)) return;
+    const now = new Date();
+    const deleted = { ...project, deletedAt: now.toISOString(), deletedBy: user?.name || "当前用户", expiresAt: new Date(now.getTime() + 30 * 86400000).toISOString() };
+    void setData((current: any[]) => current.filter((item: any) => item.id !== project.id));
+    void setScheduleTrash((current: any[]) => [deleted, ...current.filter((item: any) => item.id !== project.id)]);
+    setSelectedProject("全部项目");
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "整份排期已移入回收站，30天内可恢复" }));
+  };
+
+  const restoreSchedule = (schedule: any) => {
+    if (!canManageSchedule) return;
+    void setData((current: any[]) => [...current, { ...schedule, deletedAt: undefined, deletedBy: undefined, expiresAt: undefined }]);
+    void setScheduleTrash((current: any[]) => current.filter((item: any) => item.id !== schedule.id));
+  };
+
+  const permanentlyDeleteSchedule = (schedule: any) => {
+    if (!canManageSchedule || !window.confirm(`永久删除排期“${schedule.name}”？`)) return;
+    void setScheduleTrash((current: any[]) => current.filter((item: any) => item.id !== schedule.id));
+  };
+
   const filteredData = selectedProject === "全部项目" 
-    ? data.filter((p: any) => !schedulePhasePattern.test(p.name || ""))
-    : data.filter((p: any) => p.name === selectedProject && !schedulePhasePattern.test(p.name || ""));
+    ? data.filter((p: any) => !schedulePhasePattern.test(p.name || "") && (eligibleProjectIds.has(p.id) || !boardData.flatMap((column: any) => column.projects || []).some((project: any) => project.id === p.id)))
+    : data.filter((p: any) => p.name === selectedProject && !schedulePhasePattern.test(p.name || "") && (eligibleProjectIds.has(p.id) || !boardData.flatMap((column: any) => column.projects || []).some((project: any) => project.id === p.id)));
 
   const allFlatTasks = React.useMemo(() => flattenTasks(data), [data]);
   const todayStr = formatLocalDate();
@@ -686,6 +717,7 @@ export function Schedule() {
           >
             {projects.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
+          {canManageSchedule && selectedProject !== "全部项目" && <button type="button" onClick={deleteWholeSchedule} className="px-3 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-sm font-medium hover:bg-rose-50"><Trash2 className="mr-1 inline h-4 w-4" />删除整份排期</button>}
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button 
               onClick={() => setViewMode('gantt')} 
@@ -726,12 +758,17 @@ export function Schedule() {
             <Save className="w-4 h-4 mr-2" />
             保存为模板
           </button>
-          <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center">
+          <button onClick={() => {
+            const selected = allProjectsForSchedule.find((project: any) => project.name === selectedProject);
+            if (selected && !eligibleProjectIds.has(selected.id)) { window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目需进入“项目交底”阶段后才能创建施工日程" })); return; }
+            setIsModalOpen(true);
+          }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center">
             <Plus className="w-4 h-4 mr-2" />
             排期计划
           </button>
         </div>
       </div>
+      {canManageSchedule && scheduleTrash.length > 0 && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-center justify-between"><div><p className="text-sm font-bold text-amber-900">待清理排期 / 回收站</p><p className="mt-1 text-xs text-amber-700">早于项目交底阶段或已删除的排期不会进入正常列表，删除后保留30天。</p></div><span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-amber-700">{scheduleTrash.length} 份</span></div><div className="mt-3 space-y-2">{scheduleTrash.map((schedule: any) => <div key={schedule.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm"><span className="font-medium text-slate-700">{schedule.name}</span><span className="text-xs text-slate-400">到期 {schedule.expiresAt?.slice(0, 10) || "-"}</span><div className="flex gap-2"><button type="button" onClick={() => restoreSchedule(schedule)} className="rounded-lg px-2.5 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-50">恢复</button><button type="button" onClick={() => permanentlyDeleteSchedule(schedule)} className="rounded-lg px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50">永久删除</button></div></div>)}</div></div>}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
         <div className="flex items-center justify-between mb-4"><div><h3 className="font-bold text-slate-900">项目计划与现场目标</h3><p className="text-xs text-slate-500 mt-1">按项目查看计划、现场目标和时间偏差</p></div><span className="text-xs text-slate-400">{filteredData.length} 个项目</span></div>

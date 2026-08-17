@@ -1,4 +1,4 @@
-const CACHE_NAME = "zhijian-pro-v3";
+const CACHE_NAME = "zhijian-pro-v5";
 const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {

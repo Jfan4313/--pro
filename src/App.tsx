@@ -16,7 +16,6 @@ import { SupplyChain } from "./components/SupplyChain";
 import { Chat } from "./components/Chat";
 import { Contracts } from "./components/Contracts";
 import { Settings } from "./components/Settings";
-import { ProcurementEntry } from "./components/ProcurementEntry";
 import { Organization } from "./components/Organization";
 import { ProjectLifecycle } from "./components/ProjectLifecycle";
 import { SmartIntake } from "./components/SmartIntake";
@@ -40,16 +39,15 @@ const tabPermissions: Record<string, string> = {
   files: "files", contracts: "contracts", schedule: "schedule", acceptance: "acceptance", materials: "materials", supply: "supply", cost: "cost",
   chat: "collaboration", personnel: "personnel", partners: "partners", organization: "organization", settings: "settings", accounts: "accounts",
   "work-memo": "schedule",
-  "version-management": "settings",
+  "version-management": "dashboard",
 };
 
 export default function App() {
   const { user, loading: authLoading, can } = useAuth();
   const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || "dashboard");
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [isProcurementModalOpen, setIsProcurementModalOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
-  const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices") || "orders");
+  const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices" | "procurement">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
   const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; returnTab: string }>({ projectId: null, returnTab: "dashboard" });
 
   const navigateToTab = (tab: string) => {
@@ -100,7 +98,7 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       setActiveTab(params.get("tab") || "dashboard");
       setSelectedProjectId(params.get("project"));
-      setSupplyChainTab((params.get("supplyTab") as "orders" | "reconciliation") || "orders");
+      setSupplyChainTab((params.get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -126,10 +124,9 @@ export default function App() {
 
   return (
     <div className="app-shell flex h-screen bg-[#f8fafc] font-sans overflow-hidden">
-      <Sidebar 
+        <Sidebar 
         activeTab={activeTab} 
         setActiveTab={navigateToTab} 
-        onOpenProcurement={() => setIsProcurementModalOpen(true)}
       />
       
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -149,17 +146,13 @@ export default function App() {
           {activeTab === "partners" && <><div className="md:hidden min-h-full"><MobileWorkspace module="partners" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ExternalPartners /></div></>}
           {activeTab === "files" && <><div className="md:hidden min-h-full"><MobileWorkspace module="files" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectFiles setActiveTab={setActiveTab} /></div></>}
           {activeTab === "materials" && <><div className="md:hidden min-h-full"><MobileWorkspace module="materials" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Materials setActiveTab={handleMaterialsNavigate} /></div></>}
-          {activeTab === "supply" && <><div className="md:hidden min-h-full"><MobileWorkspace module="supply" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><SupplyChain defaultTab={supplyChainTab} onOpenProcurement={() => setIsProcurementModalOpen(true)} /></div></>}
+          {activeTab === "supply" && <><div className="md:hidden min-h-full"><MobileWorkspace module="supply" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><SupplyChain defaultTab={supplyChainTab} /></div></>}
           {activeTab === "chat" && <><div className="md:hidden min-h-full"><MobileCollaboration /></div><div className="hidden md:block h-full"><Chat /></div></>}
           {activeTab === "contracts" && <><div className="md:hidden min-h-full"><MobileWorkspace module="contracts" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Contracts /></div></>}
           {activeTab === "settings" && <><div className="md:hidden min-h-full"><MobileWorkspace module="settings" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Settings /></div></>}
           {activeTab === "accounts" && <AccountManagement />}
           {activeTab === "version-management" && <VersionManagement />}
         </main>
-
-        {isProcurementModalOpen && (
-          <ProcurementEntry onClose={() => setIsProcurementModalOpen(false)} />
-        )}
 
         <SmartIntake setActiveTab={setActiveTab} />
         <FirstRunGuide setActiveTab={navigateToTab} />

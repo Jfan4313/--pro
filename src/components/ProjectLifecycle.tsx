@@ -179,10 +179,9 @@ export const STAGES = [
 
 export const getProjectCurrentStageInfo = (projectId: string, lifecycleStates: Record<string, any>) => {
   const projState = lifecycleStates[projectId] || {};
+  let currentStageIndex = projState.currentStageId ? Math.max(0, STAGES.findIndex((stage) => stage.id === projState.currentStageId)) : 0;
   
-  let currentStageIndex = 0;
-  
-  for (let i = STAGES.length - 1; i >= 0; i--) {
+  if (!projState.currentStageId) for (let i = STAGES.length - 1; i >= 0; i--) {
     const stageId = STAGES[i].id;
     const stageState = projState[stageId];
     if (stageState) {

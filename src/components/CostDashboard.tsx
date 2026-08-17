@@ -73,7 +73,6 @@ export function CostDashboard() {
   const [costData, setCostData] = useSyncedAppData("costDataV2", []);
   const [projectBoardData] = useProjectBoardData();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
-  const [supplyOrders] = useSyncedAppData<any[]>("supplyOrders", []);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
   const [summaryProjectId, setSummaryProjectId] = useState<string>("all");
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
@@ -83,29 +82,10 @@ export function CostDashboard() {
   const [ledgerModalType, setLedgerModalType] = useState<"actual" | "expected" | "collection">("actual");
 
   const [budgetForm, setBudgetForm] = useState({ material: 0, labor: 0, management: 0, risk: 0, collectionExpected: 0 });
+  const [budgetSaveState, setBudgetSaveState] = useState<"未修改" | "待保存" | "保存中" | "已保存" | "保存失败">("未修改");
   const [ledgerForm, setLedgerForm] = useState({ date: "", type: "material", amount: 0, description: "", status: "pending" });
 
   const allProjects = projectBoardData.flatMap((col: any) => col.projects || []);
-
-  useEffect(() => {
-    if (!supplyOrders.length) return;
-    void setCostData((current: any[]) => {
-      const next = [...current];
-      let changed = false;
-      supplyOrders.forEach((order: any) => {
-        if (!order.projectId || next.some((project: any) => (project.actualLedger || []).some((item: any) => item.sourceOrderId === order.id) || (project.expectedLedger || []).some((item: any) => item.sourceOrderId === order.id))) return;
-        const amount = Number(String(order.amount || "").replace(/[^\d.]/g, "")) / 10000;
-        if (!amount) return;
-        let project = next.find((item: any) => item.id === order.projectId);
-        if (!project) { project = { id: order.projectId, project: order.projectName || order.id, budget: { material: 0, labor: 0, management: 0, risk: 0 }, actualLedger: [], expectedLedger: [], collection: { totalExpected: 0, records: [] } }; next.push(project); }
-        const ledgerItem = { id: `PO-COST-${order.id}`, sourceOrderId: order.id, date: order.orderDate || new Date().toISOString().slice(0, 10), type: "material", amount, description: `采购订单 ${order.id} · ${order.items}` };
-        if (order.status === "delivered") project.actualLedger = [ledgerItem, ...(project.actualLedger || [])];
-        else project.expectedLedger = [ledgerItem, ...(project.expectedLedger || [])];
-        changed = true;
-      });
-      return changed ? next : current;
-    });
-  }, [supplyOrders]);
 
   useEffect(() => {
     const handleFocusRisk = (event: Event) => {
@@ -141,6 +121,15 @@ export function CostDashboard() {
   }, [costData, allProjects]);
 
   const selectedProjectData = mergedCostData.find((p: any) => p.id === selectedProjectId);
+
+  useEffect(() => {
+    if (!isBudgetModalOpen || !selectedProjectData) return;
+    const baseline = { ...selectedProjectData.budget, collectionExpected: selectedProjectData.collection?.totalExpected || 0 };
+    if (JSON.stringify(baseline) === JSON.stringify(budgetForm)) { setBudgetSaveState("未修改"); return; }
+    setBudgetSaveState("待保存");
+    const timer = window.setTimeout(() => { setBudgetSaveState("保存中"); handleSaveBudget(); }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [budgetForm, isBudgetModalOpen, selectedProjectId]);
 
   const costEligibleProjectIds = useMemo(() => new Set(allProjects.filter((project: any) => getProjectCurrentStageInfo(project.id, lifecycleStates).index >= 3).map((project: any) => project.id)), [allProjects, lifecycleStates]);
 
@@ -249,7 +238,7 @@ export function CostDashboard() {
     }
     
     setCostData(newData);
-    setIsBudgetModalOpen(false);
+    setBudgetSaveState("已保存");
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '预算已更新' }));
   };
 
@@ -866,7 +855,7 @@ export function CostDashboard() {
             <div className="p-6 border-t border-slate-100 flex justify-end gap-3">
               <button onClick={() => setIsBudgetModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">取消</button>
               <button onClick={handleSaveBudget} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2">
-                <Save className="w-4 h-4" /> 保存预算
+                <Save className="w-4 h-4" /> {budgetSaveState} · 保存预算
               </button>
             </div>
           </div>

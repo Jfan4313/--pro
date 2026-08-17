@@ -34,6 +34,11 @@ jobs:
         run: npm run lint
 
       - name: Build production app
+        env:
+          VITE_APP_VERSION: 0.5.0
+          VITE_BUILD_SHA: ${{ github.sha }}
+          VITE_BUILD_DATE: ${{ github.event.head_commit.timestamp || github.run_started_at }}
+          VITE_BUILD_TIME: ${{ github.run_started_at }}
         run: npm run build
 
       - name: Package release

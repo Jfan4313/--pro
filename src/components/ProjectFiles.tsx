@@ -6,6 +6,7 @@ import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { cn } from "@/src/lib/utils";
+import { offlineDb } from "@/src/lib/offlineDb";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData] = useProjectBoardData();
@@ -24,6 +25,8 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [isSavingLocation, setIsSavingLocation] = React.useState(false);
   const [localFolderName, setLocalFolderName] = React.useState("");
   const [localFiles, setLocalFiles] = React.useState<Array<{ name: string; path: string; size: number; updatedAt: number }>>([]);
+  const [localFolderHandle, setLocalFolderHandle] = React.useState<any>(null);
+  const [localPermission, setLocalPermission] = React.useState<"unknown" | "granted" | "prompt" | "denied">("unknown");
 
   const selectedProject = projects.find((project: any) => project.id === selectedProjectId) || projects[0];
   const visibleProjects = React.useMemo(() => {
@@ -98,6 +101,16 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     loadFiles();
   }, [loadFiles]);
 
+  React.useEffect(() => {
+    void offlineDb.getAppData<any>("projectFilesDirectoryHandle").then(async (handle) => {
+      if (!handle) return;
+      setLocalFolderHandle(handle);
+      const permission = await handle.queryPermission?.({ mode: "readwrite" });
+      setLocalPermission(permission || "prompt");
+      if (permission === "granted") setLocalFolderName(handle.name || "已授权文件夹");
+    }).catch(() => undefined);
+  }, []);
+
   const initFolders = async () => {
     if (!selectedProject) return;
     setIsLoading(true);
@@ -119,7 +132,10 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       return;
     }
     try {
-      const handle = await picker({ mode: "read" });
+      const handle = await picker({ mode: "readwrite" });
+      await offlineDb.putAppData("projectFilesDirectoryHandle", handle);
+      setLocalFolderHandle(handle);
+      setLocalPermission("granted");
       const files: Array<{ name: string; path: string; size: number; updatedAt: number }> = [];
       const walk = async (directory: any, prefix = "") => {
         for await (const entry of directory.values()) {
@@ -195,7 +211,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         </div>
       )}
 
-      {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">公网网页不能直接读取电脑路径，需要你在浏览器弹窗中授权文件夹；桌面端可继续使用绝对路径。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><input value={fileRootInput} onChange={(event) => setFileRootInput(event.target.value)} placeholder={defaultFileRoot || "/Users/你的用户名/Documents/项目资料"} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" /><button onClick={() => void saveLocation()} disabled={isSavingLocation} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">{isSavingLocation ? "保存中…" : "保存归档位置"}</button><button onClick={() => void chooseLocalFolder()} className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100">选择本地文件夹</button><button onClick={() => void apiClient.openFileRoot().catch(() => window.dispatchEvent(new CustomEvent("show-toast", { detail: "无法打开目录，请确认本地服务已启动" })))} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">桌面端打开目录</button></div>{defaultFileRoot && <p className="mt-2 text-xs text-slate-400">系统默认位置：{defaultFileRoot}</p>}{localFolderName && <p className="mt-2 text-xs text-emerald-600">已授权本地文件夹：{localFolderName}（仅本次浏览器会话有效）</p>}</div>}
+      {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">云端归档位置与本机已授权文件夹分开管理，浏览器授权可在当前设备持久保存。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><input value={fileRootInput} onChange={(event) => setFileRootInput(event.target.value)} placeholder={defaultFileRoot || "/Users/你的用户名/Documents/项目资料"} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" /><button onClick={() => void saveLocation()} disabled={isSavingLocation} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">{isSavingLocation ? "保存中…" : "保存云端归档位置"}</button><button onClick={() => void chooseLocalFolder()} className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100">{localFolderHandle ? "重新授权本地文件夹" : "选择本地文件夹"}</button><button onClick={() => void apiClient.openFileRoot().catch(() => window.dispatchEvent(new CustomEvent("show-toast", { detail: "无法打开云端目录，请确认本地服务已启动" })))} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">打开云端目录</button></div>{defaultFileRoot && <p className="mt-2 text-xs text-slate-400">云端默认位置：{defaultFileRoot}</p>}{localFolderName && <p className="mt-2 text-xs text-emerald-600">本机已授权文件夹：{localFolderName} · 权限 {localPermission === "granted" ? "可读写" : "需重新授权"}</p>}</div>}
 
       {localFiles.length > 0 && <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">本地文件夹浏览</h3><p className="mt-1 text-xs text-slate-500">{localFolderName} · 已读取 {localFiles.length} 个文件</p></div><button onClick={() => void chooseLocalFolder()} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">重新授权</button></div><div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-2">{localFiles.map((file) => <div key={file.path} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5"><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-800" title={file.path}>{file.name}</p><p className="truncate text-xs text-slate-400">{file.path} · {formatSize(file.size)}</p></div><FileText className="h-4 w-4 shrink-0 text-emerald-600" /></div>)}</div></div>}
 

@@ -7,6 +7,7 @@ import { formatLocalDate } from "@/src/lib/management";
 import { useSyncStatus } from "@/src/hooks/useSyncStatus";
 import { SyncCenter } from "@/src/components/SyncCenter";
 import { dispatchRiskFocus } from "@/src/lib/riskActions";
+import { PRODUCT_VERSION } from "@/src/lib/productVersion";
 
 export function Header({ setActiveTab, onOpenProject }: { setActiveTab?: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
   const { user, logout } = useAuth();
@@ -192,6 +193,7 @@ export function Header({ setActiveTab, onOpenProject }: { setActiveTab?: (tab: s
       </div>
       
       <div className="flex items-center gap-4">
+        {setActiveTab && <button type="button" onClick={() => setActiveTab("version-management")} className="hidden rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs font-bold text-indigo-700 md:block" title="查看版本更新">V{PRODUCT_VERSION}</button>}
         <button
           type="button"
           onClick={() => setIsSyncCenterOpen(true)}

@@ -62,6 +62,9 @@ export function useSyncedAppData<T>(key: string, initialValue: T) {
 
   const updateData = async (newValue: T | ((val: T) => T)) => {
     const valueToStore = newValue instanceof Function ? newValue(dataRef.current) : newValue;
+    // Functional updaters commonly return the current reference when no data
+    // changed. Do not enqueue a write or emit a sync state in that case.
+    if (Object.is(valueToStore, dataRef.current)) return;
     dataRef.current = valueToStore;
     setData(valueToStore);
     await queueAppDataUpdate(key, valueToStore);
