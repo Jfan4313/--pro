@@ -6,7 +6,9 @@ import { STAGES } from './ProjectLifecycle';
 import { MobileHome } from './MobileHome';
 import { useDashboardOverview } from '@/src/features/dashboard/useDashboardOverview';
 import { progressTrendData, recentAnnouncements } from '@/src/features/dashboard/dashboardContent';
-import { exportWorkspaceSnapshot, importWorkspaceSnapshot } from '@/src/features/dashboard/dashboardTools';
+import { DASHBOARD_DATA_KEYS, exportWorkspaceSnapshot, importWorkspaceSnapshot } from '@/src/features/dashboard/dashboardTools';
+import { dispatchRiskFocus, type RiskAction } from '@/src/lib/riskActions';
+import { PRODUCT_RELEASE_SUMMARY, PRODUCT_VERSION, PRODUCT_VERSION_DATE } from '@/src/lib/productVersion';
 
 export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
   const {
@@ -18,6 +20,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
     lifecycleSummary,
     overdueTasks,
     pendingApprovals,
+    pendingApprovalTab,
     pendingQuickIntakes,
     rejectQuickIntake,
     risks,
@@ -25,12 +28,28 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
     todayTasks,
   } = useDashboardOverview();
 
+  const openRisk = (risk: any) => {
+    setActiveTab(risk.actionTab);
+    dispatchRiskFocus(risk);
+  };
+
+  const handleRiskAction = (risk: any, action: RiskAction) => {
+    setActiveTab(risk.actionTab);
+    dispatchRiskFocus(risk, action);
+  };
+
   const importInputRef = useRef<HTMLInputElement>(null);
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     try {
+      const preview = JSON.parse(await file.text());
+      const keys = Object.keys(preview?.data || {}).filter((key) => key.length > 0);
+      const allowedKeys = keys.filter((key) => DASHBOARD_DATA_KEYS.includes(key));
+      if (allowedKeys.length === 0) throw new Error("配置文件中没有可导入的数据");
+      const confirmed = window.confirm(`即将导入 ${allowedKeys.length} 类工作区数据：\n${allowedKeys.join("、")}\n\n已有同名数据可能被覆盖，是否继续？`);
+      if (!confirmed) return;
       const count = await importWorkspaceSnapshot(file);
       window.dispatchEvent(new CustomEvent('show-toast', { detail: `已导入 ${count} 类工作区数据，刷新后生效` }));
     } catch (error: any) {
@@ -45,6 +64,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
       todayTasks={todayTasks}
       overdueTasks={overdueTasks}
       pendingApprovals={pendingApprovals}
+      pendingApprovalTab={pendingApprovalTab}
       pendingQuickIntakes={pendingQuickIntakes}
       risks={risks}
       announcements={recentAnnouncements}
@@ -78,10 +98,10 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
             <button onClick={() => setActiveTab('schedule')} className="text-sm text-indigo-600 font-medium">进入任务管理</button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 border-b border-slate-100">
-            <WorkbenchMetric label="今日待办" value={todayTasks.length} tone="indigo" />
-            <WorkbenchMetric label="逾期任务" value={overdueTasks.length} tone="rose" />
-            <WorkbenchMetric label="待确认采集" value={pendingQuickIntakes.length} tone="amber" />
-            <WorkbenchMetric label="待审批/待确认" value={pendingApprovals} tone="slate" />
+            <WorkbenchMetric label="今日待办" value={todayTasks.length} tone="indigo" onClick={() => setActiveTab("schedule")} />
+            <WorkbenchMetric label="逾期任务" value={overdueTasks.length} tone="rose" onClick={() => setActiveTab("schedule")} />
+            <WorkbenchMetric label="待确认采集" value={pendingQuickIntakes.length} tone="amber" onClick={() => setActiveTab("work-memo")} />
+            <WorkbenchMetric label="待审批/待确认" value={pendingApprovals} tone="slate" onClick={() => setActiveTab(pendingApprovalTab)} />
           </div>
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -128,12 +148,13 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
           </div>
           <div className="p-4 space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar">
             {risks.slice(0, 8).map((risk: any) => (
-              <button key={risk.id} onClick={() => setActiveTab(risk.actionTab)} className="w-full text-left rounded-xl border border-slate-100 p-3 hover:border-rose-200 hover:bg-rose-50/40">
+              <button key={risk.id} onClick={() => openRisk(risk)} className="w-full text-left rounded-xl border border-slate-100 p-3 hover:border-rose-200 hover:bg-rose-50/40">
                 <div className="flex items-center justify-between gap-2">
                   <span className={cn("text-xs font-bold", risk.level === 'high' ? 'text-rose-600' : 'text-amber-600')}>{risk.type}</span>
                   <span className="text-[10px] text-slate-400">{risk.projectName}</span>
                 </div>
                 <div className="text-sm font-medium text-slate-900 mt-1">{risk.title}</div>
+                {(risk.taskId || risk.personId || risk.orderId || risk.type === "合同缺失") && <div className="mt-2 flex gap-2 flex-wrap">{risk.taskId && <>{risk.type === "未分配负责人" && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "assign"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "assign"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 shadow-sm ring-1 ring-slate-200">指派负责人</span>}<span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "deadline"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "deadline"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 shadow-sm ring-1 ring-slate-200">调整截止日期</span>{risk.type === "任务逾期" && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "complete"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "complete"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-emerald-600 shadow-sm ring-1 ring-slate-200">标记完成</span>}</>}{risk.personId && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "train"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "train"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-emerald-600 shadow-sm ring-1 ring-slate-200">标记已培训</span>}{risk.orderId && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "delivered"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "delivered"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-emerald-600 shadow-sm ring-1 ring-slate-200">标记已到货</span>}{risk.type === "合同缺失" && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "create-contract"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "create-contract"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 shadow-sm ring-1 ring-slate-200">新建合同</span>}</div>}
               </button>
             ))}
             {risks.length === 0 && <EmptyState text="暂无风险预警" />}
@@ -289,6 +310,16 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
         </div>
       </div>
 
+      <div className="mt-6 rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-white p-6 shadow-[0_2px_10px_-4px_rgba(79,70,229,0.12)]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-indigo-600 p-2.5 text-white"><Upload className="h-5 w-5" /></div>
+            <div><div className="flex items-center gap-2"><h3 className="font-bold text-slate-900">版本更新</h3><span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">v{PRODUCT_VERSION}</span></div><p className="mt-1 text-sm text-slate-600">{PRODUCT_RELEASE_SUMMARY}</p><p className="mt-1 text-xs text-slate-400">更新日期：{PRODUCT_VERSION_DATE}</p></div>
+          </div>
+          <button onClick={() => setActiveTab("version-management")} className="inline-flex items-center gap-1 self-start rounded-lg bg-white px-3 py-2 text-xs font-semibold text-indigo-600 ring-1 ring-indigo-100 hover:bg-indigo-50 md:self-auto">查看完整更新记录 <ArrowUpRight className="h-3.5 w-3.5" /></button>
+        </div>
+      </div>
+
       {/* 项目全生命周期进展 */}
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] mt-6">
         <div className="flex items-center justify-between mb-6">
@@ -357,6 +388,15 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
                   </td>
                 </tr>
               ))}
+              {lifecycleSummary.recentProjects.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center">
+                    <p className="text-sm font-semibold text-slate-600">还没有项目</p>
+                    <p className="mt-1 text-xs text-slate-400">创建项目后，这里会显示阶段和归档进度</p>
+                    <button onClick={() => setActiveTab("board")} className="mt-3 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">创建第一个项目</button>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -401,7 +441,7 @@ function StatCard({ title, value, trend, trendText, icon: Icon, hideTrend, trend
   );
 }
 
-function WorkbenchMetric({ label, value, tone }: any) {
+function WorkbenchMetric({ label, value, tone, onClick }: any) {
   const colors: Record<string, string> = {
     indigo: "text-indigo-600 bg-indigo-50",
     rose: "text-rose-600 bg-rose-50",
@@ -409,10 +449,11 @@ function WorkbenchMetric({ label, value, tone }: any) {
     slate: "text-slate-600 bg-slate-50",
   };
   return (
-    <div className="p-4 border-r last:border-r-0 border-slate-100">
+    <button type="button" onClick={onClick} className={cn("p-4 border-r last:border-r-0 border-slate-100 text-left transition-colors", onClick && "cursor-pointer hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-400")}>
       <div className={cn("inline-flex px-2 py-1 rounded-lg text-xs font-bold mb-2", colors[tone] || colors.slate)}>{label}</div>
       <div className="text-2xl font-bold text-slate-900 font-mono">{value}</div>
-    </div>
+      <div className="mt-1 text-[10px] text-slate-400">点击查看</div>
+    </button>
   );
 }
 

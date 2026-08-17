@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Building2, CheckCircle2, FileWarning, Phone, Plus, Search, ShieldCheck, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects } from "@/src/lib/management";
+import { readAndUploadFile } from "@/src/lib/fileUpload";
 
 export const partnerTypes = ["设计单位", "施工分包", "劳务队", "设备租赁", "检测/监理", "咨询服务", "外包个人"];
 export const partnerRequiredDocs = ["营业执照", "资质证书", "安全协议", "人员证件", "施工方案", "验收资料"];
@@ -69,6 +70,23 @@ export function ExternalPartners() {
   const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [focusedPartnerId, setFocusedPartnerId] = useState<string | null>(null);
+  const [pendingDocUpload, setPendingDocUpload] = useState<{ partnerId: string; doc: string } | null>(null);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleFocusRisk = (event: Event) => {
+      const risk = (event as CustomEvent).detail;
+      if (risk?.actionTab !== "partners" || !risk.partnerId) return;
+      setSearchQuery(risk.partnerId);
+      setFocusedPartnerId(risk.partnerId);
+      window.setTimeout(() => document.getElementById(`partner-${risk.partnerId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+      window.setTimeout(() => setFocusedPartnerId(null), 3200);
+    };
+    window.addEventListener("focus-risk", handleFocusRisk);
+    return () => window.removeEventListener("focus-risk", handleFocusRisk);
+  }, []);
 
   const projects = useMemo(() => flattenProjects(boardData), [boardData]);
   const filteredPartners = useMemo(() => {
@@ -82,6 +100,31 @@ export function ExternalPartners() {
   }, [partners, searchQuery]);
 
   const riskCount = partners.filter((partner: any) => !partner.contractId || getMissingDocs(partner).length > 0).length;
+
+  const handleDocUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !pendingDocUpload) return;
+    if (file.size > 8 * 1024 * 1024) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "资料不能超过 8MB" }));
+      return;
+    }
+    try {
+        setIsUploadingDoc(true);
+        const uploaded = await readAndUploadFile(file);
+        setPartners((current: any[]) => current.map((partner: any) => partner.id !== pendingDocUpload.partnerId ? partner : {
+          ...partner,
+          uploadedDocs: Array.from(new Set([...(partner.uploadedDocs || []), pendingDocUpload.doc])),
+          uploadedDocFiles: { ...(partner.uploadedDocFiles || {}), [pendingDocUpload.doc]: { name: file.name, url: uploaded.url, dataUrl: uploaded.dataUrl, storage: uploaded.storage, uploadedAt: new Date().toISOString() } },
+        }));
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: `${pendingDocUpload.doc} 已上传` }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "资料上传失败，请重试" }));
+    } finally {
+      setIsUploadingDoc(false);
+      setPendingDocUpload(null);
+    }
+  };
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -170,7 +213,7 @@ export function ExternalPartners() {
               {filteredPartners.map((partner: any) => {
                 const missingDocs = getMissingDocs(partner);
                 return (
-                  <tr key={partner.id} className="hover:bg-slate-50/80 transition-colors align-top">
+                  <tr id={focusedPartnerId === partner.id ? `partner-${partner.id}` : undefined} key={partner.id} className={cn("hover:bg-slate-50/80 transition-colors align-top", focusedPartnerId === partner.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
                     <td className="px-5 py-4">
                       <div className="font-bold text-slate-900">{partner.name}</div>
                       <div className="flex items-center gap-1 text-xs text-slate-500 mt-1"><Phone className="w-3 h-3" /> {partner.contact} · {partner.phone}</div>
@@ -188,9 +231,9 @@ export function ExternalPartners() {
                           return (
                             <button
                               key={doc}
-                              onClick={() => toggleDoc(partner.id, doc)}
+                              onClick={() => { if (done) toggleDoc(partner.id, doc); else { setPendingDocUpload({ partnerId: partner.id, doc }); docInputRef.current?.click(); } }}
                               className={cn("inline-flex items-center px-2 py-1 rounded text-[11px] border transition-colors", done ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-amber-50 text-amber-700 border-amber-100")}
-                              title={done ? "点击标记为缺失" : "点击标记为已提交"}
+                              title={done ? "点击标记为缺失" : "选择文件上传资料"}
                             >
                               {done && <CheckCircle2 className="w-3 h-3 mr-1" />}
                               {doc}
@@ -212,6 +255,9 @@ export function ExternalPartners() {
           </table>
         </div>
       </div>
+
+      <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" className="hidden" onChange={(event) => void handleDocUpload(event)} />
+      {isUploadingDoc && <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-xl">资料上传中…</div>}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">

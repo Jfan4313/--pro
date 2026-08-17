@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Download, PieChart as PieChartIcon, BarChart3, Wallet, Receipt, Edit2, X, Save, Plus, Calendar, CheckCircle, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useSyncedAppData } from '../hooks/useSyncedAppData';
@@ -70,6 +70,7 @@ export function CostDashboard() {
   const [costData, setCostData] = useSyncedAppData("costDataV2", []);
   const [projectBoardData] = useProjectBoardData();
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
+  const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
@@ -79,6 +80,21 @@ export function CostDashboard() {
   const [ledgerForm, setLedgerForm] = useState({ date: "", type: "material", amount: 0, description: "", status: "pending" });
 
   const allProjects = projectBoardData.flatMap((col: any) => col.projects || []);
+
+  useEffect(() => {
+    const handleFocusRisk = (event: Event) => {
+      const risk = (event as CustomEvent).detail;
+      if (risk?.actionTab !== "cost") return;
+      const projectId = risk.costId || risk.projectId;
+      if (!projectId) return;
+      setSelectedProjectId("all");
+      setFocusedProjectId(projectId);
+      window.setTimeout(() => document.getElementById(`cost-project-${projectId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+      window.setTimeout(() => setFocusedProjectId(null), 3200);
+    };
+    window.addEventListener("focus-risk", handleFocusRisk);
+    return () => window.removeEventListener("focus-risk", handleFocusRisk);
+  }, []);
 
   // Ensure all projects from projectBoardData exist in costData
   const mergedCostData = useMemo(() => {
@@ -426,7 +442,7 @@ export function CostDashboard() {
                 const isWarning = utilization > 90 && utilization <= 100;
 
                 return (
-                  <tr key={project.id} className="hover:bg-slate-50 transition-colors">
+                  <tr id={focusedProjectId === project.id ? `cost-project-${project.id}` : undefined} key={project.id} className={cn("hover:bg-slate-50 transition-colors", focusedProjectId === project.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
                     <td className="px-6 py-4 font-medium text-slate-900">{project.project}</td>
                     <td className="px-6 py-4 text-right text-slate-600">¥{project.budget.toLocaleString()}</td>
                     <td className="px-6 py-4 text-right text-slate-900 font-medium">¥{project.actual.toLocaleString()}</td>

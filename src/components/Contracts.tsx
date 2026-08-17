@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { FileText, Upload, Search, Filter, MoreHorizontal, Download, Eye, FileSignature, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
@@ -17,20 +17,44 @@ export function Contracts() {
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   const [projectBoardData] = useProjectBoardData();
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("all");
+  const [focusedContractId, setFocusedContractId] = useState<string | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [menuContractId, setMenuContractId] = useState<string | null>(null);
   const [previewContract, setPreviewContract] = useState<any | null>(null);
   const projects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
 
+  useEffect(() => {
+    const handleFocusRisk = (event: Event) => {
+      const risk = (event as CustomEvent).detail;
+      if (risk?.actionTab !== "contracts") return;
+      setSelectedProjectId(risk.projectId || "all");
+      if (risk.action === "create-contract") {
+        setPendingProjectId(risk.projectId || "");
+        setIsModalOpen(true);
+      }
+      if (risk.contractId) {
+        setSearchQuery(risk.contractId);
+        setFocusedContractId(risk.contractId);
+        window.setTimeout(() => document.getElementById(`contract-${risk.contractId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+        window.setTimeout(() => setFocusedContractId(null), 3200);
+      }
+    };
+    window.addEventListener("focus-risk", handleFocusRisk);
+    return () => window.removeEventListener("focus-risk", handleFocusRisk);
+  }, []);
+
   const filteredContracts = useMemo(() => {
     return contracts.filter((c: any) => {
       const query = searchQuery.toLowerCase();
-      return c.name.toLowerCase().includes(query) || 
+      const matchesProject = selectedProjectId === "all" || c.projectId === selectedProjectId;
+      return matchesProject && (c.name.toLowerCase().includes(query) ||
              c.id.toLowerCase().includes(query) || 
              c.partyA.toLowerCase().includes(query) || 
-             c.partyB.toLowerCase().includes(query);
+             c.partyB.toLowerCase().includes(query));
     });
-  }, [contracts, searchQuery]);
+  }, [contracts, searchQuery, selectedProjectId]);
 
   const handleAction = (action: string) => {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: `${action} 操作已执行` }));
@@ -81,6 +105,12 @@ export function Contracts() {
     setContracts((current: any[]) => current.filter((item) => item.id !== contract.id));
     setMenuContractId(null);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '合同已删除' }));
+  };
+
+  const handleApprove = (contract: any) => {
+    setContracts((current: any[]) => current.map((item) => item.id === contract.id ? { ...item, status: "active", approvedAt: new Date().toISOString() } : item));
+    setMenuContractId(null);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `合同“${contract.name}”已审批通过` }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -159,6 +189,7 @@ export function Contracts() {
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white">
+          <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 w-80 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
             <Search className="w-4 h-4 text-slate-400 mr-2" />
             <input 
@@ -168,6 +199,11 @@ export function Contracts() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-transparent border-none outline-none text-sm w-full text-slate-700"
             />
+          </div>
+          <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+            <option value="all">全部项目</option>
+            {projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
           </div>
           <button onClick={() => handleAction('筛选')} className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
             <Filter className="w-4 h-4" />
@@ -190,7 +226,7 @@ export function Contracts() {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filteredContracts.map((contract) => (
-              <tr key={contract.id} className="hover:bg-slate-50/80 transition-colors">
+              <tr id={focusedContractId === contract.id ? `contract-${contract.id}` : undefined} key={contract.id} className={cn("hover:bg-slate-50/80 transition-colors", focusedContractId === contract.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
                 <td className="px-6 py-4 font-mono text-slate-500">{contract.id}</td>
                 <td className="px-6 py-4 font-medium text-slate-900">{contract.name}</td>
                 <td className="px-6 py-4 text-slate-600">{contract.type}</td>
@@ -236,6 +272,7 @@ export function Contracts() {
                       {menuContractId === contract.id && <div className="absolute right-0 top-8 z-20 w-32 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-xl">
                         <button onClick={() => { setPreviewContract(contract); setMenuContractId(null); }} className="block w-full px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">查看详情</button>
                         <button onClick={() => { handleDownload(contract); setMenuContractId(null); }} className="block w-full px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">下载合同</button>
+                        {contract.status === "pending" && <button onClick={() => handleApprove(contract)} className="block w-full px-3 py-2 text-xs text-emerald-600 hover:bg-emerald-50">审批通过</button>}
                         <button onClick={() => handleDelete(contract)} className="block w-full px-3 py-2 text-xs text-rose-600 hover:bg-rose-50">删除合同</button>
                       </div>}
                     </div>
@@ -301,7 +338,7 @@ export function Contracts() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">关联项目</label>
-                  <select name="projectId" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                  <select name="projectId" defaultValue={pendingProjectId} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                     <option value="">暂不关联</option>
                     {projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>

@@ -18,7 +18,7 @@ export function registerDataRoutes(app, context) {
 
   app.get("/api/app-data/:key", (req, res) => {
     const row = db.prepare("SELECT * FROM app_data WHERE key = ?").get(req.params.key);
-    if (!row) return res.status(404).json({ error: "not_found" });
+    if (!row) return res.json({ key: req.params.key, value: null, updatedAt: null, version: 0, exists: false });
     res.json({ key: row.key, value: parseJson(row.value), updatedAt: row.updatedAt, version: row.version });
   });
 
@@ -91,8 +91,12 @@ export function registerDataRoutes(app, context) {
   app.post("/api/sync/pull", (req, res) => {
     const sinceVersion = Number(req.body.sinceVersion || 0);
     const rows = db.prepare("SELECT * FROM sync_events WHERE version > ? ORDER BY version ASC").all(sinceVersion);
+    const currentAppDataKeys = new Set(db.prepare("SELECT key FROM app_data").all().map((row) => row.key));
     res.json({
-      changes: rows.map((row) => ({
+      // app_data is stored as a whole workspace snapshot. If a key was removed
+      // during workspace initialization, do not replay an obsolete historical
+      // event and silently resurrect the deleted business data.
+      changes: rows.filter((row) => row.resource !== "app_data" || currentAppDataKeys.has(row.recordId)).map((row) => ({
         version: row.version,
         resource: row.resource,
         recordId: row.recordId,

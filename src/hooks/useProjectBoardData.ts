@@ -1,5 +1,6 @@
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useAuth } from "@/src/lib/auth";
+import { createEmptyBoardColumns } from "@/src/lib/workspaceDefaults";
 
 export function useProjectBoardData() {
   const { user } = useAuth();
@@ -7,8 +8,8 @@ export function useProjectBoardData() {
   const dataKey = isDemoAccount
     ? "projectBoardData"
     : `projectBoardData:${user?.id || "anonymous"}`;
-  // A new workspace must remain empty; do not promote the stage layout as demo project data.
-  const seed: any[] = [];
+  // Stage columns are structure, not demo business data. A new workspace has nine empty columns.
+  const seed = createEmptyBoardColumns();
   const syncedData = useSyncedAppData<any[]>(dataKey, seed);
 
   return [...syncedData, seed] as const;

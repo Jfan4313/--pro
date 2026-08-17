@@ -1,35 +1,47 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Building2, FileText, Image as ImageIcon, Megaphone, MoreHorizontal, Paperclip, Plus, Search, Send, Users } from "lucide-react";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { cn } from "@/src/lib/utils";
-
-const initialChannels = [
-  { id: "1", name: "全局公告", type: "announcement", unread: 2, members: ["所有人"] },
-  { id: "2", name: "智建公司 - A区商业综合体", type: "project", unread: 0, members: ["张伟", "李娜", "王强"] },
-  { id: "3", name: "智建公司 - B区住宅一期", type: "project", unread: 5, members: ["张伟", "陈杰"] },
-];
-
-const initialPosts = [
-  { id: 1, channelId: "1", author: "张伟 (项目经理)", time: "今天 10:24", content: "A区商业综合体主体结构施工进度已达60%，请各班组注意安全规范，下午3点进行现场联合检查。", type: "announcement", attachments: [] },
-  { id: 2, channelId: "2", author: "李娜 (安全员)", time: "今天 09:15", content: "上传了最新的《现场安全施工规范V2.0.pdf》，请所有新进场人员务必下载学习。", type: "document", attachments: [{ name: "现场安全施工规范V2.0.pdf", size: "2.4 MB", type: "pdf" }] },
-  { id: 3, channelId: "3", author: "王强 (高级电工)", time: "昨天 16:30", content: "地下室二层桥架安装完毕，附上现场照片，请监理查验。", type: "update", attachments: [{ name: "现场照片_桥架.jpg", size: "1.1 MB", type: "image" }] },
-];
+import { readAndUploadFile } from "@/src/lib/fileUpload";
 
 export function MobileCollaboration() {
-  const [channels] = useSyncedAppData<any[]>("chatChannels", initialChannels);
-  const [posts, setPosts] = useSyncedAppData<any[]>("chatPosts", initialPosts);
+  const [channels] = useSyncedAppData<any[]>("chatChannels", []);
+  const [posts, setPosts] = useSyncedAppData<any[]>("chatPosts", []);
   const [activeChannelId, setActiveChannelId] = useState(channels[0]?.id || "1");
   const [postText, setPostText] = useState("");
+  const [postAttachments, setPostAttachments] = useState<any[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const activeChannel = channels.find((channel: any) => channel.id === activeChannelId) || channels[0];
   const activePosts = useMemo(() => posts.filter((post: any) => post.channelId === activeChannelId), [posts, activeChannelId]);
 
+  useEffect(() => {
+    if (channels.length > 0 && !channels.some((channel: any) => channel.id === activeChannelId)) {
+      setActiveChannelId(channels[0].id);
+    }
+  }, [channels, activeChannelId]);
+
   const handlePost = async () => {
-    if (!postText.trim() || !activeChannel) return;
-    const newPost = { id: Date.now(), channelId: activeChannelId, author: "我 (项目经理)", time: "刚刚", content: postText.trim(), type: "update", attachments: [] };
+    if ((!postText.trim() && postAttachments.length === 0) || !activeChannel) return;
+    const newPost = { id: Date.now(), channelId: activeChannelId, author: "我 (项目经理)", time: "刚刚", content: postText.trim(), type: "update", attachments: postAttachments };
     await setPosts([newPost, ...posts]);
     setPostText("");
+    setPostAttachments([]);
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目动态已发布" }));
+  };
+
+  const handleAttachmentChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = (Array.from(event.target.files || []) as File[]).slice(0, 3 - postAttachments.length);
+    event.target.value = "";
+    if (files.length === 0) return;
+    setIsUploading(true);
+    const next = await Promise.all(files.map((file) => readAndUploadFile(file))).catch((error) => {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "附件读取失败" }));
+      return [];
+    });
+    setIsUploading(false);
+    setPostAttachments((current) => [...current, ...next]);
   };
 
   return (
@@ -48,6 +60,7 @@ export function MobileCollaboration() {
             const Icon = channel.type === "announcement" ? Megaphone : Building2;
             return <button key={channel.id} onClick={() => setActiveChannelId(channel.id)} className={cn("relative flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-xs font-semibold", activeChannelId === channel.id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600")}><Icon className="h-3.5 w-3.5" /><span className="max-w-36 truncate">{channel.name.replace("智建公司 - ", "")}</span>{channel.unread > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] text-white">{channel.unread}</span>}</button>;
           })}
+          {channels.length === 0 && <span className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-500">暂无项目群组</span>}
         </div>
       </div>
 
@@ -60,14 +73,15 @@ export function MobileCollaboration() {
           <article key={post.id} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-600">{post.author.substring(0, 1)}</span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-900">{post.author}</p><p className="mt-0.5 text-[10px] text-slate-400">{post.time}</p></div></div>{post.type === "announcement" && <span className="flex shrink-0 items-center gap-1 rounded-lg bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-600"><Megaphone className="h-3 w-3" />公告</span>}</div>
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{post.content}</p>
-            {post.attachments?.map((file: any, index: number) => <button key={`${file.name}-${index}`} className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3 text-left"><span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", file.type === "image" ? "bg-blue-100 text-blue-600" : "bg-rose-100 text-rose-600")}>{file.type === "image" ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}</span><span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-700">{file.name}</span><span className="mt-1 block text-[10px] text-slate-400">{file.size}</span></span></button>)}
+            {post.attachments?.map((file: any, index: number) => <a key={`${file.name}-${index}`} href={file.url || file.dataUrl || undefined} download={file.name} className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3 text-left"><span className={cn("flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl", file.type === "image" ? "bg-blue-100 text-blue-600" : "bg-rose-100 text-rose-600")}>{file.type === "image" && file.dataUrl ? <img src={file.dataUrl} alt={file.name} className="h-full w-full object-cover" /> : file.type === "image" ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}</span><span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-700">{file.name}</span><span className="mt-1 block text-[10px] text-slate-400">{file.size} · 点击下载</span></span></a>)}
           </article>
         ))}
-        {activePosts.length === 0 && <div className="py-16 text-center text-sm text-slate-400">这个群组还没有动态</div>}
+        {activePosts.length === 0 && <div className="py-16 text-center text-sm text-slate-400">{channels.length === 0 ? "创建项目后，在桌面端建立项目群组" : "这个群组还没有动态"}</div>}
       </main>
 
       <footer className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-3 py-3 backdrop-blur-xl">
-        <div className="flex items-end gap-2"><button onClick={() => window.dispatchEvent(new CustomEvent("show-toast", { detail: "图片与文件上传功能即将接入" }))} className="mb-0.5 rounded-full bg-slate-100 p-2.5 text-slate-500" aria-label="添加附件"><Paperclip className="h-5 w-5" /></button><textarea value={postText} onChange={(event) => setPostText(event.target.value)} rows={1} placeholder="发布项目动态..." className="max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-300" /><button onClick={() => void handlePost()} disabled={!postText.trim()} className="mb-0.5 rounded-full bg-indigo-600 p-2.5 text-white disabled:bg-slate-200" aria-label="发送"><Send className="h-5 w-5" /></button></div>
+        {postAttachments.length > 0 && <div className="mb-2 flex flex-wrap gap-2">{postAttachments.map((file, index) => <span key={`${file.name}-${index}`} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600"><span className="max-w-48 truncate">{file.name}</span><button type="button" onClick={() => setPostAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="text-slate-400 hover:text-rose-600" aria-label={`移除${file.name}`}>×</button></span>)}</div>}
+        <div className="flex items-end gap-2"><button onClick={() => attachmentInputRef.current?.click()} disabled={isUploading} className="mb-0.5 rounded-full bg-slate-100 p-2.5 text-slate-500 disabled:opacity-50" aria-label="添加附件"><Paperclip className="h-5 w-5" /></button><input ref={attachmentInputRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.xlsx,.zip" className="hidden" onChange={(event) => void handleAttachmentChange(event)} /><textarea value={postText} onChange={(event) => setPostText(event.target.value)} rows={1} placeholder={isUploading ? "附件上传中…" : "发布项目动态..."} className="max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-300" /><button onClick={() => void handlePost()} disabled={isUploading || (!postText.trim() && postAttachments.length === 0)} className="mb-0.5 rounded-full bg-indigo-600 p-2.5 text-white disabled:bg-slate-200" aria-label="发送"><Send className="h-5 w-5" /></button></div>
       </footer>
     </div>
   );

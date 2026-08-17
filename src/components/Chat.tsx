@@ -3,6 +3,7 @@ import { Send, Paperclip, Search, MoreVertical, FileText, Image as ImageIcon, Me
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { readAndUploadFile } from "@/src/lib/fileUpload";
 
 const initialChannels = [
   { id: "1", name: "全局公告", type: "announcement", unread: 2, members: ["所有人"] },
@@ -55,6 +56,7 @@ export function Chat() {
   const [selectedProject, setSelectedProject] = useState("");
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
   const [postAttachments, setPostAttachments] = useState<any[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const activeChannel = channels.find((c: any) => c.id === activeChannelId) || channels[0] || { id: "empty", name: "暂无协作群组", type: "announcement", unread: 0, members: [] };
@@ -111,16 +113,12 @@ export function Chat() {
     const files = (Array.from(event.target.files || []) as File[]).slice(0, 3 - postAttachments.length);
     event.target.value = "";
     if (files.length === 0) return;
-    const next = await Promise.all(files.map((file) => new Promise<any>((resolve, reject) => {
-      if (file.size > 8 * 1024 * 1024) { reject(new Error(`${file.name} 超过 8MB`)); return; }
-      const reader = new FileReader();
-      reader.onload = () => resolve({ name: file.name, size: `${(file.size / 1024 / 1024).toFixed(1)} MB`, type: file.type.startsWith("image/") ? "image" : "file", dataUrl: reader.result });
-      reader.onerror = () => reject(new Error(`读取 ${file.name} 失败`));
-      reader.readAsDataURL(file);
-    }))).catch((error) => {
+    setIsUploading(true);
+    const next = await Promise.all(files.map((file) => readAndUploadFile(file))).catch((error) => {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: error.message || '附件读取失败' }));
       return [];
     });
+    setIsUploading(false);
     setPostAttachments((current) => [...current, ...next]);
   };
 
@@ -249,10 +247,10 @@ export function Chat() {
                   </div>
                   <button 
                     onClick={handlePost}
-                    disabled={!postText.trim() && postAttachments.length === 0}
+                    disabled={isUploading || (!postText.trim() && postAttachments.length === 0)}
                     className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    <Send className="w-3.5 h-3.5" /> 发布
+                    <Send className="w-3.5 h-3.5" /> {isUploading ? "上传中…" : "发布"}
                   </button>
                 </div>
               </div>

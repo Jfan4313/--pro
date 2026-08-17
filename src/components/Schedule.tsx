@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
@@ -114,6 +114,49 @@ export function Schedule() {
   const [editingDep, setEditingDep] = useState<{projectId: string, taskId: string, taskName: string, predecessorId: string | null} | null>(null);
   const [newTaskProject, setNewTaskProject] = useState<string>("");
   const [taskFilter, setTaskFilter] = useState<"project" | "mine" | "overdue" | "unassigned" | "external" | "externalOverdue" | "quick">("project");
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleFocusRisk = (event: Event) => {
+      const risk = (event as CustomEvent).detail;
+      if (risk?.actionTab !== "schedule") return;
+
+      const targetProject = data.find((project: any) => project.id === risk.projectId || project.name === risk.projectName);
+      if (targetProject) {
+        setSelectedProject(targetProject.name);
+        setExpandedProjects((current) => current.includes(targetProject.id) ? current : [...current, targetProject.id]);
+        const targetTask = targetProject.tasks?.find((task: any) => task.id === risk.taskId);
+        if (targetTask && risk.action === "deadline") {
+          setEditingTask({ projectId: targetProject.id, taskId: targetTask.id, taskName: targetTask.name, deadline: targetTask.deadline });
+        }
+        if (targetTask && risk.action === "assign") {
+          const assignee = window.prompt("请输入负责人姓名或协作单位", targetTask.assignee === "待指派" ? "" : targetTask.assignee);
+          if (assignee?.trim()) {
+            void setData((current: any[]) => current.map((project: any) => project.id !== targetProject.id ? project : { ...project, tasks: project.tasks.map((task: any) => task.id === targetTask.id ? { ...task, assignee: assignee.trim() } : task) }));
+            window.dispatchEvent(new CustomEvent("show-toast", { detail: "负责人已指派，首页风险会自动更新" }));
+          }
+        }
+        if (targetTask && risk.action === "complete" && targetTask.status !== "completed") {
+          void setData((current: any[]) => current.map((project: any) => project.id !== targetProject.id ? project : { ...project, tasks: project.tasks.map((task: any) => task.id === targetTask.id ? { ...task, status: "completed" } : task) }));
+          window.dispatchEvent(new CustomEvent("show-toast", { detail: "任务已标记完成，首页风险会自动更新" }));
+        }
+      } else {
+        setSelectedProject("全部项目");
+      }
+
+      if (risk.taskId) {
+        setFocusedTaskId(risk.taskId);
+        setTaskFilter("project");
+        window.setTimeout(() => {
+          document.getElementById(`schedule-task-${risk.taskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+        window.setTimeout(() => setFocusedTaskId(null), 3200);
+      }
+    };
+
+    window.addEventListener("focus-risk", handleFocusRisk);
+    return () => window.removeEventListener("focus-risk", handleFocusRisk);
+  }, [data]);
 
   // 当 data 更新时，如果 newTaskProject 为空且有项目，则默认选中第一个
   React.useEffect(() => {
@@ -607,7 +650,7 @@ export function Schedule() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {visibleTaskList.slice(0, 6).map((task: any) => (
-            <div key={`${task.projectId}-${task.id}`} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div id={focusedTaskId === task.id ? `schedule-task-card-${task.id}` : undefined} key={`${task.projectId}-${task.id}`} className={cn("rounded-xl border bg-slate-50 p-3 transition-all", focusedTaskId === task.id ? "border-amber-400 ring-2 ring-amber-200 bg-amber-50" : "border-slate-100")}>
               <div className="text-sm font-medium text-slate-900 line-clamp-1">{task.name}</div>
               <div className="text-xs text-slate-500 mt-1">{task.projectName} · {task.responsibilityType || "内部人员"}：{task.assignee || "待指派"} · {task.deadline || "无截止"}</div>
               {task.sourceSummary && <div className="text-xs text-slate-400 mt-2 line-clamp-1">来源：{task.sourceSummary}</div>}
@@ -672,7 +715,7 @@ export function Schedule() {
                   {expandedProjects.includes(project.id) && (
                     <div className="pl-12 pr-4 py-2 bg-white">
                       {project.tasks.map((task) => (
-                        <div key={task.id} className="flex items-center py-3 border-b border-slate-50 last:border-0 group">
+                        <div id={focusedTaskId === task.id ? `schedule-task-${task.id}` : undefined} key={task.id} className={cn("flex items-center py-3 border-b border-slate-50 last:border-0 group transition-all", focusedTaskId === task.id && "rounded-lg bg-amber-50 ring-2 ring-amber-200 px-2 -mx-2")}>
                           <div className="w-[20%] flex items-center gap-3">
                             {task.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                             {task.status === 'in-progress' && <Clock className="w-4 h-4 text-blue-500 shrink-0" />}

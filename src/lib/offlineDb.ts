@@ -94,6 +94,12 @@ export const offlineDb = {
   saveConflict(conflict: any) {
     return tx("conflicts", "readwrite", (store) => store.put({ id: conflict.operation?.id || crypto.randomUUID(), ...conflict, createdAt: new Date().toISOString() }));
   },
+  listConflicts() {
+    return tx<any[]>("conflicts", "readonly", (store) => store.getAll());
+  },
+  deleteConflict(id: string) {
+    return tx("conflicts", "readwrite", (store) => store.delete(id));
+  },
   async getMeta<T>(key: string): Promise<T | undefined> {
     const row = await tx<any>("meta", "readonly", (store) => store.get(key));
     return row?.value as T | undefined;

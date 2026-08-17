@@ -75,7 +75,7 @@ export const apiClient = {
     return request<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(id)}/reset-password`, { method: "POST", body: { password } });
   },
   getAppData<T>(key: string) {
-    return request<{ key: string; value: T; updatedAt: string; version: number }>(`/api/app-data/${encodeURIComponent(key)}`);
+    return request<{ key: string; value: T; updatedAt: string; version: number; exists?: boolean }>(`/api/app-data/${encodeURIComponent(key)}`);
   },
   putAppData<T>(key: string, value: T) {
     return request<{ key: string; value: T; updatedAt: string; version: number }>(`/api/app-data/${encodeURIComponent(key)}`, {

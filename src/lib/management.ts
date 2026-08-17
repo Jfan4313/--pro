@@ -94,6 +94,8 @@ export function deriveRisks({
         type: "任务逾期",
         title: task.name,
         projectName: task.projectName,
+        projectId: task.projectId,
+        taskId: task.id,
         actionTab: "schedule",
       });
     }
@@ -104,6 +106,8 @@ export function deriveRisks({
         type: "未分配负责人",
         title: task.name,
         projectName: task.projectName,
+        projectId: task.projectId,
+        taskId: task.id,
         actionTab: "schedule",
       });
     }
@@ -117,6 +121,8 @@ export function deriveRisks({
         level: "high",
         type: "材料到货风险",
         title: order.items || order.id,
+        projectId: order.projectId,
+        orderId: order.id,
         projectName: project?.name || order.projectName || "未关联项目",
         actionTab: "supply",
       });
@@ -131,6 +137,7 @@ export function deriveRisks({
         level: "medium",
         type: "合同缺失",
         title: "项目已有施工进展但未关联合同",
+        projectId: project.id,
         projectName: project.name,
         actionTab: "contracts",
       });
@@ -146,6 +153,8 @@ export function deriveRisks({
         level: "high",
         type: "成本超支",
         title: `实际 ${actual} 万 / 预算 ${budget} 万`,
+        projectId: cost.id,
+        costId: cost.id,
         projectName: cost.project,
         actionTab: "cost",
       });
@@ -159,6 +168,7 @@ export function deriveRisks({
         level: "medium",
         type: "安全培训风险",
         title: `${person.name} 未完成安全培训`,
+        personId: person.id,
         projectName: person.projects[0]?.name || "未指定项目",
         actionTab: "personnel",
       });
@@ -177,6 +187,8 @@ export function deriveRisks({
         level: "high",
         type: "外协合同缺失",
         title: `${partner.name} 未关联合同`,
+        partnerId: partner.id,
+        projectId: linkedProjects[0]?.id,
         projectName: projectNames[0] || linkedProjects[0]?.name || "未关联项目",
         actionTab: "partners",
       });
@@ -190,6 +202,8 @@ export function deriveRisks({
         level: "medium",
         type: "外协资料缺失",
         title: `${partner.name} 缺少 ${missingDocs.slice(0, 2).join("、")}`,
+        partnerId: partner.id,
+        projectId: linkedProjects[0]?.id,
         projectName: projectNames[0] || linkedProjects[0]?.name || "未关联项目",
         actionTab: "partners",
       });
@@ -204,6 +218,8 @@ export function deriveRisks({
         type: "外协任务逾期",
         title: task.name,
         projectName: task.projectName,
+        projectId: task.projectId,
+        taskId: task.id,
         actionTab: "schedule",
       });
     }
@@ -214,6 +230,8 @@ export function deriveRisks({
         type: "责任主体未明确",
         title: task.name,
         projectName: task.projectName,
+        projectId: task.projectId,
+        taskId: task.id,
         actionTab: "schedule",
       });
     }

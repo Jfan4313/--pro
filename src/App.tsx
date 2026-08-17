@@ -31,6 +31,7 @@ import { MobileWorkspace } from "./components/MobileWorkspace";
 import { AccountManagement } from "./components/AccountManagement";
 import { WorkMemo } from "./components/WorkMemo";
 import { VersionManagement } from "./components/VersionManagement";
+import { FirstRunGuide } from "./components/FirstRunGuide";
 import { LoginScreen, PasswordChangeScreen } from "./components/LoginScreen";
 import { useAuth } from "./lib/auth";
 
@@ -45,10 +46,10 @@ const tabPermissions: Record<string, string> = {
 export default function App() {
   const { user, loading: authLoading, can } = useAuth();
   const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || "dashboard");
-  const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation">("orders");
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [isProcurementModalOpen, setIsProcurementModalOpen] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
+  const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation") || "orders");
   const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; returnTab: string }>({ projectId: null, returnTab: "dashboard" });
 
   const navigateToTab = (tab: string) => {
@@ -59,25 +60,51 @@ export default function App() {
     }
     if (tab === "site-survey") setSurveyContext({ projectId: null, returnTab: "dashboard" });
     setActiveTab(tab);
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", tab);
+    if (tab !== "project-detail") params.delete("project");
+    window.history.pushState({ tab }, "", `${window.location.pathname}?${params.toString()}`);
   };
 
   const openProjectSurvey = (projectId: string, returnTab = "project-detail") => {
     setSelectedProjectId(projectId);
     setSurveyContext({ projectId, returnTab });
     setActiveTab("site-survey");
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "site-survey");
+    params.set("project", projectId);
+    window.history.pushState({ tab: "site-survey", projectId }, "", `${window.location.pathname}?${params.toString()}`);
   };
 
   const handleMaterialsNavigate = (tab: string, subTab?: string) => {
     setActiveTab(tab);
     if (tab === 'supply' && subTab) {
       setSupplyChainTab(subTab as any);
+      const params = new URLSearchParams(window.location.search);
+      params.set("supplyTab", subTab);
+      window.history.replaceState({ tab, supplyTab: subTab }, "", `${window.location.pathname}?${params.toString()}`);
     }
   };
 
   const openProjectDetail = (projectId: string) => {
     setSelectedProjectId(projectId);
     setActiveTab("project-detail");
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "project-detail");
+    params.set("project", projectId);
+    window.history.pushState({ tab: "project-detail", projectId }, "", `${window.location.pathname}?${params.toString()}`);
   };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setActiveTab(params.get("tab") || "dashboard");
+      setSelectedProjectId(params.get("project"));
+      setSupplyChainTab((params.get("supplyTab") as "orders" | "reconciliation") || "orders");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     const handleToast = (e: any) => {
@@ -106,13 +133,13 @@ export default function App() {
       />
       
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <Header setActiveTab={navigateToTab} />
+        <Header setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />
         <main className="app-main flex-1 overflow-y-auto flex flex-col">
           {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
           {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectDetail} /></div></>}
-          {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectId} onBack={() => setActiveTab("dashboard")} setActiveTab={navigateToTab} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
+          {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectId} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
           {activeTab === "lifecycle" && <><div className="md:hidden min-h-full"><MobileWorkspace module="lifecycle" setActiveTab={navigateToTab} onOpenProject={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectLifecycle onOpenSiteSurvey={(projectId) => openProjectSurvey(projectId, "lifecycle")} /></div></>}
-          {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} onBack={() => { setActiveTab(surveyContext.returnTab); setSurveyContext({ projectId: null, returnTab: "dashboard" }); }} />}
+          {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} onBack={() => { navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
           {activeTab === "work-memo" && <WorkMemo />}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
@@ -135,6 +162,7 @@ export default function App() {
         )}
 
         <SmartIntake setActiveTab={setActiveTab} />
+        <FirstRunGuide setActiveTab={navigateToTab} />
 
         {/* Global Toast */}
         {toastMsg && (

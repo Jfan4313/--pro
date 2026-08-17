@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Users, UserCheck, ShieldAlert, Search, Filter, MoreHorizontal, CheckCircle2, AlertCircle, X, Download, UploadCloud, FileBadge, Image as ImageIcon, Edit, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
@@ -39,6 +39,24 @@ export function Personnel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [focusedPersonId, setFocusedPersonId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleFocusRisk = (event: Event) => {
+      const risk = (event as CustomEvent).detail;
+      if (risk?.actionTab !== "personnel" || !risk.personId) return;
+      if (risk.action === "train") {
+        void setData((current: any[]) => current.map((person: any) => person.id === risk.personId ? { ...person, safetyTrained: true } : person));
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "已标记安全培训完成，首页风险会自动更新" }));
+      }
+      setSearchQuery(risk.personId);
+      setFocusedPersonId(risk.personId);
+      window.setTimeout(() => document.getElementById(`personnel-${risk.personId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+      window.setTimeout(() => setFocusedPersonId(null), 3200);
+    };
+    window.addEventListener("focus-risk", handleFocusRisk);
+    return () => window.removeEventListener("focus-risk", handleFocusRisk);
+  }, []);
   
   // New state for Add Personnel Form
   const [formData, setFormData] = useState({
@@ -313,7 +331,7 @@ export function Personnel() {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filteredData.map((person) => (
-              <tr key={person.id} className="hover:bg-slate-50/80 transition-colors">
+              <tr id={focusedPersonId === person.id ? `personnel-${person.id}` : undefined} key={person.id} className={cn("hover:bg-slate-50/80 transition-colors", focusedPersonId === person.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
                 <td className="px-4 py-4 font-mono text-slate-500 whitespace-nowrap">{person.id}</td>
                 <td className="px-4 py-4 font-medium text-slate-900">
                   <div className="min-w-0">

@@ -67,6 +67,13 @@ export function useDashboardOverview() {
     return pendingContracts + pendingOrders + pendingCollections;
   }, [contracts, supplyOrders, costData]);
 
+  const pendingApprovalTab = useMemo(() => {
+    if (contracts.some((item: any) => item.status === "pending" || item.status === "draft")) return "contracts";
+    if (supplyOrders.some((item: any) => item.approvalStatus === "pending" || item.status === "production")) return "supply";
+    if (costData.some((project: any) => (project.collection?.records || []).some((record: any) => record.status === "pending"))) return "cost";
+    return "work-memo";
+  }, [contracts, supplyOrders, costData]);
+
   const financeSummary = useMemo(() => {
     return costData.reduce((acc: any, project: any) => {
       const budget = (project.budget?.material || 0) + (project.budget?.labor || 0) + (project.budget?.management || 0) + (project.budget?.risk || 0);
@@ -115,6 +122,7 @@ export function useDashboardOverview() {
     lifecycleSummary,
     overdueTasks,
     pendingApprovals,
+    pendingApprovalTab,
     pendingQuickIntakes,
     rejectQuickIntake,
     risks,

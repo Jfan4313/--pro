@@ -5,6 +5,58 @@ import { AUTH_TOKEN_KEY } from "./clientIdentity";
 
 const SYNC_EVENT = "zhijian-sync-event";
 
+export type SyncState = "idle" | "saving" | "syncing" | "offline" | "error" | "conflict";
+export interface SyncStatus {
+  state: SyncState;
+  pending: number;
+  lastSyncedAt: string | null;
+  error: string | null;
+}
+
+let syncStatus: SyncStatus = {
+  state: typeof navigator !== "undefined" && navigator.onLine ? "idle" : "offline",
+  pending: 0,
+  lastSyncedAt: null,
+  error: null,
+};
+
+function updateSyncStatus(patch: Partial<SyncStatus>) {
+  syncStatus = { ...syncStatus, ...patch };
+  emitSyncEvent({ type: "sync_status", status: syncStatus });
+}
+
+export function getSyncStatus() {
+  return syncStatus;
+}
+
+export async function resolveSyncConflict(id: string, strategy: "server" | "local") {
+  const conflicts = await offlineDb.listConflicts();
+  const conflict = conflicts.find((item: any) => item.id === id);
+  if (!conflict) return false;
+
+  if (strategy === "server") {
+    if (conflict.serverRecord?.id && conflict.operation?.resource) {
+      await offlineDb.putEntity(conflict.operation.resource, conflict.serverRecord);
+    }
+  } else if (conflict.operation) {
+    await offlineDb.queue({
+      ...conflict.operation,
+      id: crypto.randomUUID(),
+      baseVersion: conflict.serverRecord?.version,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  await offlineDb.deleteConflict(id);
+  updateSyncStatus({ state: strategy === "local" ? "syncing" : "idle", error: null });
+  if (strategy === "local") void flushOutbox();
+  else {
+    const remaining = await offlineDb.listConflicts();
+    if (remaining.length === 0) updateSyncStatus({ state: "idle", error: null });
+  }
+  return true;
+}
+
 export function emitSyncEvent(detail: unknown) {
   window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail }));
 }
@@ -16,6 +68,7 @@ export function onSyncEvent(listener: (detail: any) => void) {
 }
 
 export async function queueAppDataUpdate<T>(key: string, value: T) {
+  updateSyncStatus({ state: navigator.onLine ? "saving" : "offline", error: null });
   await offlineDb.putAppData(key, value, { pending: true });
   await offlineDb.queue({
     id: crypto.randomUUID(),
@@ -27,10 +80,13 @@ export async function queueAppDataUpdate<T>(key: string, value: T) {
     createdAt: new Date().toISOString(),
   });
   emitSyncEvent({ type: "app_data_changed", key, value });
+  const pending = (await offlineDb.getOutbox()).length;
+  updateSyncStatus({ pending, state: navigator.onLine ? "syncing" : "offline" });
   void flushOutbox();
 }
 
 export async function queueEntityOperation(resource: string, type: "upsert" | "delete", payload: any) {
+  updateSyncStatus({ state: navigator.onLine ? "saving" : "offline", error: null });
   const recordId = payload.id || crypto.randomUUID();
   const operation = {
     id: crypto.randomUUID(),
@@ -47,13 +103,24 @@ export async function queueEntityOperation(resource: string, type: "upsert" | "d
   if (type === "upsert") await offlineDb.putEntity(resource, operation.payload);
   await offlineDb.queue(operation);
   emitSyncEvent({ type: "entity_changed", resource, record: operation.payload });
+  const pending = (await offlineDb.getOutbox()).length;
+  updateSyncStatus({ pending, state: navigator.onLine ? "syncing" : "offline" });
   void flushOutbox();
   return operation.payload;
 }
 
 export async function flushOutbox() {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) {
+    updateSyncStatus({ state: "offline", pending: (await offlineDb.getOutbox()).length });
+    return;
+  }
   const operations = await offlineDb.getOutbox();
+  if (operations.length === 0) {
+    updateSyncStatus({ state: "idle", pending: 0, error: null });
+    return;
+  }
+  updateSyncStatus({ state: "syncing", pending: operations.length, error: null });
+  let hadConflict = false;
   for (const operation of operations) {
     try {
       if (operation.kind === "appData") {
@@ -63,16 +130,26 @@ export async function flushOutbox() {
         const response = await apiClient.push([operation]);
         for (const applied of response.applied) await offlineDb.putEntity(operation.resource, applied);
         for (const conflict of response.conflicts) await offlineDb.saveConflict(conflict);
+        if (response.conflicts.length > 0) {
+          hadConflict = true;
+          updateSyncStatus({ state: "conflict", pending: (await offlineDb.getOutbox()).length, error: "存在数据冲突，请检查同步记录" });
+        }
       }
       await offlineDb.deleteOutbox(operation.id);
-    } catch {
+      updateSyncStatus({ pending: (await offlineDb.getOutbox()).length });
+    } catch (error: any) {
+      updateSyncStatus({ state: "error", pending: (await offlineDb.getOutbox()).length, error: error?.message || "同步失败，请稍后重试" });
       return;
     }
   }
+  updateSyncStatus({ state: hadConflict ? "conflict" : "idle", pending: 0, lastSyncedAt: new Date().toISOString(), error: hadConflict ? "存在数据冲突，请检查同步记录" : null });
 }
 
 export async function pullLatest() {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) {
+    updateSyncStatus({ state: "offline" });
+    return;
+  }
   const sinceVersion = (await offlineDb.getMeta<number>("serverVersion")) || 0;
   try {
     const response = await apiClient.pull(sinceVersion);
@@ -86,7 +163,8 @@ export async function pullLatest() {
       }
     }
     await offlineDb.setMeta("serverVersion", response.serverVersion);
-  } catch {
+  } catch (error: any) {
+    updateSyncStatus({ state: "error", error: error?.message || "无法连接同步服务" });
     // The app keeps using IndexedDB when the local backend is unreachable.
   }
 }
@@ -94,7 +172,9 @@ export async function pullLatest() {
 export function startRealtimeSync() {
   void flushOutbox();
   void pullLatest();
+  window.addEventListener("offline", () => updateSyncStatus({ state: "offline", error: null }));
   window.addEventListener("online", () => {
+    updateSyncStatus({ state: "syncing", error: null });
     void flushOutbox();
     void pullLatest();
   });

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Building2, Users, FolderTree, Plus, MoreVertical, Search, ChevronRight, Edit2, Trash2, UserPlus, X } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
+import { createEmptyOrganization } from "@/src/lib/workspaceDefaults";
 import { motion, AnimatePresence } from "motion/react";
 
 type OrgNodeType = "company" | "department" | "team";
@@ -57,7 +58,7 @@ const initialOrgData = {
 };
 
 export function Organization() {
-  const [orgData, setOrgData] = useSyncedAppData<OrgNode>("organizationData", initialOrgData as OrgNode);
+  const [orgData, setOrgData] = useSyncedAppData<OrgNode>("organizationData", createEmptyOrganization() as OrgNode);
   const [personnelData, setPersonnelData] = useSyncedAppData("personnelData", []);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("org-1");
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(["org-1", "dept-1", "dept-2"]));

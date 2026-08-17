@@ -9,15 +9,13 @@ import { AuthProvider } from './lib/auth.tsx';
 
 const viteEnv = (import.meta as any).env || {};
 
-const EMPTY_WORKSPACE_VERSION = "2026-08-16-empty-business-data-v2";
-const businessDataKeys = ["projectBoardData", "personnelData", "scheduleData", "project_contracts", "costDataV2", "materialsData", "bomData", "bomHistory", "bomVersion", "materialPrices", "materialPriceHistory", "supplyOrders", "suppliers", "externalPartners", "organizationData", "chatChannels", "chatPosts", "workMemos"];
-void offlineDb.getMeta<string>("workspace-data-version").then(async (version) => {
-  if (version === EMPTY_WORKSPACE_VERSION) return;
-  await Promise.all(businessDataKeys.map((key) => offlineDb.deleteAppData(key)));
-  const pending = await offlineDb.getOutbox();
-  await Promise.all(pending.map((item: any) => offlineDb.deleteOutbox(item.id)));
-  await offlineDb.setMeta("workspace-data-version", EMPTY_WORKSPACE_VERSION);
-}).catch(() => undefined).finally(() => startRealtimeSync());
+const EMPTY_WORKSPACE_VERSION = "2026-08-16-empty-business-data-v3";
+// Do not delete cached business data or pending writes during startup. The previous
+// migration cleared local work unconditionally; new versions only record the schema
+// marker and let the normal sync/data migration path preserve user work.
+void offlineDb.setMeta("workspace-data-version", EMPTY_WORKSPACE_VERSION)
+  .catch(() => undefined)
+  .finally(() => startRealtimeSync());
 
 if (viteEnv.DEV && "serviceWorker" in navigator) {
   // A production PWA service worker can remain registered on localhost and

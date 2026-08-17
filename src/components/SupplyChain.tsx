@@ -37,10 +37,32 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
   const [statusFilter, setStatusFilter] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [activeTab, setActiveTab] = useState<"orders" | "reconciliation">(defaultTab);
+  const [focusedOrderId, setFocusedOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveTab(defaultTab);
   }, [defaultTab]);
+
+  useEffect(() => {
+    const handleFocusRisk = (event: Event) => {
+      const risk = (event as CustomEvent).detail;
+      if (risk?.actionTab !== "supply") return;
+      setActiveTab("orders");
+      setSelectedProjectId(risk.projectId || "all");
+      if (risk.orderId && risk.action === "delivered") {
+        void setOrders((current: any[]) => current.map((order: any) => order.id === risk.orderId ? { ...order, status: "delivered" } : order));
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "采购订单已标记为已到货，首页风险会自动更新" }));
+      }
+      if (risk.orderId) {
+        setSearchQuery(risk.orderId);
+        setFocusedOrderId(risk.orderId);
+        window.setTimeout(() => document.getElementById(`supply-order-${risk.orderId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+        window.setTimeout(() => setFocusedOrderId(null), 3200);
+      }
+    };
+    window.addEventListener("focus-risk", handleFocusRisk);
+    return () => window.removeEventListener("focus-risk", handleFocusRisk);
+  }, []);
 
   const allProjects = projectBoardData.flatMap((col: any) => col.projects || []);
 
@@ -243,7 +265,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
                   const status = statusConfig[order.status as keyof typeof statusConfig];
                   const project = allProjects.find((p: any) => p.id === order.projectId);
                   return (
-                    <tr key={order.id} className="hover:bg-slate-50 transition-colors group">
+                    <tr id={focusedOrderId === order.id ? `supply-order-${order.id}` : undefined} key={order.id} className={cn("hover:bg-slate-50 transition-colors group", focusedOrderId === order.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
                       <td className="px-6 py-4 font-mono font-medium text-slate-700">{order.id}</td>
                       <td className="px-6 py-4">
                         {project ? (

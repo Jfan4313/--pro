@@ -2,18 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/src/lib/apiClient";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
-
-const EMPTY_WORKSPACE_KEYS = new Set([
-  "projectBoardData", "personnelData", "scheduleData", "project_contracts", "costDataV2",
-  "materialsData", "bomData", "bomHistory", "bomVersion", "materialPrices", "materialPriceHistory",
-  "supplyOrders", "suppliers", "externalPartners", "organizationData", "chatChannels", "chatPosts",
-  "workMemos", "quickIntakeItems", "appNotifications", "warehouseTransactions", "warehouseOutboundOrders",
-]);
-
-function emptyWorkspaceValue<T>(key: string, fallback: T): T {
-  if (!EMPTY_WORKSPACE_KEYS.has(key)) return fallback;
-  return (key === "organizationData" ? {} : []) as T;
-}
+import { emptyWorkspaceValue } from "@/src/lib/workspaceDefaults";
 
 export function useSyncedAppData<T>(key: string, initialValue: T) {
   const [data, setData] = useState<T>(initialValue);
@@ -33,8 +22,19 @@ export function useSyncedAppData<T>(key: string, initialValue: T) {
 
       try {
         const remote = await apiClient.getAppData<T>(key);
-        const value = remote.value;
-        await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
+        const value = remote.exists === false ? emptyWorkspaceValue(key, initialValue) : remote.value;
+        if (remote.exists !== false) {
+          await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
+        } else {
+          // A key removed from the server must not keep reappearing from an old
+          // IndexedDB cache on the next page load. Offline requests still keep
+          // the cache because they enter the catch branch above. Preserve a
+          // cache that has a pending local write, since it is valid user work.
+          const pending = await offlineDb.getOutbox();
+          if (!pending.some((item: any) => item.kind === "appData" && item.key === key)) {
+            await offlineDb.deleteAppData(key);
+          }
+        }
         if (!cancelled) setData(value);
       } catch (error: any) {
         if (error?.status === 404) {
