@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Building2, CheckCircle2, FileWarning, Phone, Plus, Search, ShieldCheck, X } from "lucide-react";
+import { Building2, CheckCircle2, FileWarning, Phone, Plus, Search, ShieldCheck, X, Edit2, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -70,6 +70,7 @@ export function ExternalPartners() {
   const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPartner, setEditingPartner] = useState<any | null>(null);
   const [focusedPartnerId, setFocusedPartnerId] = useState<string | null>(null);
   const [pendingDocUpload, setPendingDocUpload] = useState<{ partnerId: string; doc: string } | null>(null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
@@ -134,7 +135,7 @@ export function ExternalPartners() {
     const type = String(form.get("type") || partnerTypes[0]);
     const docs = type === "外包个人" ? ["人员证件", "安全协议"] : partnerRequiredDocs;
     const newPartner = {
-      id: `EP-${Date.now()}`,
+      id: editingPartner?.id || `EP-${Date.now()}`,
       name: String(form.get("name") || ""),
       type,
       contact: String(form.get("contact") || ""),
@@ -146,11 +147,20 @@ export function ExternalPartners() {
       status: String(form.get("status") || "pending-contract"),
       qualification: String(form.get("qualification") || ""),
       requiredDocs: docs,
-      uploadedDocs: [],
+      uploadedDocs: editingPartner?.uploadedDocs || [],
+      uploadedDocFiles: editingPartner?.uploadedDocFiles || {},
     };
-    setPartners((prev: any[]) => [newPartner, ...prev]);
+    setPartners((prev: any[]) => editingPartner ? prev.map((partner: any) => partner.id === editingPartner.id ? newPartner : partner) : [newPartner, ...prev]);
     setIsModalOpen(false);
-    window.dispatchEvent(new CustomEvent("show-toast", { detail: "参建单位已添加" }));
+    setEditingPartner(null);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: editingPartner ? "参建单位信息已修改" : "参建单位已添加" }));
+  };
+
+  const openEdit = (partner: any) => { setEditingPartner(partner); setIsModalOpen(true); };
+  const deletePartner = (partner: any) => {
+    if (!window.confirm(`确定删除“${partner.name}”吗？相关外协资料记录也会从列表移除。`)) return;
+    setPartners((current: any[]) => current.filter((item) => item.id !== partner.id));
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "参建单位/外协对象已删除" }));
   };
 
   const toggleDoc = (partnerId: string, docName: string) => {
@@ -170,7 +180,7 @@ export function ExternalPartners() {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">参建单位与外协管理</h2>
           <p className="text-slate-500 text-sm mt-1">管理设计、分包、劳务、检测、租赁和外包人员的责任闭环</p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center justify-center">
+        <button onClick={() => { setEditingPartner(null); setIsModalOpen(true); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center justify-center">
           <Plus className="w-4 h-4 mr-2" />
           新增参建单位
         </button>
@@ -207,6 +217,7 @@ export function ExternalPartners() {
                 <th className="px-5 py-4">合同</th>
                 <th className="px-5 py-4">资料</th>
                 <th className="px-5 py-4">状态</th>
+                <th className="px-5 py-4">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -218,6 +229,7 @@ export function ExternalPartners() {
                       <div className="font-bold text-slate-900">{partner.name}</div>
                       <div className="flex items-center gap-1 text-xs text-slate-500 mt-1"><Phone className="w-3 h-3" /> {partner.contact} · {partner.phone}</div>
                     </td>
+                    <td className="px-5 py-4"><div className="flex items-center gap-1"><button onClick={() => openEdit(partner)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="编辑"><Edit2 className="h-4 w-4" /></button><button onClick={() => deletePartner(partner)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除"><Trash2 className="h-4 w-4" /></button></div></td>
                     <td className="px-5 py-4"><span className="inline-flex px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-medium">{partner.type}</span></td>
                     <td className="px-5 py-4 text-slate-600">{(partner.projectNames || []).join("、") || "未关联"}</td>
                     <td className="px-5 py-4 text-slate-600 max-w-[260px]"><div className="line-clamp-2" title={partner.scope}>{partner.scope || "未填写"}</div></td>
@@ -263,47 +275,47 @@ export function ExternalPartners() {
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between p-6 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">新增参建单位/外协对象</h3>
+              <h3 className="text-lg font-bold text-slate-900">{editingPartner ? "编辑参建单位/外协对象" : "新增参建单位/外协对象"}</h3>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <Field name="name" label="单位/个人名称" placeholder="例如：某某设计院" required />
+                <Field name="name" defaultValue={editingPartner?.name} label="单位/个人名称" placeholder="例如：某某设计院" required />
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">类型</label>
-                  <select name="type" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
+                  <select name="type" defaultValue={editingPartner?.type || partnerTypes[0]} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
                     {partnerTypes.map((type) => <option key={type}>{type}</option>)}
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <Field name="contact" label="联系人" placeholder="联系人姓名" required />
-                <Field name="phone" label="联系电话" placeholder="手机号/座机" required />
+                <Field name="contact" defaultValue={editingPartner?.contact} label="联系人" placeholder="联系人姓名" required />
+                <Field name="phone" defaultValue={editingPartner?.phone} label="联系电话" placeholder="手机号/座机" required />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">关联项目</label>
-                  <select name="projectId" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
+                  <select name="projectId" defaultValue={editingPartner?.projectIds?.[0] || ""} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
                     <option value="">暂不关联</option>
                     {projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">关联合同</label>
-                  <select name="contractId" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
+                  <select name="contractId" defaultValue={editingPartner?.contractId || ""} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
                     <option value="">待签/待关联</option>
                     {contracts.map((contract: any) => <option key={contract.id} value={contract.id}>{contract.id} · {contract.name}</option>)}
                   </select>
                 </div>
               </div>
-              <Field name="qualification" label="资质/证书摘要" placeholder="例如：建筑施工总承包二级" />
+              <Field name="qualification" defaultValue={editingPartner?.qualification} label="资质/证书摘要" placeholder="例如：建筑施工总承包二级" />
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">负责范围</label>
-                <textarea name="scope" rows={3} required className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none" placeholder="例如：支架安装、组件安装、现场收尾" />
+                <textarea name="scope" defaultValue={editingPartner?.scope} rows={3} required className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm resize-none" placeholder="例如：支架安装、组件安装、现场收尾" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">状态</label>
-                <select name="status" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
+                <select name="status" defaultValue={editingPartner?.status || "pending-contract"} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-sm">
                   <option value="pending-contract">待签合同</option>
                   <option value="active">合作中</option>
                   <option value="suspended">暂停</option>
@@ -312,7 +324,7 @@ export function ExternalPartners() {
               </div>
               <div className="pt-4 flex justify-end gap-3 border-t border-slate-100">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
-                <button type="submit" className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg">确认添加</button>
+                <button type="submit" className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg">{editingPartner ? "保存修改" : "确认添加"}</button>
               </div>
             </form>
           </div>
@@ -336,11 +348,11 @@ function Metric({ icon: Icon, label, value, color }: any) {
   );
 }
 
-function Field({ name, label, placeholder, required }: { name: string; label: string; placeholder?: string; required?: boolean }) {
+function Field({ name, label, placeholder, required, defaultValue }: { name: string; label: string; placeholder?: string; required?: boolean; defaultValue?: string }) {
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">{label}{required && <span className="text-rose-500"> *</span>}</label>
-      <input name={name} required={required} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder={placeholder} />
+      <input name={name} defaultValue={defaultValue} required={required} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder={placeholder} />
     </div>
   );
 }

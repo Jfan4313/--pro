@@ -3,6 +3,7 @@ import { Truck, Clock, FileText, Search, Filter, ArrowRight, X, Building2, Phone
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { getProjectNumber } from "@/src/lib/management";
 
 const initialSupplyData = [
   { id: "PO-2026-001", projectId: "p5", supplier: "隆基绿能科技股份有限公司", items: "单晶硅光伏组件 550Wp", amount: "¥1,250,000", orderDate: "2026-02-15", expectedDate: "2026-03-20", status: "in-transit" },
@@ -31,7 +32,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
   const [orders, setOrders] = useSyncedAppData("supplyOrders", []);
   const [suppliers, setSuppliers] = useSyncedAppData("suppliers", []);
   const [projectBoardData] = useProjectBoardData();
-  const [bomData] = useSyncedAppData("bomData", []);
+  const [bomData, setBomData] = useSyncedAppData<any[]>("bomData", []);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -69,6 +70,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isNewSupplierModalOpen, setIsNewSupplierModalOpen] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
 
   const [newSupplierForm, setNewSupplierForm] = useState({
     name: "",
@@ -80,6 +82,8 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
 
   const [newOrderForm, setNewOrderForm] = useState({
     projectId: "",
+    bomId: "",
+    quantity: "",
     supplier: "",
     items: "",
     amount: "",
@@ -104,7 +108,11 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
 
     const newOrder = {
       id: `PO-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`,
+      purchaseOrderNo: `PO-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`,
       projectId: newOrderForm.projectId,
+      projectNumber: getProjectNumber(allProjects.find((project: any) => project.id === newOrderForm.projectId)),
+      bomId: newOrderForm.bomId,
+      quantity: Number(newOrderForm.quantity) || 0,
       supplier: newOrderForm.supplier,
       items: newOrderForm.items,
       amount: `¥${Number(newOrderForm.amount).toLocaleString()}`,
@@ -114,8 +122,11 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
     };
 
     setOrders([newOrder, ...orders]);
+    if (newOrderForm.bomId && Number(newOrderForm.quantity) > 0) {
+      setBomData((current: any[]) => current.map((item) => item.id === newOrderForm.bomId ? { ...item, procuredQty: Number(item.procuredQty || 0) + Number(newOrderForm.quantity), lastPurchaseOrderNo: newOrder.id } : item));
+    }
     setIsNewOrderModalOpen(false);
-    setNewOrderForm({ projectId: "", supplier: "", items: "", amount: "", expectedDate: "" });
+    setNewOrderForm({ projectId: "", bomId: "", quantity: "", supplier: "", items: "", amount: "", expectedDate: "" });
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '采购单已创建' }));
   };
 
@@ -239,10 +250,11 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
                 >
                   <option value="all">所有项目</option>
                   {allProjects.map((p: any) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>{getProjectNumber(p)} · {p.name}</option>
                   ))}
                 </select>
               </div>
+
               <div className="relative"><button onClick={() => setShowFilters((current) => !current)} title="打开筛选" className={cn("p-2 rounded-md transition-colors", showFilters || statusFilter !== "all" ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100")}><Filter className="w-4 h-4" /></button>{showFilters && <div className="absolute right-0 top-10 z-20 w-52 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"><label className="block text-xs font-semibold text-slate-500">订单状态<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-700"><option value="all">全部状态</option>{Object.entries(statusConfig).map(([value, config]) => <option key={value} value={value}>{config.label}</option>)}</select></label><button onClick={() => { setStatusFilter("all"); setSelectedProjectId("all"); }} className="mt-3 w-full rounded-lg bg-slate-100 py-2 text-xs font-semibold text-slate-600">重置筛选</button></div>}</div>
             </div>
             
@@ -287,7 +299,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button className="text-emerald-600 hover:text-emerald-700 font-medium flex items-center justify-end w-full opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setSelectedOrder(order)} className="text-emerald-600 hover:text-emerald-700 font-medium flex items-center justify-end w-full opacity-0 group-hover:opacity-100 transition-opacity">
                           详情 <ArrowRight className="w-3.5 h-3.5 ml-1" />
                         </button>
                       </td>
@@ -436,6 +448,16 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
       )}
 
       {/* Supplier Directory Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setSelectedOrder(null)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 p-5"><div><p className="text-xs font-bold text-emerald-600">采购订单详情</p><h3 className="mt-1 text-lg font-bold text-slate-900">{selectedOrder.id}</h3></div><button onClick={() => setSelectedOrder(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100" aria-label="关闭订单详情"><X className="h-5 w-5" /></button></div>
+            <div className="grid grid-cols-2 gap-3 p-5 text-sm"><Detail label="关联项目" value={allProjects.find((project: any) => project.id === selectedOrder.projectId)?.name || "未关联项目"} /><Detail label="供应商" value={selectedOrder.supplier} /><Detail label="采购物品" value={selectedOrder.items} /><Detail label="订单金额" value={selectedOrder.amount} /><Detail label="下单日期" value={selectedOrder.orderDate} /><Detail label="预计交期" value={selectedOrder.expectedDate} /><Detail label="当前状态" value={statusConfig[selectedOrder.status as keyof typeof statusConfig]?.label || selectedOrder.status} /></div>
+            <div className="flex justify-end border-t border-slate-100 p-5"><button onClick={() => setSelectedOrder(null)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">关闭</button></div>
+          </div>
+        </div>
+      )}
+
       {isSupplierModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl w-full max-w-4xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -627,10 +649,19 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
                 >
                   <option value="">请选择关联项目</option>
                   {allProjects.map((p: any) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>{getProjectNumber(p)} · {p.name}</option>
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">绑定项目材料清单（可选）</label>
+                <select value={newOrderForm.bomId} onChange={(e) => { const item = bomData.find((bom: any) => bom.id === e.target.value); setNewOrderForm({ ...newOrderForm, bomId: e.target.value, items: item ? `${item.name} ${item.spec || ""}`.trim() : newOrderForm.items }); }} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white">
+                  <option value="">暂不绑定材料清单</option>
+                  {bomData.filter((bom: any) => !newOrderForm.projectId || bom.projectId === newOrderForm.projectId || bom.project === allProjects.find((project: any) => project.id === newOrderForm.projectId)?.name).map((bom: any) => <option key={bom.id} value={bom.id}>{bom.id} · {bom.name}（计划 {bom.plannedQty || 0}{bom.unit || ""}）</option>)}
+                </select>
+              </div>
+              <div><label className="block text-sm font-medium text-slate-700 mb-1">本次采购数量</label><input type="number" min="0" value={newOrderForm.quantity} onChange={(e) => setNewOrderForm({ ...newOrderForm, quantity: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg" placeholder="填写后自动回写材料清单实际采购量" /></div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">供应商 <span className="text-rose-500">*</span></label>
@@ -705,4 +736,8 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
       )}
     </div>
   );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-400">{label}</p><p className="mt-1 break-words font-medium text-slate-800">{value || "-"}</p></div>;
 }

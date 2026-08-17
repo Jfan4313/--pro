@@ -125,6 +125,9 @@ export const apiClient = {
       savedAt: string;
     }>("/api/file-settings", { method: "PUT", body: payload });
   },
+  openFileRoot() {
+    return request<{ ok: boolean; rootPath: string }>("/api/file-settings/open", { method: "POST" });
+  },
   initProjectFolders(projectId: string, payload: { project: unknown; stages: unknown[] }) {
     return request<{
       ok: boolean;

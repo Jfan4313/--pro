@@ -15,6 +15,7 @@ export const EMPTY_WORKSPACE_KEYS = new Set([
   "materialsData", "bomData", "bomHistory", "bomVersion", "materialPrices", "materialPriceHistory",
   "supplyOrders", "suppliers", "externalPartners", "organizationData", "chatChannels", "chatPosts",
   "workMemos", "quickIntakeItems", "appNotifications", "warehouseTransactions", "warehouseOutboundOrders",
+  "scheduleProjectMeta",
 ]);
 
 export function createEmptyBoardColumns() {
@@ -29,5 +30,5 @@ export function emptyWorkspaceValue<T>(key: string, fallback: T): T {
   const isProjectBoard = key === "projectBoardData" || key.startsWith("projectBoardData:");
   if (isProjectBoard) return createEmptyBoardColumns() as T;
   if (!EMPTY_WORKSPACE_KEYS.has(key)) return fallback;
-  return (key === "organizationData" ? createEmptyOrganization() : []) as T;
+  return (key === "organizationData" || key === "scheduleProjectMeta" ? {} : []) as T;
 }

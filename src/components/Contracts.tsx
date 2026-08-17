@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { FileText, Upload, Search, Filter, MoreHorizontal, Download, Eye, FileSignature, X } from "lucide-react";
+import { FileText, Upload, Search, Filter, MoreHorizontal, Download, Eye, FileSignature, X, History, Paperclip } from "lucide-react";
+import { apiClient, API_BASE_URL } from "@/src/lib/apiClient";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -18,11 +19,13 @@ export function Contracts() {
   const [projectBoardData] = useProjectBoardData();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("all");
+  const [selectedType, setSelectedType] = useState("all");
   const [focusedContractId, setFocusedContractId] = useState<string | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [menuContractId, setMenuContractId] = useState<string | null>(null);
   const [previewContract, setPreviewContract] = useState<any | null>(null);
+  const [pendingContractFile, setPendingContractFile] = useState<File | null>(null);
   const projects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
 
   useEffect(() => {
@@ -49,7 +52,8 @@ export function Contracts() {
     return contracts.filter((c: any) => {
       const query = searchQuery.toLowerCase();
       const matchesProject = selectedProjectId === "all" || c.projectId === selectedProjectId;
-      return matchesProject && (c.name.toLowerCase().includes(query) ||
+      const matchesType = selectedType === "all" || c.type === selectedType;
+      return matchesProject && matchesType && (c.name.toLowerCase().includes(query) ||
              c.id.toLowerCase().includes(query) || 
              c.partyA.toLowerCase().includes(query) || 
              c.partyB.toLowerCase().includes(query));
@@ -77,6 +81,8 @@ export function Contracts() {
           date: new Date().toISOString().split('T')[0],
           status: "draft",
           fileData: fileData // Store the file data locally
+          ,isTemplate: true,
+          versionHistory: [{ version: 1, action: "上传模板", at: new Date().toISOString(), note: "模板初始上传" }],
         };
         setContracts([newContract, ...contracts]);
         handleAction(`已本地上传: ${file.name}`);
@@ -85,8 +91,20 @@ export function Contracts() {
     }
   };
 
+  const recordModification = (contract: any) => {
+    const note = window.prompt("请输入本次合同修改说明", "修改合同条款") || "";
+    if (!note.trim()) return;
+    const history = [...(contract.versionHistory || []), { version: (contract.versionHistory?.length || 0) + 1, action: "合同修改", at: new Date().toISOString(), note: note.trim() }];
+    setContracts((current: any[]) => current.map((item) => item.id === contract.id ? { ...item, version: history.length, versionHistory: history, status: item.status === "completed" ? "draft" : item.status } : item));
+    setPreviewContract((current: any) => current?.id === contract.id ? { ...current, version: history.length, versionHistory: history, status: current.status === "completed" ? "draft" : current.status } : current);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `已记录第 ${history.length} 版合同修改` }));
+  };
+
   const handleDownload = (contract: any) => {
-    if (contract.fileData) {
+    if (contract.fileUrl) {
+      window.open(contract.fileUrl, "_blank", "noopener,noreferrer");
+      handleAction('打开合同附件');
+    } else if (contract.fileData) {
       // If we have the file data stored locally, download it
       const a = document.createElement('a');
       a.href = contract.fileData;
@@ -113,11 +131,25 @@ export function Contracts() {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: `合同“${contract.name}”已审批通过` }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleArchive = (contract: any) => {
+    if (!window.confirm(`确认将合同“${contract.name}”最终归档吗？归档后如需修改会生成新版本。`)) return;
+    setContracts((current: any[]) => current.map((item) => item.id === contract.id ? { ...item, status: "completed", archivedAt: new Date().toISOString(), versionHistory: [...(item.versionHistory || []), { version: (item.versionHistory?.length || 0) + 1, action: "最终归档", at: new Date().toISOString(), note: "合同完成最终归档" }] } : item));
+    setMenuContractId(null);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "合同已最终归档" }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget as HTMLFormElement);
     const partnerId = String(form.get("partnerId") || "");
     const partner = externalPartners.find((item: any) => item.id === partnerId);
+    let uploadedFile: any = null;
+    if (pendingContractFile) {
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = () => reject(reader.error); reader.readAsDataURL(pendingContractFile); });
+        uploadedFile = await apiClient.uploadFile(`contract-${Date.now()}-${pendingContractFile.name}`, dataUrl.split(",")[1] || "");
+      } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "合同文件上传失败，请检查本地服务后重试" })); return; }
+    }
     const newContract = {
       id: `C-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
       name: String(form.get("name") || ""),
@@ -131,9 +163,14 @@ export function Contracts() {
       partnerId,
       paymentNodes: [],
       deliverables: partner?.requiredDocs || [],
+      fileUrl: uploadedFile ? `${API_BASE_URL}${uploadedFile.url}` : "",
+      fileName: pendingContractFile?.name || "",
+      version: 1,
+      versionHistory: [{ version: 1, action: "创建合同", at: new Date().toISOString(), note: pendingContractFile ? "创建并上传合同文件" : "创建合同记录" }],
     };
     setContracts((prev: any[]) => [newContract, ...prev]);
     setIsModalOpen(false);
+    setPendingContractFile(null);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '新建合同成功' }));
   };
 
@@ -204,13 +241,15 @@ export function Contracts() {
             <option value="all">全部项目</option>
             {projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
+          <select value={selectedType} onChange={(event) => setSelectedType(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"><option value="all">全部合同类别</option>{Array.from(new Set(contracts.map((contract: any) => contract.type).filter(Boolean))).map((type: any) => <option key={type} value={type}>{type}</option>)}</select>
           </div>
           <button onClick={() => handleAction('筛选')} className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors">
             <Filter className="w-4 h-4" />
           </button>
         </div>
         
-        <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto custom-scrollbar">
+        <table className="w-full min-w-[1280px] text-left text-sm">
           <thead className="bg-slate-50/50 text-slate-500 font-medium border-b border-slate-100">
             <tr>
               <th className="px-6 py-4">合同编号</th>
@@ -244,7 +283,7 @@ export function Contracts() {
                 </td>
                 <td className="px-6 py-4 font-medium text-slate-700">{contract.amount}</td>
                 <td className="px-6 py-4 text-slate-500 font-mono">{contract.date}</td>
-                <td className="px-6 py-4">
+                <td className="whitespace-nowrap px-6 py-4">
                   <span className={cn(
                     "px-2.5 py-1 rounded-full text-xs font-medium",
                     contract.status === 'active' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : 
@@ -257,7 +296,7 @@ export function Contracts() {
                      contract.status === 'draft' ? '草稿/模板' : '已归档'}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td className="whitespace-nowrap px-6 py-4 text-right">
                   <div className="flex items-center justify-end gap-2">
                     <button onClick={() => setPreviewContract(contract)} title="查看合同" className="p-1.5 text-slate-400 hover:text-indigo-600 rounded transition-colors">
                       <Eye className="w-4 h-4" />
@@ -269,10 +308,11 @@ export function Contracts() {
                       <button onClick={() => setMenuContractId((current) => current === contract.id ? null : contract.id)} title="更多操作" className="p-1.5 text-slate-400 hover:text-slate-600 rounded transition-colors">
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
-                      {menuContractId === contract.id && <div className="absolute right-0 top-8 z-20 w-32 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-xl">
+                      {menuContractId === contract.id && <div className="absolute bottom-8 right-0 z-20 w-32 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left shadow-xl">
                         <button onClick={() => { setPreviewContract(contract); setMenuContractId(null); }} className="block w-full px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">查看详情</button>
                         <button onClick={() => { handleDownload(contract); setMenuContractId(null); }} className="block w-full px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">下载合同</button>
                         {contract.status === "pending" && <button onClick={() => handleApprove(contract)} className="block w-full px-3 py-2 text-xs text-emerald-600 hover:bg-emerald-50">审批通过</button>}
+                        {contract.status !== "completed" && <button onClick={() => handleArchive(contract)} className="block w-full px-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50">最终归档</button>}
                         <button onClick={() => handleDelete(contract)} className="block w-full px-3 py-2 text-xs text-rose-600 hover:bg-rose-50">删除合同</button>
                       </div>}
                     </div>
@@ -282,13 +322,16 @@ export function Contracts() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {previewContract && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setPreviewContract(null)}>
         <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
           <div className="flex items-center justify-between border-b border-slate-100 p-5"><div><p className="text-xs font-bold text-indigo-600">合同详情</p><h3 className="mt-1 text-lg font-bold text-slate-900">{previewContract.name}</h3></div><button onClick={() => setPreviewContract(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
-          <div className="grid grid-cols-2 gap-3 p-5 text-sm"><Detail label="合同编号" value={previewContract.id} /><Detail label="类型" value={previewContract.type} /><Detail label="甲方" value={previewContract.partyA} /><Detail label="乙方" value={previewContract.partyB} /><Detail label="金额" value={previewContract.amount} /><Detail label="签订日期" value={previewContract.date} /><Detail label="状态" value={previewContract.status === 'active' ? '执行中' : previewContract.status === 'pending' ? '待签批' : previewContract.status === 'draft' ? '草稿/模板' : '已归档'} /></div>
-          <div className="flex justify-end gap-2 border-t border-slate-100 p-5"><button onClick={() => handleDownload(previewContract)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">下载合同</button></div>
+          <div className="grid grid-cols-2 gap-3 p-5 text-sm"><Detail label="合同编号" value={previewContract.id} /><Detail label="类型" value={previewContract.type} /><Detail label="甲方" value={previewContract.partyA} /><Detail label="乙方" value={previewContract.partyB} /><Detail label="金额" value={previewContract.amount} /><Detail label="签订日期" value={previewContract.date} /><Detail label="状态" value={previewContract.status === 'active' ? '执行中' : previewContract.status === 'pending' ? '待签批' : previewContract.status === 'draft' ? '草稿/模板' : '已归档'} /><Detail label="当前版本" value={`第 ${previewContract.version || previewContract.versionHistory?.length || 1} 版`} /></div>
+          {previewContract.fileUrl && <div className="px-5 pb-3"><a href={previewContract.fileUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-indigo-600 hover:underline">打开合同文件：{previewContract.fileName || "查看附件"}</a></div>}
+          <div className="border-t border-slate-100 px-5 py-4"><div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-800"><History className="h-4 w-4 text-indigo-600" />合同修改记录</div><div className="space-y-2">{(previewContract.versionHistory || []).map((item: any) => <div key={`${item.version}-${item.at}`} className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><span className="font-bold">第 {item.version} 版 · {item.action}</span><span className="ml-2 text-slate-400">{new Date(item.at).toLocaleString("zh-CN")}</span><p className="mt-1">{item.note}</p></div>)}</div></div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 p-5"><button onClick={() => recordModification(previewContract)} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700">记录修改</button><button onClick={() => handleDownload(previewContract)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">下载合同</button></div>
         </div>
       </div>}
 
@@ -363,6 +406,11 @@ export function Contracts() {
                   <option value="draft">草稿/模板</option>
                   <option value="completed">已归档</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">合同文件</label>
+                <label className="flex cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 hover:border-indigo-300 hover:bg-indigo-50/40"><Paperclip className="h-5 w-5 text-indigo-500" /><span className="min-w-0 flex-1 truncate">{pendingContractFile?.name || "上传 PDF / Word 合同文件（可选）"}</span><input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(event) => setPendingContractFile(event.target.files?.[0] || null)} /></label>
+                <p className="mt-1 text-xs text-slate-400">上传后会保留文件地址，并作为第 1 版合同记录。</p>
               </div>
               <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, CalendarDays, Camera, DollarSign, FileText, Handshake, Package, Truck, Users } from "lucide-react";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
-import { deriveRisks, flattenProjects, flattenTasks } from "@/src/lib/management";
+import { deriveRisks, flattenProjects, flattenTasks, getProjectNumber } from "@/src/lib/management";
 import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { getMissingDocs } from "./ExternalPartners";
 import { useEntityList } from "@/src/hooks/useEntityList";
@@ -58,7 +58,10 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenSurvey }:
       <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-900 flex items-center gap-2"><ArrowLeft className="w-4 h-4" /> 返回项目汇总</button>
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">{project.name}</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-bold text-slate-900">{project.name}</h2>
+            <span className="font-mono text-xs px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100">项目编号: {getProjectNumber(project)}</span>
+          </div>
           <p className="text-sm text-slate-500 mt-1">{project.type} · 负责人 {project.manager} · 预计竣工 {project.dueDate}</p>
         </div>
         <button onClick={() => setActiveTab("lifecycle")} className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium">进入生命周期</button>

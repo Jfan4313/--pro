@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, AlertCircle, CheckCircle2, ChevronRight, Plus, Download, Filter, X, Table as TableIcon, LayoutList, Link, Upload, Edit2, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -87,6 +87,7 @@ export function Schedule() {
   const [data, setData] = useSyncedAppData("scheduleData", []);
   const [boardData] = useProjectBoardData();
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
+  const [projectMeta, setProjectMeta] = useSyncedAppData<Record<string, any>>("scheduleProjectMeta", {});
   
   // 动态获取项目列表，合并 scheduleData 和 boardData 中的项目名称，以便新建项目能够显示
   const projects = React.useMemo(() => {
@@ -295,6 +296,26 @@ export function Schedule() {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '任务状态已更新' }));
   };
 
+  const editTaskDetails = (projectId: string, taskId: string) => {
+    const project = data.find((item: any) => item.id === projectId);
+    const task = project?.tasks?.find((item: any) => item.id === taskId);
+    if (!project || !task) return;
+    const name = window.prompt("修改任务名称", task.name);
+    if (name === null || !name.trim()) return;
+    const assignee = window.prompt("修改负责人", task.assignee || "待指派");
+    if (assignee === null) return;
+    setData((current: any[]) => current.map((item: any) => item.id !== projectId ? item : { ...item, tasks: item.tasks.map((entry: any) => entry.id === taskId ? { ...entry, name: name.trim(), assignee: assignee.trim() || "待指派" } : entry) }));
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "任务信息已修改" }));
+  };
+
+  const deleteTask = (projectId: string, taskId: string) => {
+    const project = data.find((item: any) => item.id === projectId);
+    const task = project?.tasks?.find((item: any) => item.id === taskId);
+    if (!project || !task || !window.confirm(`确定删除任务“${task.name}”吗？`)) return;
+    setData((current: any[]) => current.map((item: any) => item.id !== projectId ? item : { ...item, tasks: item.tasks.filter((entry: any) => entry.id !== taskId).map((entry: any) => entry.predecessorId === taskId ? { ...entry, predecessorId: null } : entry) }));
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "任务已删除" }));
+  };
+
   const filteredData = selectedProject === "全部项目" 
     ? data 
     : data.filter(p => p.name === selectedProject);
@@ -321,6 +342,21 @@ export function Schedule() {
     quick: "来自快速待办",
   };
   const visibleTaskList = taskBuckets[taskFilter];
+
+  const addProjectTarget = (project: any) => {
+    const current = projectMeta[project.id] || {};
+    const targetEnd = window.prompt("请输入新的目标完成日期（YYYY-MM-DD）", current.targetEnd || project.endDate || "");
+    if (!targetEnd) return;
+    const reason = window.prompt("请输入本次目标调整原因", current.varianceReason || "");
+    void setProjectMeta((all) => ({ ...all, [project.id]: { ...current, targetEnd, varianceReason: reason || "未填写", updatedAt: new Date().toISOString() } }));
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目目标已更新" }));
+  };
+
+  const daysBetween = (from?: string, to?: string) => {
+    if (!from || !to) return null;
+    const value = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000);
+    return Number.isFinite(value) ? value : null;
+  };
 
   const handleExportCSV = () => {
     const headers = ["项目名称", "任务名称", "开始日期", "结束日期", "截止日期", "负责人", "状态", "前置任务"];
@@ -631,6 +667,19 @@ export function Schedule() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4"><div><h3 className="font-bold text-slate-900">项目计划与现场目标</h3><p className="text-xs text-slate-500 mt-1">按项目查看计划、现场目标和时间偏差</p></div><span className="text-xs text-slate-400">{filteredData.length} 个项目</span></div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {filteredData.map((project: any) => {
+            const meta = projectMeta[project.id] || {};
+            const targetEnd = meta.targetEnd || project.endDate;
+            const variance = daysBetween(project.endDate, targetEnd);
+            return <article key={project.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-start justify-between gap-3"><div><h4 className="font-semibold text-slate-900">{project.name}</h4><p className="mt-1 text-xs text-slate-500">计划：{project.startDate || "未设置"} 至 {project.endDate || "未设置"}</p></div><button onClick={() => addProjectTarget(project)} className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-600 ring-1 ring-slate-200 hover:bg-indigo-50">新增/调整目标</button></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg bg-white p-2"><span className="text-slate-400">现场目标</span><p className="mt-1 font-semibold text-slate-700">{targetEnd || "未设置"}</p></div><div className="rounded-lg bg-white p-2"><span className="text-slate-400">计划偏差</span><p className={cn("mt-1 font-semibold", variance && variance > 0 ? "text-rose-600" : variance && variance < 0 ? "text-emerald-600" : "text-slate-700")}>{variance === null ? "待补充" : variance === 0 ? "无偏差" : `${variance > 0 ? "+" : ""}${variance} 天`}</p></div></div>{meta.varianceReason && <p className="mt-3 text-xs text-amber-700">偏差原因：{meta.varianceReason}</p>}</article>;
+          })}
+          {filteredData.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">暂无项目排期，请先创建项目或导入计划</div>}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
           <div>
             <h3 className="font-bold text-slate-900">任务管理视图</h3>
@@ -651,7 +700,7 @@ export function Schedule() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {visibleTaskList.slice(0, 6).map((task: any) => (
             <div id={focusedTaskId === task.id ? `schedule-task-card-${task.id}` : undefined} key={`${task.projectId}-${task.id}`} className={cn("rounded-xl border bg-slate-50 p-3 transition-all", focusedTaskId === task.id ? "border-amber-400 ring-2 ring-amber-200 bg-amber-50" : "border-slate-100")}>
-              <div className="text-sm font-medium text-slate-900 line-clamp-1">{task.name}</div>
+            <div className="flex items-center justify-between gap-2"><div className="text-sm font-medium text-slate-900 line-clamp-1">{task.name}</div><div className="flex shrink-0 gap-1"><button onClick={() => editTaskDetails(task.projectId, task.id)} className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="修改任务"><Edit2 className="h-3.5 w-3.5" /></button><button onClick={() => deleteTask(task.projectId, task.id)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除任务"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
               <div className="text-xs text-slate-500 mt-1">{task.projectName} · {task.responsibilityType || "内部人员"}：{task.assignee || "待指派"} · {task.deadline || "无截止"}</div>
               {task.sourceSummary && <div className="text-xs text-slate-400 mt-2 line-clamp-1">来源：{task.sourceSummary}</div>}
             </div>
@@ -721,7 +770,7 @@ export function Schedule() {
                             {task.status === 'in-progress' && <Clock className="w-4 h-4 text-blue-500 shrink-0" />}
                             {task.status === 'delayed' && <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />}
                             {task.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0" />}
-                            <span className="text-sm text-slate-700 group-hover:text-indigo-600 transition-colors truncate" title={task.name}>{task.name}</span>
+                            <span className="flex min-w-0 items-center gap-1 text-sm text-slate-700 group-hover:text-indigo-600 transition-colors truncate" title={task.name}><span className="truncate">{task.name}</span><button onClick={(e) => { e.stopPropagation(); editTaskDetails(project.id, task.id); }} className="opacity-0 group-hover:opacity-100 rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="修改任务"><Edit2 className="h-3 w-3" /></button><button onClick={(e) => { e.stopPropagation(); deleteTask(project.id, task.id); }} className="opacity-0 group-hover:opacity-100 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除任务"><Trash2 className="h-3 w-3" /></button></span>
                           </div>
                           
                           <div className="w-[10%] flex items-center">
@@ -833,7 +882,7 @@ export function Schedule() {
                   project.tasks.map(task => (
                     <tr key={task.id} className="hover:bg-slate-50/80 transition-colors group">
                       <td className="px-6 py-4 font-medium text-slate-900">{project.name}</td>
-                      <td className="px-6 py-4 text-slate-700">{task.name}</td>
+                      <td className="px-6 py-4 text-slate-700"><div className="flex items-center gap-2"><span>{task.name}</span><button onClick={() => editTaskDetails(project.id, task.id)} className="opacity-0 group-hover:opacity-100 rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="修改任务"><Edit2 className="h-3.5 w-3.5" /></button><button onClick={() => deleteTask(project.id, task.id)} className="opacity-0 group-hover:opacity-100 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除任务"><Trash2 className="h-3.5 w-3.5" /></button></div></td>
                       <td className="px-6 py-4 text-slate-500 font-mono">{task.start}</td>
                       <td className="px-6 py-4 text-slate-500 font-mono">{task.end}</td>
                       <td className="px-6 py-4 text-slate-500 font-mono">

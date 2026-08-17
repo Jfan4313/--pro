@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { useSyncedAppData } from '../hooks/useSyncedAppData';
 import { useProjectBoardData } from '../hooks/useProjectBoardData';
 import { cn } from '../lib/utils';
+import { getProjectCurrentStageInfo } from './ProjectLifecycle';
 
 const initialCostData = [
   {
@@ -62,6 +63,8 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 const typeLabels: Record<string, string> = {
   material: "材料费用",
   labor: "人工费用",
+  procurement_labor: "采购人工/装卸费",
+  auxiliary: "辅料费用",
   management: "管理成本",
   risk: "风险金"
 };
@@ -69,6 +72,8 @@ const typeLabels: Record<string, string> = {
 export function CostDashboard() {
   const [costData, setCostData] = useSyncedAppData("costDataV2", []);
   const [projectBoardData] = useProjectBoardData();
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
+  const [supplyOrders] = useSyncedAppData<any[]>("supplyOrders", []);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
 
@@ -80,6 +85,26 @@ export function CostDashboard() {
   const [ledgerForm, setLedgerForm] = useState({ date: "", type: "material", amount: 0, description: "", status: "pending" });
 
   const allProjects = projectBoardData.flatMap((col: any) => col.projects || []);
+
+  useEffect(() => {
+    if (!supplyOrders.length) return;
+    void setCostData((current: any[]) => {
+      const next = [...current];
+      let changed = false;
+      supplyOrders.forEach((order: any) => {
+        if (!order.projectId || next.some((project: any) => (project.actualLedger || []).some((item: any) => item.sourceOrderId === order.id) || (project.expectedLedger || []).some((item: any) => item.sourceOrderId === order.id))) return;
+        const amount = Number(String(order.amount || "").replace(/[^\d.]/g, "")) / 10000;
+        if (!amount) return;
+        let project = next.find((item: any) => item.id === order.projectId);
+        if (!project) { project = { id: order.projectId, project: order.projectName || order.id, budget: { material: 0, labor: 0, management: 0, risk: 0 }, actualLedger: [], expectedLedger: [], collection: { totalExpected: 0, records: [] } }; next.push(project); }
+        const ledgerItem = { id: `PO-COST-${order.id}`, sourceOrderId: order.id, date: order.orderDate || new Date().toISOString().slice(0, 10), type: "material", amount, description: `采购订单 ${order.id} · ${order.items}` };
+        if (order.status === "delivered") project.actualLedger = [ledgerItem, ...(project.actualLedger || [])];
+        else project.expectedLedger = [ledgerItem, ...(project.expectedLedger || [])];
+        changed = true;
+      });
+      return changed ? next : current;
+    });
+  }, [supplyOrders, setCostData]);
 
   useEffect(() => {
     const handleFocusRisk = (event: Event) => {
@@ -116,6 +141,8 @@ export function CostDashboard() {
 
   const selectedProjectData = mergedCostData.find((p: any) => p.id === selectedProjectId);
 
+  const costEligibleProjectIds = useMemo(() => new Set(allProjects.filter((project: any) => getProjectCurrentStageInfo(project.id, lifecycleStates).index >= 3).map((project: any) => project.id)), [allProjects, lifecycleStates]);
+
   // Global Stats
   const globalStats = useMemo(() => {
     let totalBudget = 0;
@@ -129,7 +156,10 @@ export function CostDashboard() {
 
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const summaryData = mergedCostData.map((p: any) => {
+    const summaryData = mergedCostData.filter((p: any) => {
+      const hasRecordedCost = (p.budget?.material || 0) + (p.budget?.labor || 0) + (p.budget?.management || 0) + (p.budget?.risk || 0) > 0 || (p.actualLedger || []).length > 0 || (p.expectedLedger || []).length > 0 || (p.collection?.records || []).length > 0;
+      return hasRecordedCost || costEligibleProjectIds.has(p.id);
+    }).map((p: any) => {
       const budgetTotal = p.budget.material + p.budget.labor + p.budget.management + p.budget.risk;
       const actualTotal = p.actualLedger.reduce((sum: number, item: any) => sum + item.amount, 0);
       const expectedTotal = p.expectedLedger.reduce((sum: number, item: any) => sum + item.amount, 0);
@@ -173,7 +203,7 @@ export function CostDashboard() {
       delayedCollectionsAmount,
       summaryData
     };
-  }, [mergedCostData]);
+  }, [mergedCostData, costEligibleProjectIds]);
 
   const handleSaveBudget = () => {
     if (!selectedProjectData) return;
@@ -862,6 +892,8 @@ export function CostDashboard() {
                   <select value={ledgerForm.type} onChange={(e) => setLedgerForm({...ledgerForm, type: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                     <option value="material">材料费用</option>
                     <option value="labor">人工费用</option>
+                    <option value="procurement_labor">采购人工/装卸费</option>
+                    <option value="auxiliary">辅料费用</option>
                     <option value="management">管理成本</option>
                     <option value="risk">风险金</option>
                   </select>

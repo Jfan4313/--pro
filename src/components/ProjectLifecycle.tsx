@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
+import { getProjectNumber } from "@/src/lib/management";
 
 export const STAGES = [
   { 
@@ -228,7 +229,23 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
     : [];
 
   const [selectedProject, setSelectedProject] = useState<string | null>(allProjects[0]?.id || null);
+  const [stageFilter, setStageFilter] = useState("all");
   const [activeStage, setActiveStage] = useState(STAGES[0].id);
+
+  const projectsWithStage = useMemo(() => allProjects.map((project: any, index: number) => ({
+    ...project,
+    projectNumber: getProjectNumber(project, index),
+    lifecycleInfo: getProjectCurrentStageInfo(project.id, lifecycleStates),
+  })), [allProjects, lifecycleStates]);
+  const visibleProjects = useMemo(() => stageFilter === "all"
+    ? projectsWithStage
+    : projectsWithStage.filter((project: any) => project.lifecycleInfo.stage.id === stageFilter), [projectsWithStage, stageFilter]);
+
+  useEffect(() => {
+    if (!visibleProjects.some((project: any) => project.id === selectedProject)) {
+      setSelectedProject(visibleProjects[0]?.id || null);
+    }
+  }, [visibleProjects, selectedProject]);
 
   const activeProj = allProjects.find((p: any) => p.id === selectedProject) || allProjects[0];
   const activeProjectSurveys = activeProj ? surveyRecords.filter((record: any) => record.projectId === activeProj.id) : [];
@@ -363,8 +380,13 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
           </h2>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">进行中的项目</div>
-          {allProjects.map((p: any) => (
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">项目阶段筛选</div>
+          <div className="flex flex-wrap gap-1.5 mb-3 px-1">
+            <button onClick={() => setStageFilter("all")} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === "all" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>全部项目</button>
+            {STAGES.slice(0, 4).map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === stage.id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
+          </div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">进行中的项目 ({visibleProjects.length})</div>
+          {visibleProjects.map((p: any) => (
             <button
               key={p.id}
               onClick={() => setSelectedProject(p.id)}
@@ -379,7 +401,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
                 {p.name}
               </div>
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{p.type}</span>
+                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{p.projectNumber}</span>
                 <span>{p.manager}</span>
               </div>
             </button>
@@ -396,7 +418,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
                 <div className="min-w-0">
                   <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{activeProj.name}</h1>
                   <div className="flex flex-wrap items-center gap-3 mt-3">
-                    <span className="font-mono bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md text-xs font-medium">编号: TS-{activeProj.id.toUpperCase().replace('P', '2026')}</span>
+                    <span className="font-mono bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md text-xs font-medium">项目编号: {getProjectNumber(activeProj)}</span>
                     <span className="text-slate-500 text-sm flex items-center gap-1.5"><Briefcase className="w-4 h-4" />负责人: {activeProj.manager}</span>
                     <span className="text-slate-500 text-sm flex items-center gap-1.5"><Clock className="w-4 h-4" />竣工计划: {activeProj.dueDate}</span>
                   </div>
@@ -407,7 +429,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
                   className="md:hidden w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
                   aria-label="选择项目"
                 >
-                  {allProjects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                  {visibleProjects.map((project: any) => <option key={project.id} value={project.id}>{project.projectNumber} · {project.name}</option>)}
                 </select>
               </div>
             </div>

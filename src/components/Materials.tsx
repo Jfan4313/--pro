@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from "react";
-import { Package, AlertTriangle, CheckCircle, Search, Filter, Plus, X, Download, Upload, History, FileSpreadsheet, ListTodo, TrendingUp, DollarSign, Users, Truck, Camera, Trash2, ArrowUpFromLine, ArrowDownToLine, ClipboardList } from "lucide-react";
+import { Package, AlertTriangle, CheckCircle, Search, Filter, Plus, X, Download, Upload, History, FileSpreadsheet, ListTodo, TrendingUp, DollarSign, Users, Truck, Camera, Trash2, Edit2, ArrowUpFromLine, ArrowDownToLine, ClipboardList } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -36,6 +36,7 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
   const [selectedType, setSelectedType] = useState("全部类型");
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState<InventoryMaterial | null>(null);
   const [isOutboundModalOpen, setIsOutboundModalOpen] = useState(false);
   const [isWarehouseHistoryOpen, setIsWarehouseHistoryOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -235,6 +236,17 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
       return;
     }
 
+    if (editingMaterial) {
+      setData((current) => current.map((item) => item.id === editingMaterial.id ? {
+        ...item,
+        name: inboundForm.name.trim(), spec: inboundForm.spec.trim(), stock: quantity, unit: inboundForm.unit.trim(), location: inboundForm.location.trim(), supplier: inboundForm.supplier.trim() || "未填写", type: inboundForm.type || "未分类", sourceProject: inboundForm.sourceProject, project: inboundForm.sourceProject, sourceType: inboundForm.sourceType, inboundAt: inboundForm.inboundAt, photos: inboundForm.photos.length ? inboundForm.photos : item.photos,
+      } : item));
+      setEditingMaterial(null);
+      setIsModalOpen(false);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '库存材料信息已修改' }));
+      return;
+    }
+
     const existing = data.find(item => item.name.trim() === inboundForm.name.trim() && item.spec.trim() === inboundForm.spec.trim() && item.location.trim() === inboundForm.location.trim());
     const materialId = existing?.id || makeMaterialId();
     if (existing) {
@@ -288,6 +300,19 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
     setInboundForm(createEmptyInboundForm(selectedProject));
     setIsModalOpen(false);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '入库登记成功' }));
+  };
+
+  const openEditMaterial = (item: InventoryMaterial) => {
+    setEditingMaterial(item);
+    setInboundForm({ sourceType: item.sourceType || "other", sourceProject: item.sourceProject || item.project || "", name: item.name, spec: item.spec, quantity: String(item.stock), unit: item.unit, location: item.location, supplier: item.supplier || "", type: item.type || "", inboundAt: item.inboundAt || new Date().toISOString().slice(0, 16), photos: item.photos || [], remark: (item as any).remark || "" });
+    setIsModalOpen(true);
+  };
+
+  const deleteMaterial = (item: InventoryMaterial) => {
+    if (!window.confirm(`确定删除材料“${item.name}（${item.spec}）”吗？库存和材料记录将移除。`)) return;
+    setData((current) => current.filter((entry) => entry.id !== item.id));
+    setWarehouseTransactions((current) => current.filter((entry: any) => entry.materialId !== item.id));
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: '库存材料已删除' }));
   };
 
   const handleOutboundSubmit = (e: React.FormEvent) => {
@@ -626,8 +651,8 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
     <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">材料与供应链管理</h2>
-          <p className="text-slate-500 text-sm mt-1">工程物料库存、清单、价格监控与供应链协同</p>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">材料库存管理</h2>
+          <p className="text-slate-500 text-sm mt-1">材料库存、材料台账和项目材料清单；采购订单与价格追踪请进入供应链模块</p>
         </div>
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 mr-2 backdrop-blur-sm">
@@ -712,7 +737,7 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
                 <ArrowUpFromLine className="w-4 h-4 mr-2" />
                 出库登记
               </button>
-              <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-all shadow-sm shadow-indigo-600/20 flex items-center active:scale-95">
+              <button onClick={() => { setEditingMaterial(null); setInboundForm(createEmptyInboundForm(selectedProject)); setIsModalOpen(true); }} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-all shadow-sm shadow-indigo-600/20 flex items-center active:scale-95">
                 <Plus className="w-4 h-4 mr-2" />
                 入库登记
               </button>
@@ -862,6 +887,7 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
                     <th className="px-6 py-4">状态</th>
                     <th className="px-6 py-4">供应商</th>
                     <th className="px-6 py-4">最近入库/凭证</th>
+                    <th className="px-6 py-4">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100/80">
@@ -901,11 +927,12 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
                           )}
                         </div>
                       </td>
+                      <td className="px-6 py-4"><div className="flex items-center gap-1"><button onClick={() => openEditMaterial(item)} className="rounded-lg p-2 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="修改材料"><Edit2 className="h-4 w-4" /></button><button onClick={() => deleteMaterial(item)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除材料"><Trash2 className="h-4 w-4" /></button></div></td>
                     </tr>
                   ))}
                   {filteredData.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="px-6 py-16 text-center text-slate-500">
+                      <td colSpan={11} className="px-6 py-16 text-center text-slate-500">
                         <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                           <Package className="w-8 h-8 text-slate-400" />
                         </div>
@@ -1290,8 +1317,8 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-slate-100">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">入库登记</h3>
-                <p className="text-sm text-slate-500 mt-1">登记材料来源、规格和现场照片，提交后自动增加库存</p>
+                <h3 className="text-lg font-bold text-slate-900">{editingMaterial ? "修改库存材料" : "入库登记"}</h3>
+                <p className="text-sm text-slate-500 mt-1">{editingMaterial ? "修改材料类别、规格、库存数量和存放信息" : "登记材料来源、规格和现场照片，提交后自动增加库存"}</p>
               </div>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <X className="w-5 h-5" />
@@ -1387,7 +1414,7 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
                   取消
                 </button>
                 <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm">
-                  确认入库
+                  {editingMaterial ? "保存修改" : "确认入库"}
                 </button>
               </div>
             </form>

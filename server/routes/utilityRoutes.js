@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
@@ -52,6 +53,17 @@ export function registerUtilityRoutes(app, context) {
       res.json({ ...services.getFileSettings(), savedAt: nowIso() });
     } catch (error) {
       res.status(500).json({ error: "file_root_unavailable", message: error.message });
+    }
+  });
+
+  app.post("/api/file-settings/open", (_req, res) => {
+    const rootPath = services.getFileSettings().rootPath;
+    try {
+      const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+      spawn(command, [rootPath], { detached: true, stdio: "ignore" }).unref();
+      res.json({ ok: true, rootPath });
+    } catch (error) {
+      res.status(500).json({ error: "file_root_open_failed", message: error.message });
     }
   });
 

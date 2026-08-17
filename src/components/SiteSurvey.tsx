@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { ArrowLeft, Building2, Camera, CheckCircle2, Clock3, Cloud, CloudOff, Edit2, FileDown, FileImage, ImagePlus, Loader2, MapPin, Plus, RefreshCw, Save, X } from "lucide-react";
+import { ArrowLeft, Building2, Camera, CheckCircle2, Clock3, Cloud, CloudOff, Edit2, FileDown, FileImage, ImagePlus, Loader2, MapPin, Merge, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { apiClient } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
@@ -30,7 +30,7 @@ import type { DraftPhoto, PendingSurvey, SurveyForm, SurveyPhoto, SurveyRecord, 
 export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => void; initialProjectId?: string | null }) {
   const [boardData, setBoardData, , boardSeed] = useProjectBoardData();
   const projects = useMemo(() => flattenProjects(boardData), [boardData]);
-  const { data: records } = useEntityList<SurveyRecord>("site-surveys", []);
+  const { data: records, deleteDocument } = useEntityList<SurveyRecord>("site-surveys", []);
   const [form, setForm] = useState(emptyForm);
   const [draftPhotos, setDraftPhotos] = useState<DraftPhoto[]>([]);
   const [pendingSurveys, setPendingSurveys] = useState<PendingSurvey[]>([]);
@@ -42,6 +42,8 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<SurveyRecord | null>(null);
+  const [selectedArchiveIds, setSelectedArchiveIds] = useState<string[]>([]);
+  const [removedRecordIds, setRemovedRecordIds] = useState<string[]>([]);
   const [editingRecord, setEditingRecord] = useState<SurveyRecord | null>(null);
   const [retainedPhotos, setRetainedPhotos] = useState<SurveyPhoto[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -69,11 +71,11 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
     const seen = new Set<string>();
     return preferredRecords.filter((record) => {
       const id = String(record.id || "");
-      if (!id || seen.has(id)) return false;
+      if (!id || seen.has(id) || removedRecordIds.includes(id)) return false;
       seen.add(id);
       return true;
     });
-  }, [pendingSurveys, recentlySavedRecords, records]);
+  }, [pendingSurveys, recentlySavedRecords, records, removedRecordIds]);
   const selectedProject = useMemo(
     () => projects.find((project: any) => project.id === form.projectId),
     [form.projectId, projects],
@@ -637,6 +639,57 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
     }
   };
 
+  const toggleArchiveSelection = (recordId: string) => {
+    setSelectedArchiveIds((current) => current.includes(recordId) ? current.filter((id) => id !== recordId) : [...current, recordId]);
+  };
+
+  const deleteSurveyRecord = async (record: SurveyRecord) => {
+    if (!window.confirm(`确定删除“${getSurveySubject(record)}”这条测试/勘察档案吗？删除后不可恢复。`)) return;
+    await deleteDocument(String(record.id));
+    await offlineDb.deleteEntity("site-surveys", String(record.id)).catch(() => undefined);
+    await offlineDb.deleteEntity(PENDING_SURVEYS_RESOURCE, String(record.id)).catch(() => undefined);
+    setPendingSurveys((current) => current.filter((item) => item.id !== record.id));
+    setRecentlySavedRecords((current) => current.filter((item) => item.id !== record.id));
+    setRemovedRecordIds((current) => [...new Set([...current, String(record.id)])]);
+    setSelectedArchiveIds((current) => current.filter((id) => id !== record.id));
+    setSelectedRecord(null);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "勘察档案已删除" }));
+  };
+
+  const mergeSelectedArchives = async () => {
+    const selected = allRecords.filter((record) => selectedArchiveIds.includes(String(record.id)));
+    if (selected.length < 2) return;
+    const projectIds = new Set(selected.map((record) => record.projectId));
+    if (projectIds.size !== 1 || selected.some((record) => record.surveyScope === "building" || record.roomType === "building-structure")) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "只能合并同一项目下的电房勘察档案" }));
+      return;
+    }
+    const roomNames = selected.map((record) => record.roomName).filter(Boolean);
+    if (!window.confirm(`将 ${selected.length} 个电房档案合并为一条项目电房汇总档案，并保留全部照片。原档案会被删除，是否继续？`)) return;
+    const merged: SurveyRecord = {
+      ...selected[0],
+      id: globalThis.crypto?.randomUUID?.() || `survey-merge-${Date.now()}`,
+      roomId: `merged-${Date.now()}`,
+      roomName: `电房综合档案（${roomNames.join("、")}）`,
+      notes: [selected[0].notes, `合并来源：${roomNames.join("、")}`].filter(Boolean).join("\n"),
+      photos: selected.flatMap((record) => record.photos || []).filter((photo, index, photos) => photos.findIndex((item) => item.id === photo.id) === index),
+      createdAt: new Date().toISOString(),
+      status: selected.some((record) => record.status === "pending") ? "pending" : "completed",
+    };
+    await queueEntityOperation("site-surveys", "upsert", merged);
+    await offlineDb.putEntity("site-surveys", merged);
+    await Promise.all(selected.map(async (record) => {
+      await deleteDocument(String(record.id));
+      await offlineDb.deleteEntity("site-surveys", String(record.id)).catch(() => undefined);
+      await offlineDb.deleteEntity(PENDING_SURVEYS_RESOURCE, String(record.id)).catch(() => undefined);
+    }));
+    setRecentlySavedRecords((current) => [merged, ...current.filter((record) => !selectedArchiveIds.includes(String(record.id)))]);
+    setPendingSurveys((current) => current.filter((record) => !selectedArchiveIds.includes(String(record.id))));
+    setRemovedRecordIds((current) => [...new Set([...current, ...selectedArchiveIds])]);
+    setSelectedArchiveIds([]);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "电房档案已合并，全部照片已保留" }));
+  };
+
   return (
     <div className="min-h-full bg-slate-50 p-4 md:p-8">
       <div className="mx-auto max-w-6xl space-y-5 md:space-y-8">
@@ -740,13 +793,17 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
 
           <section>
             <div className="mb-4 flex items-center justify-between"><div><h3 className="text-lg font-bold text-slate-900">勘察档案</h3><p className="mt-1 text-xs text-slate-500">共 {allRecords.length} 条记录{pendingSurveys.length > 0 ? ` · ${pendingSurveys.length} 条待上传` : ""}</p></div></div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">可勾选同一项目的多个电房档案进行合并，也可删除测试档案。</p>
+              {selectedArchiveIds.length >= 2 && <button type="button" onClick={() => void mergeSelectedArchives()} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white"><Merge className="h-4 w-4" />合并已选 {selectedArchiveIds.length} 条</button>}
+            </div>
             <div className="space-y-3">
               {allRecords.map((record) => (
-                <button key={record.id} onClick={() => setSelectedRecord(record)} className="w-full rounded-2xl border border-slate-100 bg-white p-4 text-left shadow-sm transition-colors hover:border-indigo-200">
-                  <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${record.status === "pending" ? "bg-amber-50 text-amber-600" : record.surveyScope === "building" || record.roomType === "building-structure" ? "bg-emerald-50 text-emerald-600" : record.roomType === "low-voltage" ? "bg-sky-50 text-sky-600" : "bg-indigo-50 text-indigo-600"}`}><Building2 className="h-5 w-5" /></span><div className="min-w-0"><div className="flex items-center gap-2"><h4 className="truncate text-sm font-bold text-slate-900">{record.roomName}</h4><span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{record.surveyScope === "building" || record.roomType === "building-structure" ? "天面/建筑结构" : getRoomTypeLabel(record.roomType)}</span></div><p className="mt-1 truncate text-xs text-slate-500">{record.projectName}</p></div></div><span className={`flex shrink-0 items-center gap-1 text-xs font-medium ${record.status === "pending" ? "text-amber-600" : "text-emerald-600"}`}>{record.status === "pending" ? <><CloudOff className="h-3.5 w-3.5" />待上传</> : <><CheckCircle2 className="h-3.5 w-3.5" />已归档</>}</span></div>
+                <div key={record.id} className="w-full rounded-2xl border border-slate-100 bg-white p-4 text-left shadow-sm transition-colors hover:border-indigo-200">
+                  <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><input type="checkbox" checked={selectedArchiveIds.includes(String(record.id))} onChange={() => toggleArchiveSelection(String(record.id))} className="mt-3 h-4 w-4 shrink-0 accent-indigo-600" aria-label={`选择${record.roomName}档案`} /><button type="button" onClick={() => setSelectedRecord(record)} className="flex min-w-0 flex-1 items-start gap-3 text-left"><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${record.status === "pending" ? "bg-amber-50 text-amber-600" : record.surveyScope === "building" || record.roomType === "building-structure" ? "bg-emerald-50 text-emerald-600" : record.roomType === "low-voltage" ? "bg-sky-50 text-sky-600" : "bg-indigo-50 text-indigo-600"}`}><Building2 className="h-5 w-5" /></span><div className="min-w-0"><div className="flex items-center gap-2"><h4 className="truncate text-sm font-bold text-slate-900">{record.roomName}</h4><span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{record.surveyScope === "building" || record.roomType === "building-structure" ? "天面/建筑结构" : getRoomTypeLabel(record.roomType)}</span></div><p className="mt-1 truncate text-xs text-slate-500">{record.projectName}</p></div></button></div><div className="flex items-center gap-2"><span className={`flex shrink-0 items-center gap-1 text-xs font-medium ${record.status === "pending" ? "text-amber-600" : "text-emerald-600"}`}>{record.status === "pending" ? <><CloudOff className="h-3.5 w-3.5" />待上传</> : <><CheckCircle2 className="h-3.5 w-3.5" />已归档</>}</span><button type="button" onClick={() => void deleteSurveyRecord(record)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除档案" aria-label="删除档案"><Trash2 className="h-4 w-4" /></button></div></div>
                   <div className="mt-3 flex items-center gap-4 text-xs text-slate-400"><span className="flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{record.surveyDate}</span><span className="flex items-center gap-1"><FileImage className="h-3.5 w-3.5" />{getPhotoCategoryCount(record.photos || [])} 类 · {record.photos?.length || 0} 张</span></div>
                   {record.photos?.[0] && <div className="mt-3 h-32 overflow-hidden rounded-xl bg-slate-100"><img src={uploadedUrl(record.photos[0].url)} alt={record.roomName} className="h-full w-full object-cover" /></div>}
-                </button>
+                </div>
               ))}
               {allRecords.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center"><Camera className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-500">还没有现场勘察记录</p><p className="mt-1 text-xs text-slate-400">完成第一次拍照后会显示在这里</p></div>}
             </div>

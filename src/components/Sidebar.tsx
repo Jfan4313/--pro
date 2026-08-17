@@ -35,8 +35,8 @@ const navGroups = [
     label: "合同与供应链",
     items: [
       { id: "contracts", label: "合同管理", icon: FileText, permission: "contracts" },
-      { id: "materials", label: "材料与供应链", icon: Package, permission: "materials" },
-      { id: "supply", label: "供应链订单", icon: Truck, permission: "supply" },
+      { id: "materials", label: "材料库存管理", icon: Package, permission: "materials" },
+      { id: "supply", label: "供应链订单与价格", icon: Truck, permission: "supply" },
       { id: "cost", label: "成本与预算", icon: DollarSign, permission: "cost" },
     ],
   },

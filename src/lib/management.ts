@@ -6,6 +6,15 @@ export function flattenProjects(projectBoardData: any[] = []) {
   return Array.isArray(projectBoardData) ? projectBoardData.flatMap((column: any) => column.projects || []) : [];
 }
 
+/** Stable user-facing project identifier, with a backwards-compatible fallback for legacy records. */
+export function getProjectNumber(project: any, fallbackIndex = 0) {
+  if (project?.projectNumber) return String(project.projectNumber);
+  if (project?.code) return String(project.code);
+  const id = String(project?.id || "");
+  const suffix = id.match(/(\d{3,})$/)?.[1] || String(fallbackIndex + 1);
+  return `PRJ-${suffix.slice(-4).padStart(4, "0")}`;
+}
+
 export function flattenTasks(scheduleData: any[] = []) {
   if (!Array.isArray(scheduleData)) return [];
   return scheduleData.flatMap((project: any) =>

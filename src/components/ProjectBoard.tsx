@@ -5,6 +5,7 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { apiClient } from "@/src/lib/apiClient";
+import { getProjectNumber } from "@/src/lib/management";
 
 const statusConfig = {
   normal: { icon: Clock, color: "text-slate-400", tooltip: "进度正常" },
@@ -137,9 +138,15 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
-    
+    const existingProjects = (Array.isArray(data) && data.length > 0 ? data : boardSeed).flatMap((column: any) => column.projects || []);
+    const nextProjectSequence = existingProjects.reduce((max: number, project: any) => {
+      const value = Number(String(project.projectNumber || "").match(/(\d+)$/)?.[1] || 0);
+      return Math.max(max, value);
+    }, 0) + 1;
+
     const newProject = {
       id: `p${Date.now()}`,
+      projectNumber: `PRJ-${String(nextProjectSequence).padStart(4, "0")}`,
       name: formData.get('name') as string,
       type: formData.get('type') as string,
       manager: formData.get('manager') as string,
@@ -281,13 +288,13 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
         </div>
       </div>
 
-      <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
-        <div className="flex gap-4 md:gap-6 h-full min-w-max px-1">
+      <div className="flex-1 overflow-y-auto pb-4 custom-scrollbar">
+        <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {(Array.isArray(data) && data.length > 0 ? data : boardSeed).map((column) => (
             <div 
               key={column.id} 
               className={cn(
-                "w-72 md:w-80 flex flex-col h-full bg-slate-50/50 rounded-2xl border p-3 md:p-4 transition-all duration-300",
+                "min-h-[360px] flex flex-col bg-slate-50/50 rounded-2xl border p-3 md:p-4 transition-all duration-300",
                 dragOverItem?.columnId === column.id && !dragOverItem?.projectId ? "border-indigo-400 bg-indigo-50/50 ring-4 ring-indigo-500/5" : "border-slate-200/60 shadow-sm"
               )}
               onDragOver={(e) => handleDragOver(e, column.id, null)}
@@ -376,7 +383,10 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                         </div>
                       </div>
                       
-                      <h4 className="font-bold text-slate-900 mb-2 leading-tight group-hover:text-indigo-600 transition-colors">{project.name}</h4>
+                      <div className="flex items-start gap-2 mb-2">
+                        <h4 className="font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">{project.name}</h4>
+                        <span className="shrink-0 font-mono text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">{getProjectNumber(project)}</span>
+                      </div>
                       
                       {(() => {
                         const lifecycleInfo = getProjectCurrentStageInfo(project.id, lifecycleStates as any);

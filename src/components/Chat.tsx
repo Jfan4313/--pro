@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, type ChangeEvent } from "react";
-import { Send, Paperclip, Search, MoreVertical, FileText, Image as ImageIcon, Megaphone, Users, Plus, X, Building2 } from "lucide-react";
+import { Send, Paperclip, Search, MoreVertical, FileText, Image as ImageIcon, Megaphone, Users, Plus, X, Building2, Link2, Trash2, ExternalLink } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -51,12 +51,14 @@ export function Chat() {
 
   const [isCreateChannelModalOpen, setIsCreateChannelModalOpen] = useState(false);
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
+  const [isLinksModalOpen, setIsLinksModalOpen] = useState(false);
   
   const [newChannelName, setNewChannelName] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
   const [postAttachments, setPostAttachments] = useState<any[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [linkForm, setLinkForm] = useState({ type: "feishu-doc", label: "飞书文档", url: "" });
   const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const activeChannel = channels.find((c: any) => c.id === activeChannelId) || channels[0] || { id: "empty", name: "暂无协作群组", type: "announcement", unread: 0, members: [] };
@@ -154,6 +156,29 @@ export function Chat() {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '成员添加成功' }));
   };
 
+  const handleDeleteChannel = () => {
+    if (!activeChannel || activeChannel.id === "empty") return;
+    if (!window.confirm(`确定删除工作群“${activeChannel.name}”及其动态吗？`)) return;
+    const next = channels.filter((channel: any) => channel.id !== activeChannel.id);
+    setChannels(next);
+    setPosts(posts.filter((post: any) => post.channelId !== activeChannel.id));
+    setActiveChannelId(next[0]?.id || "empty");
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "工作群已删除" }));
+  };
+
+  const addExternalLink = () => {
+    if (!linkForm.url.trim() || !/^https?:\/\//i.test(linkForm.url.trim()) || !activeChannel) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "请输入有效的 http/https 链接" }));
+      return;
+    }
+    const link = { id: `link-${Date.now()}`, type: linkForm.type, label: linkForm.label, url: linkForm.url.trim() };
+    setChannels(channels.map((channel: any) => channel.id === activeChannel.id ? { ...channel, externalLinks: [...(channel.externalLinks || []), link] } : channel));
+    setLinkForm({ type: "feishu-doc", label: "飞书文档", url: "" });
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "站外协作链接已保存" }));
+  };
+
+  const removeExternalLink = (linkId: string) => setChannels(channels.map((channel: any) => channel.id === activeChannel.id ? { ...channel, externalLinks: (channel.externalLinks || []).filter((link: any) => link.id !== linkId) } : channel));
+
   return (
     <div className="p-8 h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
       <div className="flex items-center justify-between mb-8 shrink-0">
@@ -219,9 +244,11 @@ export function Chat() {
               <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">内部公开</span>
             </div>
             <div className="flex items-center gap-4 text-slate-400">
-              <button onClick={() => setIsAddMemberModalOpen(true)} title="管理群成员" className="hover:text-indigo-600 transition-colors"><MoreVertical className="w-5 h-5" /></button>
+              <button onClick={() => setIsLinksModalOpen(true)} title="飞书/企业微信链接" className="hover:text-indigo-600 transition-colors"><Link2 className="w-5 h-5" /></button><button onClick={() => setIsAddMemberModalOpen(true)} title="管理群成员" className="hover:text-indigo-600 transition-colors"><MoreVertical className="w-5 h-5" /></button><button onClick={handleDeleteChannel} title="删除工作群" className="hover:text-rose-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
             </div>
           </div>
+
+          {(activeChannel.externalLinks || []).length > 0 && <div className="flex flex-wrap gap-2 border-b border-slate-100 bg-white px-6 py-2">{activeChannel.externalLinks.map((link: any) => <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50"><ExternalLink className="h-3 w-3" />{link.label}</a>)}</div>}
 
           <div className="flex-1 overflow-y-auto p-6 flex">
             <div className="flex-1 max-w-3xl mx-auto space-y-6 pr-6">
@@ -395,6 +422,8 @@ export function Chat() {
           </div>
         </div>
       )}
+
+      {isLinksModalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setIsLinksModalOpen(false)}><div className="w-full max-w-lg rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-slate-100 p-5"><div><h3 className="font-bold text-slate-900">站外协作链接</h3><p className="mt-1 text-xs text-slate-500">配置飞书文档、飞书群聊或企业微信群聊链接；当前先以安全跳转方式互通。</p></div><button onClick={() => setIsLinksModalOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><div className="space-y-4 p-5"><div className="grid grid-cols-2 gap-3"><select value={linkForm.type} onChange={(event) => setLinkForm({ ...linkForm, type: event.target.value, label: event.target.value === "feishu-doc" ? "飞书文档" : event.target.value === "feishu-chat" ? "飞书群聊" : "企业微信群聊" })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm"><option value="feishu-doc">飞书文档</option><option value="feishu-chat">飞书群聊</option><option value="wecom-chat">企业微信群聊</option></select><input value={linkForm.label} onChange={(event) => setLinkForm({ ...linkForm, label: event.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="显示名称" /></div><input value={linkForm.url} onChange={(event) => setLinkForm({ ...linkForm, url: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="粘贴 https://... 链接" /><button onClick={addExternalLink} className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white">添加链接</button><div className="space-y-2">{(activeChannel.externalLinks || []).map((link: any) => <div key={link.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm"><a href={link.url} target="_blank" rel="noreferrer" className="truncate text-indigo-600">{link.label} · {link.url}</a><button onClick={() => removeExternalLink(link.id)} className="ml-2 text-xs text-rose-600">删除</button></div>)}</div></div></div></div>}
 
       {/* Add Member Modal */}
       {isAddMemberModalOpen && (

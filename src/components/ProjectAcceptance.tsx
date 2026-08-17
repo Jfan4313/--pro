@@ -34,8 +34,19 @@ interface AcceptanceRecord {
   result: "pass" | "rework";
   notes: string;
   photos: string[];
+  documents?: string[];
+  stageScope?: "stage" | "total";
+  stage?: string;
+  items?: AcceptanceItem[];
   reworkItems: ReworkItem[];
   recheckedAt?: string;
+}
+
+interface AcceptanceItem {
+  id: string;
+  name: string;
+  photos: string[];
+  documents: string[];
 }
 
 const statusMeta: Record<AcceptanceStatus, { label: string; className: string }> = {
@@ -54,11 +65,16 @@ function blankReworkItem(): ReworkItem {
   return { id: `rw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, issue: "", owner: "", deadline: "", status: "open", createdAt: new Date().toISOString(), photos: [] };
 }
 
+const ACCEPTANCE_ITEM_PRESETS = ["结构验收", "隐蔽工程验收", "光伏支架验收", "组件安装验收", "电气设备验收", "并网及调试验收"];
+
 function blankForm(projectName = "") {
   return {
     projectName,
     title: "",
     acceptanceType: "阶段验收",
+    stageScope: "stage" as "stage" | "total",
+    stage: "施工阶段",
+    items: ACCEPTANCE_ITEM_PRESETS.slice(0, 3).map((name, index) => ({ id: `item-${Date.now()}-${index}`, name, photos: [], documents: [] })),
     inspector: "",
     acceptedAt: nowLocalDateTime(),
     result: "pass" as "pass" | "rework",
@@ -78,8 +94,10 @@ export function ProjectAcceptance() {
   const [dateFilter, setDateFilter] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState(() => blankForm(projects[0]?.name || ""));
-  const [photoTarget, setPhotoTarget] = useState<{ type: "record" } | { type: "rework"; id: string } | null>(null);
+  const [photoTarget, setPhotoTarget] = useState<{ type: "record" } | { type: "rework"; id: string } | { type: "items"; ids: string[] } | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
 
   const visibleRecords = useMemo(() => {
     return records.filter((record) => {
@@ -93,13 +111,14 @@ export function ProjectAcceptance() {
 
   const openCreate = () => {
     setForm(blankForm(projects[0]?.name || ""));
+    setSelectedItemIds([]);
     setIsModalOpen(true);
   };
 
   const uploadPhotos = async (files: FileList | null) => {
     if (!files?.length || !photoTarget) return;
-    const existing = photoTarget.type === "record" ? form.photos : form.reworkItems.find(item => item.id === photoTarget.id)?.photos || [];
-    const selected = Array.from(files).slice(0, 6 - existing.length);
+    const existing = photoTarget.type === "record" ? form.photos : photoTarget.type === "rework" ? form.reworkItems.find(item => item.id === photoTarget.id)?.photos || [] : [];
+    const selected = Array.from(files).slice(0, 12 - existing.length);
     if (selected.some(file => file.size > 5 * 1024 * 1024)) {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "单张照片不能超过 5MB" }));
       return;
@@ -115,8 +134,9 @@ export function ProjectAcceptance() {
         const uploaded = await apiClient.uploadFile(file.name, dataUrl.split(",")[1] || "");
         return `${API_BASE_URL}${uploaded.url}`;
       }));
-      if (photoTarget.type === "record") setForm(current => ({ ...current, photos: [...current.photos, ...urls].slice(0, 6) }));
-      else setForm(current => ({ ...current, reworkItems: current.reworkItems.map(item => item.id === photoTarget.id ? { ...item, photos: [...item.photos, ...urls].slice(0, 6) } : item) }));
+      if (photoTarget.type === "record") setForm(current => ({ ...current, photos: [...current.photos, ...urls].slice(0, 12) }));
+      else if (photoTarget.type === "rework") setForm(current => ({ ...current, reworkItems: current.reworkItems.map(item => item.id === photoTarget.id ? { ...item, photos: [...item.photos, ...urls].slice(0, 12) } : item) }));
+      else setForm(current => ({ ...current, items: current.items.map(item => photoTarget.ids.includes(item.id) ? { ...item, photos: [...item.photos, ...urls].slice(0, 12) } : item) }));
       window.dispatchEvent(new CustomEvent("show-toast", { detail: `已上传 ${urls.length} 张照片` }));
     } catch {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "照片上传失败，请检查网络后重试" }));
@@ -125,10 +145,23 @@ export function ProjectAcceptance() {
     }
   };
 
+  const uploadDocuments = async (files: FileList | null) => {
+    if (!files?.length || !selectedItemIds.length) return;
+    try {
+      const urls = await Promise.all(Array.from(files).slice(0, 12).map(async (file) => {
+        const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+        const uploaded = await apiClient.uploadFile(file.name, dataUrl.split(",")[1] || "");
+        return `${API_BASE_URL}${uploaded.url}`;
+      }));
+      setForm(current => ({ ...current, items: current.items.map(item => selectedItemIds.includes(item.id) ? { ...item, documents: [...item.documents, ...urls] } : item) }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已上传 ${urls.length} 份验收文档到 ${selectedItemIds.length} 个分项` }));
+    } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "验收文档上传失败，请检查网络后重试" })); }
+  };
+
   const submitRecord = (event: FormEvent) => {
     event.preventDefault();
-    if (!form.projectName || !form.title.trim() || !form.inspector.trim() || !form.acceptedAt || form.photos.length === 0) {
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "请完整填写验收信息并上传照片" }));
+    if (!form.projectName || !form.title.trim() || !form.inspector.trim() || !form.acceptedAt || form.items.length === 0 || form.items.some(item => !item.name.trim() || (item.photos.length === 0 && item.documents.length === 0))) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "请填写每个验收分项名称，并上传照片或验收文档" }));
       return;
     }
     if (form.result === "rework" && form.reworkItems.some(item => !item.issue.trim() || !item.owner.trim() || !item.deadline)) {
@@ -149,6 +182,10 @@ export function ProjectAcceptance() {
       result: form.result,
       notes: form.notes.trim(),
       photos: form.photos,
+      documents: form.items.flatMap(item => item.documents),
+      stageScope: form.stageScope,
+      stage: form.stage,
+      items: form.items,
       reworkItems: form.result === "rework" ? form.reworkItems : [],
     };
     void setRecords(current => [record, ...current]);
@@ -233,13 +270,14 @@ export function ProjectAcceptance() {
                       <span className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", statusMeta[record.status].className)}>{statusMeta[record.status].label}</span>
                       {locked && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">已锁定不可修改</span>}
                     </div>
-                    <p className="mt-2 text-sm text-slate-500">{record.projectName} · {record.acceptanceType} · 验收人 {record.inspector}</p>
+                    <p className="mt-2 text-sm text-slate-500">{record.projectName} · {record.stageScope === "total" ? "总验收" : "阶段性验收"} · {record.stage || record.acceptanceType} · 验收人 {record.inspector}</p>
                     <p className="mt-1 flex items-center gap-1 text-xs text-slate-400"><Clock3 className="h-3.5 w-3.5" />验收时间 {record.acceptedAt.replace("T", " ")} · 创建 {record.createdAt.replace("T", " ").slice(0, 16)}</p>
                   </div>
                   {record.reworkItems.length > 0 && record.status !== "recheck_passed" && <button onClick={() => passRecheck(record)} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700">复验通过</button>}
                 </div>
                 {record.notes && <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">{record.notes}</p>}
                 {record.photos.length > 0 && <div className="mt-4">{renderPhotos(record.photos)}</div>}
+                {record.items?.length ? <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">{record.items.map(item => <div key={item.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3"><div className="flex items-center justify-between gap-2"><span className="font-semibold text-slate-800">{item.name}</span><span className="text-xs text-slate-400">{item.photos.length} 张照片 · {item.documents.length} 份文档</span></div>{item.documents.length > 0 && <div className="mt-2 space-y-1">{item.documents.map((document, index) => <a key={`${document}-${index}`} href={document} target="_blank" rel="noreferrer" className="block truncate text-xs text-indigo-600 hover:underline">验收文档 {index + 1}</a>)}</div>}</div>)}</div> : null}
                 {record.reworkItems.length > 0 && <div className="mt-4 space-y-3">{record.reworkItems.map(item => <div key={item.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium text-slate-900">{item.issue}</p><p className="mt-1 text-xs text-slate-500">责任人：{item.owner} · 期限：{item.deadline} · {item.status === "done" ? `完成：${item.completedAt?.replace("T", " ").slice(0, 16)}` : "未完成"}</p>{item.completionNote && <p className="mt-2 text-xs text-slate-500">完成说明：{item.completionNote}</p>}</div>{item.status !== "done" && !locked && <button onClick={() => completeRework(record.id, item.id)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white">标记完成</button>}</div>{item.photos.length > 0 && <div className="mt-3">{renderPhotos(item.photos)}</div>}</div>)}</div>}
               </article>
             );
@@ -255,14 +293,21 @@ export function ProjectAcceptance() {
             <form onSubmit={submitRecord} className="space-y-5 overflow-y-auto p-6">
               <div className="grid grid-cols-2 gap-4">
                 <Field label="项目"><select value={form.projectName} onChange={(event) => setForm({ ...form, projectName: event.target.value })} className="form-input"><option value="">请选择项目</option>{projects.map((project: any) => <option key={project.id}>{project.name}</option>)}</select></Field>
+                <Field label="验收范围"><select value={form.stageScope} onChange={(event) => setForm({ ...form, stageScope: event.target.value as any })} className="form-input"><option value="stage">阶段性验收</option><option value="total">总验收</option></select></Field>
+                <Field label="验收阶段"><select value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value })} className="form-input"><option>项目立项/勘察</option><option>设计阶段</option><option>施工阶段</option><option>并网调试阶段</option><option>竣工阶段</option></select></Field>
                 <Field label="验收类型"><select value={form.acceptanceType} onChange={(event) => setForm({ ...form, acceptanceType: event.target.value })} className="form-input"><option>阶段验收</option><option>隐蔽工程验收</option><option>竣工验收</option><option>并网验收</option><option>材料/设备验收</option></select></Field>
                 <Field label="验收标题"><input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="form-input" placeholder="例如：支架安装阶段验收" /></Field>
                 <Field label="验收人"><input required value={form.inspector} onChange={(event) => setForm({ ...form, inspector: event.target.value })} className="form-input" placeholder="验收人员姓名" /></Field>
                 <Field label="验收时间"><input required type="datetime-local" value={form.acceptedAt} onChange={(event) => setForm({ ...form, acceptedAt: event.target.value })} className="form-input" /></Field>
                 <Field label="验收结果"><select value={form.result} onChange={(event) => setForm({ ...form, result: event.target.value as any, reworkItems: event.target.value === "rework" && form.reworkItems.length === 0 ? [blankReworkItem()] : form.reworkItems })} className="form-input"><option value="pass">验收通过</option><option value="rework">需返工</option></select></Field>
               </div>
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3"><div><h4 className="font-bold text-slate-900">验收分项与归档材料</h4><p className="mt-1 text-xs text-slate-500">勾选多个分项后可批量上传照片；每个分项至少需要照片或文档。</p></div><div className="flex gap-2"><button type="button" onClick={() => setForm({ ...form, items: [...form.items, { id: `item-${Date.now()}`, name: "", photos: [], documents: [] }] })} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-indigo-700 shadow-sm">+ 新增分项</button><button type="button" disabled={!selectedItemIds.length} onClick={() => { setPhotoTarget({ type: "items", ids: selectedItemIds }); photoInputRef.current?.click(); }} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">批量上传照片</button><button type="button" disabled={!selectedItemIds.length} onClick={() => documentInputRef.current?.click()} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-indigo-700 disabled:opacity-50">批量上传文档</button></div></div>
+                <div className="mt-3 space-y-2">{form.items.map((item, index) => <div key={item.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-xl border border-white bg-white p-3"><input type="checkbox" checked={selectedItemIds.includes(item.id)} onChange={() => setSelectedItemIds(current => current.includes(item.id) ? current.filter(id => id !== item.id) : [...current, item.id])} className="h-4 w-4 accent-indigo-600" aria-label={`选择${item.name || `分项${index + 1}`}`} /><input value={item.name} onChange={(event) => setForm({ ...form, items: form.items.map(current => current.id === item.id ? { ...current, name: event.target.value } : current) })} className="form-input" placeholder="例如：结构验收、支架验收" /><div className="flex items-center gap-2 text-xs text-slate-500"><span>{item.photos.length} 张照片</span><span>{item.documents.length} 份文档</span>{form.items.length > 1 && <button type="button" onClick={() => { setForm({ ...form, items: form.items.filter(current => current.id !== item.id) }); setSelectedItemIds(current => current.filter(id => id !== item.id)); }} className="text-rose-600">删除</button>}</div></div>)}</div>
+                <input ref={documentInputRef} type="file" multiple className="hidden" onChange={(event) => { void uploadDocuments(event.target.files); event.target.value = ""; }} />
+              </div>
               <Field label="验收备注"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} rows={3} className="form-input resize-none" placeholder="验收意见、质量情况、现场说明" /></Field>
-              <div><div className="mb-2 flex items-center justify-between"><label className="text-sm font-medium text-slate-700">验收照片 <span className="text-rose-500">*</span></label><span className="text-xs text-slate-400">至少 1 张，最多 6 张</span></div>{renderPhotos(form.photos, index => setForm({ ...form, photos: form.photos.filter((_, i) => i !== index) }))}<button type="button" onClick={() => { setPhotoTarget({ type: "record" }); photoInputRef.current?.click(); }} className="mt-3 inline-flex h-20 w-20 flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-600"><Camera className="h-5 w-5" /><span className="mt-1 text-xs">上传</span></button></div>
+              <div><div className="mb-2 flex items-center justify-between"><label className="text-sm font-medium text-slate-700">补充验收照片</label><span className="text-xs text-slate-400">分项照片请在上方批量上传</span></div>{renderPhotos(form.photos, index => setForm({ ...form, photos: form.photos.filter((_, i) => i !== index) }))}<button type="button" onClick={() => { setPhotoTarget({ type: "record" }); photoInputRef.current?.click(); }} className="mt-3 inline-flex h-20 w-20 flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-600"><Camera className="h-5 w-5" /><span className="mt-1 text-xs">上传</span></button></div>
               {form.result === "rework" && <div className="space-y-3"><div className="flex items-center justify-between"><h4 className="text-sm font-bold text-slate-900">返工记录</h4><button type="button" onClick={() => setForm({ ...form, reworkItems: [...form.reworkItems, blankReworkItem()] })} className="rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">+ 添加返工项</button></div>{form.reworkItems.map(item => <div key={item.id} className="rounded-xl border border-amber-100 bg-amber-50/40 p-4"><div className="grid grid-cols-3 gap-3"><Field label="问题描述"><input value={item.issue} onChange={(event) => setForm({ ...form, reworkItems: form.reworkItems.map(current => current.id === item.id ? { ...current, issue: event.target.value } : current) })} className="form-input" placeholder="返工问题" /></Field><Field label="责任人"><input value={item.owner} onChange={(event) => setForm({ ...form, reworkItems: form.reworkItems.map(current => current.id === item.id ? { ...current, owner: event.target.value } : current) })} className="form-input" placeholder="责任人" /></Field><Field label="整改期限"><input type="date" value={item.deadline} onChange={(event) => setForm({ ...form, reworkItems: form.reworkItems.map(current => current.id === item.id ? { ...current, deadline: event.target.value } : current) })} className="form-input" /></Field></div><div className="mt-3 flex items-center justify-between"><button type="button" onClick={() => { setPhotoTarget({ type: "rework", id: item.id }); photoInputRef.current?.click(); }} className="text-xs font-medium text-indigo-600">上传返工照片</button><button type="button" onClick={() => setForm({ ...form, reworkItems: form.reworkItems.filter(current => current.id !== item.id) })} className="text-xs font-medium text-rose-600">删除返工项</button></div>{item.photos.length > 0 && <div className="mt-3">{renderPhotos(item.photos, index => setForm({ ...form, reworkItems: form.reworkItems.map(current => current.id === item.id ? { ...current, photos: current.photos.filter((_, i) => i !== index) } : current) }))}</div>}</div>)}</div>}
               <input ref={photoInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { void uploadPhotos(event.target.files); event.target.value = ""; }} />
               <div className="flex justify-end gap-3 border-t border-slate-100 pt-4"><button type="button" onClick={() => setIsModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">取消</button><button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">保存验收记录</button></div>
