@@ -106,7 +106,7 @@ export function MobileHome({
         <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="text-sm font-bold text-slate-900">版本更新</h3><span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">v{PRODUCT_VERSION}</span></div><p className="mt-1 text-xs leading-5 text-slate-600">{PRODUCT_RELEASE_SUMMARY}</p><p className="mt-1 text-[10px] text-slate-400">更新日期：{PRODUCT_VERSION_DATE}</p></div><button onClick={() => setActiveTab("version-management")} className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-semibold text-indigo-600">查看记录</button></div>
       </section>
 
-      <section className="mt-5 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+      {risks.length > 0 && <section className="mt-5 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-base font-bold text-slate-900"><AlertTriangle className="h-4 w-4 text-rose-500" />风险提醒</h3>
           <span className="rounded-lg bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600">{risks.length}</span>
@@ -122,9 +122,8 @@ export function MobileHome({
               </span>
             </button>
           ))}
-          {risks.length === 0 && <div className="flex items-center justify-center gap-2 py-5 text-sm text-slate-400"><CheckCircle2 className="h-4 w-4 text-emerald-500" />当前没有风险预警</div>}
         </div>
-      </section>
+      </section>}
 
       <section className="mt-5">
         <div className="mb-3 flex items-center justify-between">
@@ -163,7 +162,7 @@ export function MobileHome({
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-indigo-600"><MessageSquare className="h-5 w-5" /></span>
             <span className="min-w-0 flex-1">
               <span className="block text-xs font-semibold text-indigo-500">最新工作消息</span>
-              <span className="mt-1 block truncate text-sm font-bold text-slate-900">{announcements[0].title}</span>
+              <span className="mt-1 block truncate text-sm font-bold text-slate-900">{announcements[0].content || "附件消息"}</span>
             </span>
             <ArrowRight className="mt-2 h-4 w-4 text-indigo-400" />
           </button>

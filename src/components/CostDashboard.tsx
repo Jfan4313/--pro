@@ -6,58 +6,6 @@ import { useProjectBoardData } from '../hooks/useProjectBoardData';
 import { cn } from '../lib/utils';
 import { getProjectCurrentStageInfo } from './ProjectLifecycle';
 
-const initialCostData = [
-  {
-    id: "p1",
-    project: "A区商业综合体",
-    budget: {
-      material: 2500,
-      labor: 1500,
-      management: 500,
-      risk: 500,
-    },
-    actualLedger: [
-      { id: "AL-1", date: "2026-03-01", type: "material", amount: 500, description: "第一批组件采购" },
-      { id: "AL-2", date: "2026-03-10", type: "labor", amount: 300, description: "基础施工人工费" }
-    ],
-    expectedLedger: [
-      { id: "EL-1", date: "2026-04-01", type: "material", amount: 1000, description: "第二批组件及逆变器" },
-      { id: "EL-2", date: "2026-04-15", type: "labor", amount: 500, description: "安装调试人工费" }
-    ],
-    collection: {
-      totalExpected: 6000,
-      records: [
-        { id: "C-1", date: "2026-02-01", amount: 1200, description: "预付款", status: "received" },
-        { id: "C-2", date: "2026-05-01", amount: 3000, description: "进度款", status: "pending" }
-      ]
-    }
-  },
-  {
-    id: "p3",
-    project: "B区住宅一期",
-    budget: {
-      material: 4000,
-      labor: 2000,
-      management: 1000,
-      risk: 1000,
-    },
-    actualLedger: [
-      { id: "AL-3", date: "2026-02-15", type: "material", amount: 2000, description: "钢筋水泥采购" },
-      { id: "AL-4", date: "2026-03-05", type: "labor", amount: 1000, description: "主体结构人工费" }
-    ],
-    expectedLedger: [
-      { id: "EL-3", date: "2026-05-01", type: "material", amount: 1500, description: "二次结构材料" },
-    ],
-    collection: {
-      totalExpected: 10000,
-      records: [
-        { id: "C-3", date: "2026-01-15", amount: 2000, description: "预付款", status: "received" },
-        { id: "C-4", date: "2026-06-01", amount: 4000, description: "进度款", status: "pending" }
-      ]
-    }
-  }
-];
-
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const typeLabels: Record<string, string> = {
@@ -797,9 +745,6 @@ export function CostDashboard() {
             {allProjects.map((p: any) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
-            {/* Fallback for initial data if not in project board */}
-            {!allProjects.some((p: any) => p.id === "p1") && <option value="p1">A区商业综合体</option>}
-            {!allProjects.some((p: any) => p.id === "p3") && <option value="p3">B区住宅一期</option>}
           </select>
           <button 
             onClick={handleExportCSV}

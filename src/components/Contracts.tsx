@@ -6,13 +6,6 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects } from "@/src/lib/management";
 
-const initialContracts: any[] = [
-  { id: "C-2026-001", name: "A区商业综合体总承包合同", type: "施工合同", partyA: "城建集团", partyB: "第一建筑工程公司", amount: "¥12,500万", date: "2026-01-15", status: "active", projectId: "p1" },
-  { id: "C-2026-002", name: "钢材采购年度框架协议", type: "采购合同", partyA: "第一建筑工程公司", partyB: "宝钢股份", amount: "按实结算", date: "2026-02-01", status: "active" },
-  { id: "C-2026-003", name: "B区塔吊租赁合同", type: "租赁合同", partyA: "第一建筑工程公司", partyB: "宏达机械租赁", amount: "¥85万", date: "2026-02-20", status: "pending" },
-  { id: "C-2025-105", name: "前期地勘服务协议", type: "服务合同", partyA: "城建集团", partyB: "省地质勘查院", amount: "¥120万", date: "2025-11-10", status: "completed" },
-];
-
 export function Contracts() {
   const [contracts, setContracts] = useSyncedAppData("project_contracts", []);
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);

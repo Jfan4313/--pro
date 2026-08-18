@@ -1,16 +1,17 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Brush } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, Zap, AlertTriangle, Save, Download, Upload, Briefcase, CheckCircle2, Users, Package, FileText, ChevronRight } from 'lucide-react';
-import { useRef, type ChangeEvent } from 'react';
+import { useMemo, useRef, type ChangeEvent } from 'react';
 import { cn } from "@/src/lib/utils";
 import { STAGES } from './ProjectLifecycle';
 import { MobileHome } from './MobileHome';
 import { useDashboardOverview } from '@/src/features/dashboard/useDashboardOverview';
-import { progressTrendData, recentAnnouncements } from '@/src/features/dashboard/dashboardContent';
 import { DASHBOARD_DATA_KEYS, exportWorkspaceSnapshot, importWorkspaceSnapshot } from '@/src/features/dashboard/dashboardTools';
 import { dispatchRiskFocus, type RiskAction } from '@/src/lib/riskActions';
 import { PRODUCT_RELEASE_SUMMARY, PRODUCT_VERSION, PRODUCT_VERSION_DATE } from '@/src/lib/productVersion';
+import { useSyncedAppData } from '@/src/hooks/useSyncedAppData';
 
 export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
+  const [chatPosts] = useSyncedAppData<any[]>('chatPosts', []);
   const {
     acceptedProjects,
     allFlatProjects,
@@ -27,6 +28,11 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
     stats,
     todayTasks,
   } = useDashboardOverview();
+  const recentChatPosts = useMemo(() => (Array.isArray(chatPosts) ? chatPosts : []).slice(0, 3), [chatPosts]);
+  const projectStageData = useMemo(() => STAGES.map((stage) => ({
+    stage: stage.name.split(' ')[1]?.split('(')[0] || stage.name,
+    projects: lifecycleSummary.counts[stage.id] || 0,
+  })), [lifecycleSummary.counts]);
 
   const openRisk = (risk: any) => {
     setActiveTab(risk.actionTab);
@@ -67,7 +73,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
       pendingApprovalTab={pendingApprovalTab}
       pendingQuickIntakes={pendingQuickIntakes}
       risks={risks}
-      announcements={recentAnnouncements}
+      announcements={recentChatPosts}
       setActiveTab={setActiveTab}
       onOpenProject={onOpenProject}
     />
@@ -89,7 +95,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className={cn("bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden", risks.length > 0 ? "xl:col-span-2" : "xl:col-span-3")}>
           <div className="p-6 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h3 className="font-bold text-lg text-slate-900">今日工作台</h3>
@@ -141,7 +147,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {risks.length > 0 && <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-100 flex items-center justify-between">
             <h3 className="font-bold text-lg text-slate-900">风险预警</h3>
             <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-lg">{risks.length}</span>
@@ -157,9 +163,8 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
                 {(risk.taskId || risk.personId || risk.orderId || risk.type === "合同缺失") && <div className="mt-2 flex gap-2 flex-wrap">{risk.taskId && <>{risk.type === "未分配负责人" && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "assign"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "assign"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 shadow-sm ring-1 ring-slate-200">指派负责人</span>}<span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "deadline"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "deadline"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 shadow-sm ring-1 ring-slate-200">调整截止日期</span>{risk.type === "任务逾期" && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "complete"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "complete"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-emerald-600 shadow-sm ring-1 ring-slate-200">标记完成</span>}</>}{risk.personId && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "train"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "train"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-emerald-600 shadow-sm ring-1 ring-slate-200">标记已培训</span>}{risk.orderId && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "delivered"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "delivered"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-emerald-600 shadow-sm ring-1 ring-slate-200">标记已到货</span>}{risk.type === "合同缺失" && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); handleRiskAction(risk, "create-contract"); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); handleRiskAction(risk, "create-contract"); } }} className="rounded-lg bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 shadow-sm ring-1 ring-slate-200">新建合同</span>}</div>}
               </button>
             ))}
-            {risks.length === 0 && <EmptyState text="暂无风险预警" />}
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -201,40 +206,25 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {allFlatProjects.length > 0 && <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)]">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h3 className="font-bold text-lg text-slate-900">项目进度对比 (计划 vs 实际)</h3>
-              <p className="text-sm text-slate-500 mt-1">点击图例隐藏/显示系列，拖动滑块缩放查看</p>
+              <h3 className="font-bold text-lg text-slate-900">项目阶段分布</h3>
+              <p className="text-sm text-slate-500 mt-1">根据当前项目生命周期状态实时汇总</p>
             </div>
-            <select className="text-sm border border-slate-200 rounded-lg text-slate-600 bg-white px-4 py-2 outline-none shadow-sm hover:border-slate-300 transition-colors">
-              <option>2026年上半年</option>
-              <option>2025年下半年</option>
-            </select>
           </div>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={progressTrendData} margin={{ top: 20, right: 0, bottom: 0, left: -20 }} barGap={0}>
+              <BarChart data={projectStageData} margin={{ top: 20, right: 0, bottom: 0, left: -20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dx={-10} unit="%" />
+                <XAxis dataKey="stage" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11 }} dy={10} />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dx={-10} />
                 <Tooltip 
                   cursor={{ fill: '#f8fafc' }}
                   contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 />
-                <Legend iconType="circle" wrapperStyle={{ paddingBottom: '20px' }} verticalAlign="top" />
-                <Bar dataKey="planned" name="计划进度 (%)" fill="#cbd5e1" radius={[4, 4, 0, 0]} barSize={16} />
-                <Bar dataKey="actual" name="实际进度 (%)" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={16} />
-                <Brush 
-                  dataKey="month" 
-                  height={30} 
-                  stroke="#8884d8" 
-                  fill="#f8fafc"
-                  tickFormatter={() => ''}
-                  startIndex={0}
-                  endIndex={5}
-                />
+                <Bar dataKey="projects" name="项目数" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={22} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -271,14 +261,12 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
             <p className="text-xs text-slate-400">总预算 ¥{financeSummary.budget.toLocaleString()}万</p>
           </div>
         </div>
-      </div>
+      </div>}
 
-      {/* 最新项目公告 */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] mt-6">
+      {recentChatPosts.length > 0 && <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] mt-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             <h3 className="font-bold text-lg text-slate-900">工作群动态</h3>
-            <span className="px-2 py-0.5 bg-rose-100 text-rose-600 text-xs font-bold rounded-full animate-pulse">New</span>
           </div>
           <button 
             onClick={() => setActiveTab('chat')}
@@ -288,27 +276,23 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {recentAnnouncements.map(announcement => (
+          {recentChatPosts.map(post => (
             <div 
-              key={announcement.id} 
+              key={post.id}
               onClick={() => setActiveTab('chat')}
               className="p-4 rounded-xl border border-slate-100 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-100 transition-colors cursor-pointer group"
             >
               <div className="flex items-start justify-between mb-3">
                 <span className="text-xs font-medium text-slate-600 bg-white px-2 py-1 rounded-md border border-slate-200 group-hover:border-indigo-200">
-                  {announcement.author}
+                  {post.author || "工作群成员"}
                 </span>
-                <span className="text-xs text-slate-400">{announcement.date}</span>
+                <span className="text-xs text-slate-400">{post.time || String(post.createdAt || "").replace("T", " ").slice(0, 16)}</span>
               </div>
-              <h4 className="font-semibold text-slate-900 mb-2 flex items-center gap-2">
-                {announcement.isUrgent && <span className="w-2 h-2 rounded-full bg-rose-500"></span>}
-                {announcement.title}
-              </h4>
-              <p className="text-sm text-slate-500 line-clamp-2 leading-relaxed">{announcement.content}</p>
+              <p className="text-sm font-medium text-slate-700 line-clamp-3 leading-relaxed">{post.content || "附件消息"}</p>
             </div>
           ))}
         </div>
-      </div>
+      </div>}
 
       <div className="mt-6 rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-white p-6 shadow-[0_2px_10px_-4px_rgba(79,70,229,0.12)]">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -338,7 +322,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
         </div>
         
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-          {STAGES.slice(0, 8).map((stage, idx) => (
+          {STAGES.map((stage) => (
             <div key={stage.id} className="flex flex-col gap-2 p-3 rounded-xl border border-slate-100 bg-slate-50 relative overflow-hidden">
               <div className="text-xl font-bold text-slate-700">{lifecycleSummary.counts[stage.id] || 0}</div>
               <div className="text-xs font-medium text-slate-500 whitespace-nowrap truncate">{stage.name.split(' ')[1]}</div>

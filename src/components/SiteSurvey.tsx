@@ -5,7 +5,9 @@ import { apiClient } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
 import { flattenProjects } from "@/src/lib/management";
+import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { queueEntityOperation } from "@/src/lib/syncEngine";
 import { STAGES } from "./ProjectLifecycle";
@@ -29,7 +31,8 @@ import type { DraftPhoto, PendingSurvey, SurveyForm, SurveyPhoto, SurveyRecord, 
 
 export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => void; initialProjectId?: string | null }) {
   const [boardData, setBoardData, , boardSeed] = useProjectBoardData();
-  const projects = useMemo(() => flattenProjects(boardData), [boardData]);
+  const projects = useMemo(() => sortProjectsNaturally(flattenProjects(boardData)), [boardData]);
+  const { reserveProjectNumber } = useProjectNumbering();
   const { data: records, deleteDocument } = useEntityList<SurveyRecord>("site-surveys", []);
   const [form, setForm] = useState(emptyForm);
   const [draftPhotos, setDraftPhotos] = useState<DraftPhoto[]>([]);
@@ -409,7 +412,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
     setIsProjectModalOpen(true);
   };
 
-  const createProject = (event: FormEvent) => {
+  const createProject = async (event: FormEvent) => {
     event.preventDefault();
     const name = newProject.name.trim();
     if (!name) return;
@@ -420,6 +423,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
 
     const project = {
       id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}`,
+      projectNumber: await reserveProjectNumber(),
       name,
       type: newProject.type,
       manager: "待确定",
@@ -435,7 +439,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       let firstStageIndex = next.findIndex((column: any) => column.id === STAGES[0].id);
       if (firstStageIndex < 0) firstStageIndex = 0;
       if (!next[firstStageIndex]) return source;
-      next[firstStageIndex].projects = [project, ...next[firstStageIndex].projects];
+      next[firstStageIndex].projects = sortProjectsNaturally([project, ...next[firstStageIndex].projects]);
       next[firstStageIndex].count = next[firstStageIndex].projects.length;
       return next;
     });

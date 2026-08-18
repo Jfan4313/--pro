@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw } from "lucide-react";
+import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw, GripVertical } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { apiClient } from "@/src/lib/apiClient";
 import { getProjectNumber } from "@/src/lib/management";
+import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
+import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 
 const statusConfig = {
   normal: { icon: Clock, color: "text-slate-400", tooltip: "进度正常" },
@@ -31,13 +33,14 @@ const typeColors: Record<string, string> = {
 const projectTypes = ["光伏项目", "储能项目", "充电桩项目", "零碳园区", "节能改造"];
 const businessModels = ["EPC", "EMC"];
 
-export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: string) => void }) {
+export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenProject?: (projectId: string) => void; onOpenProjectDetail?: (projectId: string) => void }) {
   const [data, setData, , boardSeed] = useProjectBoardData();
   const [supplyOrders] = useSyncedAppData("supplyOrders", []);
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [scheduleData] = useSyncedAppData("scheduleData", []);
   const [lifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
   const [archivedProjects, setArchivedProjects] = useSyncedAppData<any[]>("projectArchive", []);
+  const { conflicts: projectNumberConflicts, reserveProjectNumber } = useProjectNumbering();
 
   const getConstructProgress = (project: any) => {
     const projectSchedule = scheduleData.find((s: any) => s.id === project.id || s.name === project.name || (project.name && s.name && s.name.includes(project.name)));
@@ -167,19 +170,15 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
-    const existingProjects = (Array.isArray(data) && data.length > 0 ? data : boardSeed).flatMap((column: any) => column.projects || []);
-    const nextProjectSequence = existingProjects.reduce((max: number, project: any) => {
-      const value = Number(String(project.projectNumber || "").match(/(\d+)$/)?.[1] || 0);
-      return Math.max(max, value);
-    }, 0) + 1;
+    const projectNumber = await reserveProjectNumber();
 
     const newProject = {
       id: `p${Date.now()}`,
-      projectNumber: `PRJ-${String(nextProjectSequence).padStart(4, "0")}`,
+      projectNumber,
       name: formData.get('name') as string,
       type: formData.get('type') as string,
       businessModel: formData.get('businessModel') as string,
@@ -201,7 +200,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
       
       if (planningColIndex !== -1 && newData[planningColIndex]) {
         const planningCol = { ...newData[planningColIndex] };
-        planningCol.projects = [newProject, ...(planningCol.projects || [])];
+        planningCol.projects = sortProjectsNaturally([newProject, ...(planningCol.projects || [])]);
         planningCol.count = planningCol.projects.length;
         newData[planningColIndex] = planningCol;
       }
@@ -324,7 +323,9 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
         </div>
       </div>
 
-      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">在建和已推进项目可归档到这里，归档只改变项目展示状态，不删除业务资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{archivedProjects.map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button></div>)}</div>}</div>}
+      {projectNumberConflicts.length > 0 && <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">检测到重复项目编号：{projectNumberConflicts.map((item) => item.projectNumber).join("、")}。为避免进入错误项目，重复编号暂不可用于跳转。</div>}
+
+      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">在建和已推进项目可归档到这里，归档只改变项目展示状态，不删除业务资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{sortProjectsNaturally(archivedProjects).map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button></div>)}</div>}</div>}
 
       <div className="flex-1 overflow-y-auto pb-4 custom-scrollbar">
         <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -360,7 +361,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-3 md:space-y-4 pr-1 pb-10 custom-scrollbar scroll-smooth">
-                {Array.isArray(column.projects) && column.projects.map((project) => {
+                {Array.isArray(column.projects) && sortProjectsNaturally(column.projects).map((project) => {
                   const config = statusConfig[project.status as keyof typeof statusConfig] || statusConfig.normal;
                   const StatusIcon = config.icon;
                   const statusColor = config.color;
@@ -377,13 +378,14 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                   return (
                     <div 
                       key={project.id} 
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, column.id, project.id)}
-                      onDragEnd={handleDragEnd}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onOpenProject?.(project.id)}
+                      onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenProject?.(project.id); } }}
                       onDragOver={(e) => handleDragOver(e, column.id, project.id)}
                       onDrop={(e) => handleDrop(e, column.id, project.id)}
                       className={cn(
-                        "bg-white p-5 rounded-2xl border shadow-sm transition-all cursor-grab active:cursor-grabbing relative group overflow-hidden",
+                        "bg-white p-5 rounded-2xl border shadow-sm transition-all cursor-pointer relative group overflow-hidden focus:outline-none focus:ring-2 focus:ring-indigo-400",
                         isDragging ? "opacity-50 scale-95 border-indigo-300" : "border-slate-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/5",
                         isDragOver ? "border-t-4 border-t-indigo-500 mt-6" : "",
                         hasSafetyRisk ? "border-rose-200 shadow-rose-100/50" : ""
@@ -391,13 +393,14 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                     >
                       <div className="flex justify-between items-start mb-3">
                         <input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={(e) => { e.stopPropagation(); setSelectedProjectIds((current) => e.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id)); }} onClick={(e) => e.stopPropagation()} className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600" aria-label={`选择归档项目 ${project.name}`} />
-                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border", typeColors[project.type] || "bg-slate-100 text-slate-700 border-slate-200")}>
+                        <button type="button" draggable onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, column.id, project.id); }} onDragEnd={(e) => { e.stopPropagation(); handleDragEnd(); }} onClick={(e) => e.stopPropagation()} className="cursor-grab rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500 active:cursor-grabbing" title="拖动排序" aria-label={`拖动排序 ${project.name}`}><GripVertical className="h-4 w-4" /></button>
+                        {project.type && <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border", typeColors[project.type] || "bg-slate-100 text-slate-700 border-slate-200")}>
                           {project.type}
-                        </span>
+                        </span>}
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
-                              onClick={(e) => { e.stopPropagation(); onOpenProject?.(project.id); }}
+                              onClick={(e) => { e.stopPropagation(); onOpenProjectDetail?.(project.id); }}
                               className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors" 
                               title="查看详情"
                             >
@@ -426,7 +429,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                       <div className="flex items-start gap-2 mb-2">
                         <h4 className="font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">{project.name}</h4>
                         <span className="shrink-0 font-mono text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">{getProjectNumber(project)}</span>
-                        <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">{project.businessModel || "EPC"}</span>
+                        {project.businessModel && <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">{project.businessModel}</span>}
                       </div>
                       
                       {(() => {
@@ -445,12 +448,12 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                       })()}
                       
                       <div className="flex items-center justify-between pt-3 border-t border-slate-100/60">
-                        <div className="flex items-center gap-2">
+                        {project.manager && <div className="flex items-center gap-2">
                           <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500">
                             {project.manager?.charAt(0) || '?'}
                           </div>
-                          <span className="text-[11px] font-medium text-slate-500">{project.manager || '未指定'}</span>
-                        </div>
+                          <span className="text-[11px] font-medium text-slate-500">{project.manager}</span>
+                        </div>}
                         <div className="flex items-center gap-2">
                           {(() => {
                             const projectOrders = supplyOrders.filter((o: any) => o.projectId === project.id);
@@ -464,7 +467,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                             }
                             return null;
                           })()}
-                          <span className="text-[10px] text-slate-400 font-mono bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{project.dueDate}</span>
+                          {project.dueDate && <span className="text-[10px] text-slate-400 font-mono bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{project.dueDate}</span>}
                         </div>
                       </div>
                     </div>

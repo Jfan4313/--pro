@@ -9,7 +9,7 @@ import { SupplyChain } from "./SupplyChain";
 import { buildInventoryCsvRows, filterBomMaterials, filterInventoryMaterials, filterPriceMaterials } from "@/src/features/materials/materialFilters";
 import { createEmptyInboundForm, createEmptyOutboundForm } from "@/src/features/materials/materialForms";
 import { downloadMaterialTemplate, readMaterialImportFile } from "@/src/features/materials/materialImport";
-import { initialBomData, initialBomHistory, initialPriceData, initialPriceHistory, materialsDataInitial, materialTypes } from "@/src/features/materials/materialSeeds";
+import { materialTypes } from "@/src/features/materials/materialSeeds";
 import type { InventoryMaterial, InventoryStatus, MaterialImportPreview, MaterialImportType, WarehouseOutboundOrder, WarehouseOutboundOrderItem, WarehouseOutboundOrderStatus, WarehouseTransaction } from "@/src/features/materials/types";
 import { useAuth } from "@/src/lib/auth";
 import * as XLSX from "xlsx";

@@ -39,6 +39,10 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   }, [projects, stageFilter, lifecycleStates, projectSearch]);
   const currentStageInfo = selectedProject ? getProjectCurrentStageInfo(selectedProject.id, lifecycleStates) : null;
   const availableStages = currentStageInfo ? STAGES.slice(0, currentStageInfo.index + 1) : STAGES.slice(0, 1);
+  const archivedStages = availableStages.map((stage) => ({
+    stage,
+    folder: (projectFiles?.stages || []).find((item: any) => item.stageId === stage.id || item.stageName === stage.name),
+  })).filter(({ folder }) => (folder?.files || []).length > 0);
   const totalFiles = React.useMemo(() => {
     return (projectFiles?.stages || []).reduce((sum: number, stage: any) => sum + (stage.files || []).length, 0);
   }, [projectFiles]);
@@ -190,7 +194,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             <button onClick={() => setStageFilter("all")} className={cn("rounded-xl border px-3 py-2 text-xs font-bold", stageFilter === "all" ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-100 bg-white text-slate-600")}>全部阶段</button>
-            {STAGES.slice(0, 4).map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("rounded-xl border px-3 py-2 text-xs font-bold", stageFilter === stage.id ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-100 bg-white text-slate-600")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
+            {STAGES.map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("rounded-xl border px-3 py-2 text-xs font-bold", stageFilter === stage.id ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-100 bg-white text-slate-600")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -224,8 +228,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         </div>
 
         <div className="divide-y divide-slate-100">
-          {availableStages.map((stage) => {
-            const folder = (projectFiles?.stages || []).find((item: any) => item.stageId === stage.id || item.stageName === stage.name);
+          {archivedStages.map(({ stage, folder }) => {
             const files = folder?.files || [];
             return (
               <div key={stage.id} className="p-5">
@@ -239,8 +242,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
                   </span>
                 </div>
 
-                {files.length > 0 ? (
-                  <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
                     {files.map((file: any) => (
                       <div key={file.relativePath} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
                         <div className="min-w-0">
@@ -257,14 +259,10 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 py-6 text-center text-sm text-slate-400">
-                    暂无归档文件，可在“全生命周期”对应阶段上传资料
-                  </div>
-                )}
               </div>
             );
           })}
+          {archivedStages.length === 0 && <div className="p-10 text-center text-sm text-slate-400">该项目暂无真实归档文件</div>}
         </div>
       </div>
     </div>

@@ -7,8 +7,9 @@ import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { getMissingDocs } from "./ExternalPartners";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { offlineDb } from "@/src/lib/offlineDb";
+import { resolveProjectReference } from "@/src/lib/projectNumbering";
 
-export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenSurvey }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenSurvey?: (projectId: string) => void }) {
+export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle, onOpenSurvey }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenLifecycle?: (projectReference: string) => void; onOpenSurvey?: (projectId: string) => void }) {
   const [projectBoardData] = useProjectBoardData();
   const [scheduleData] = useSyncedAppData<any[]>("scheduleData", []);
   const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
@@ -22,7 +23,8 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenSurvey }:
   const [pendingSurveys, setPendingSurveys] = useState<any[]>([]);
 
   const projects = flattenProjects(projectBoardData);
-  const project = projects.find((item: any) => item.id === projectId) || projects[0];
+  const resolvedProject = resolveProjectReference(projects, projectId);
+  const project = resolvedProject.project || (!projectId ? projects[0] : null);
   const tasks = flattenTasks(scheduleData).filter((task: any) => task.projectId === project?.id || task.projectName === project?.name);
   const projectContracts = contracts.filter((contract: any) => contract.projectId === project?.id || String(contract.name || "").includes(project?.name || ""));
   const projectOrders = supplyOrders.filter((order: any) => order.projectId === project?.id || order.projectName === project?.name);
@@ -62,9 +64,9 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenSurvey }:
             <h2 className="text-2xl font-bold text-slate-900">{project.name}</h2>
             <span className="font-mono text-xs px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100">项目编号: {getProjectNumber(project)}</span>
           </div>
-          <p className="text-sm text-slate-500 mt-1">{project.type} · 负责人 {project.manager} · 预计竣工 {project.dueDate}</p>
+          {(project.type || project.manager || project.dueDate) && <p className="text-sm text-slate-500 mt-1">{[project.type, project.manager ? `负责人 ${project.manager}` : "", project.dueDate ? `预计竣工 ${project.dueDate}` : ""].filter(Boolean).join(" · ")}</p>}
         </div>
-        <button onClick={() => setActiveTab("lifecycle")} className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium">进入生命周期</button>
+        <button onClick={() => onOpenLifecycle?.(getProjectNumber(project))} className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium">进入生命周期</button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">

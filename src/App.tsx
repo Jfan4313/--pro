@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -34,6 +34,10 @@ import { VersionManagement } from "./components/VersionManagement";
 import { FirstRunGuide } from "./components/FirstRunGuide";
 import { LoginScreen, PasswordChangeScreen } from "./components/LoginScreen";
 import { useAuth } from "./lib/auth";
+import { useProjectBoardData } from "./hooks/useProjectBoardData";
+import { useWorkspaceMigrations } from "./hooks/useWorkspaceMigrations";
+import { flattenProjects, getProjectNumber } from "./lib/management";
+import { resolveProjectReference } from "./lib/projectNumbering";
 
 const tabPermissions: Record<string, string> = {
   dashboard: "dashboard", board: "projects", "project-detail": "projects", lifecycle: "lifecycle", "site-survey": "survey",
@@ -45,9 +49,13 @@ const tabPermissions: Record<string, string> = {
 
 export default function App() {
   const { user, loading: authLoading, can } = useAuth();
+  useWorkspaceMigrations();
+  const [projectBoardData] = useProjectBoardData();
+  const allProjects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
   const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || "dashboard");
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
+  const [selectedProjectReference, setSelectedProjectReference] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("stage") || null);
   const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices" | "procurement">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
   const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; returnTab: string }>({ projectId: null, returnTab: "dashboard" });
 
@@ -61,12 +69,15 @@ export default function App() {
     setActiveTab(tab);
     const params = new URLSearchParams(window.location.search);
     params.set("tab", tab);
-    if (tab !== "project-detail") params.delete("project");
+    if (tab !== "project-detail" && tab !== "site-survey") params.delete("project");
+    if (tab !== "lifecycle") params.delete("stage");
+    if (tab !== "project-detail" && tab !== "site-survey") setSelectedProjectReference(null);
+    if (tab !== "lifecycle") setSelectedStageId(null);
     window.history.pushState({ tab }, "", `${window.location.pathname}?${params.toString()}`);
   };
 
   const openProjectSurvey = (projectId: string, returnTab = "project-detail") => {
-    setSelectedProjectId(projectId);
+    setSelectedProjectReference(projectId);
     setSurveyContext({ projectId, returnTab });
     setActiveTab("site-survey");
     const params = new URLSearchParams(window.location.search);
@@ -85,20 +96,52 @@ export default function App() {
     }
   };
 
-  const openProjectDetail = (projectId: string) => {
-    setSelectedProjectId(projectId);
+  const openProjectDetail = useCallback((projectId: string) => {
+    const resolved = resolveProjectReference(allProjects, projectId);
+    const projectReference = resolved.project ? getProjectNumber(resolved.project) : projectId;
+    setSelectedProjectReference(projectReference);
     setActiveTab("project-detail");
     const params = new URLSearchParams(window.location.search);
     params.set("tab", "project-detail");
-    params.set("project", projectId);
-    window.history.pushState({ tab: "project-detail", projectId }, "", `${window.location.pathname}?${params.toString()}`);
-  };
+    params.set("project", projectReference);
+    params.delete("stage");
+    window.history.pushState({ tab: "project-detail", project: projectReference }, "", `${window.location.pathname}?${params.toString()}`);
+  }, [allProjects]);
+
+  const openProjectLifecycle = useCallback((projectReference: string) => {
+    const resolved = resolveProjectReference(allProjects, projectReference);
+    if (resolved.conflict) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `项目编号 ${projectReference} 存在重复，请先处理编号冲突` }));
+      return;
+    }
+    const reference = resolved.project ? getProjectNumber(resolved.project) : projectReference;
+    setSelectedProjectReference(reference);
+    setSelectedStageId(null);
+    setActiveTab("lifecycle");
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "lifecycle");
+    params.set("project", reference);
+    params.delete("stage");
+    window.history.pushState({ tab: "lifecycle", project: reference }, "", `${window.location.pathname}?${params.toString()}`);
+  }, [allProjects]);
+
+  const syncLifecycleRoute = useCallback((project: any, stageId: string) => {
+    const projectNumber = getProjectNumber(project);
+    setSelectedProjectReference(projectNumber);
+    setSelectedStageId(stageId);
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "lifecycle");
+    params.set("project", projectNumber);
+    params.set("stage", stageId);
+    window.history.replaceState({ tab: "lifecycle", project: projectNumber, stage: stageId }, "", `${window.location.pathname}?${params.toString()}`);
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
       setActiveTab(params.get("tab") || "dashboard");
-      setSelectedProjectId(params.get("project"));
+      setSelectedProjectReference(params.get("project"));
+      setSelectedStageId(params.get("stage"));
       setSupplyChainTab((params.get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
     };
     window.addEventListener("popstate", handlePopState);
@@ -134,10 +177,10 @@ export default function App() {
         <Header setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />
         <main className="app-main flex-1 overflow-y-auto flex flex-col">
           {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
-          {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectDetail} /></div></>}
-          {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectId} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
-          {activeTab === "lifecycle" && <><div className="md:hidden min-h-full"><MobileWorkspace module="lifecycle" setActiveTab={navigateToTab} onOpenProject={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectLifecycle onOpenSiteSurvey={(projectId) => openProjectSurvey(projectId, "lifecycle")} /></div></>}
-          {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} onBack={() => { navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, returnTab: "dashboard" }); }} />}
+          {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div></>}
+          {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
+          {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId) => openProjectSurvey(projectId, "lifecycle")} />}
+          {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
           {activeTab === "work-memo" && <WorkMemo />}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}

@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera } from "lucide-react";
+import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { getProjectNumber } from "@/src/lib/management";
+import { resolveProjectReference, sortProjectsNaturally } from "@/src/lib/projectNumbering";
 
 export const STAGES = [
   { 
@@ -218,18 +219,26 @@ function formatUploadTime(value: string) {
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
 }
 
-export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (projectId: string) => void }) {
+export function ProjectLifecycle({ initialProjectReference, initialStageId, onBack, onOpenProjectDetail, onSelectionChange, onOpenSiteSurvey }: {
+  initialProjectReference?: string | null;
+  initialStageId?: string | null;
+  onBack?: () => void;
+  onOpenProjectDetail?: (projectId: string) => void;
+  onSelectionChange?: (project: any, stageId: string) => void;
+  onOpenSiteSurvey?: (projectId: string) => void;
+}) {
   const [boardData] = useProjectBoardData();
-  const [lifecycleStates, setLifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
+  const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   
-  const allProjects = Array.isArray(boardData) 
+  const allProjects = useMemo(() => sortProjectsNaturally(Array.isArray(boardData)
     ? boardData.flatMap((col: any) => col.projects || [])
-    : [];
+    : []), [boardData]);
 
-  const [selectedProject, setSelectedProject] = useState<string | null>(allProjects[0]?.id || null);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState("all");
   const [activeStage, setActiveStage] = useState(STAGES[0].id);
+  const requestedProject = useMemo(() => resolveProjectReference(allProjects, initialProjectReference), [allProjects, initialProjectReference]);
 
   const projectsWithStage = useMemo(() => allProjects.map((project: any, index: number) => ({
     ...project,
@@ -241,12 +250,28 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
     : projectsWithStage.filter((project: any) => project.lifecycleInfo.stage.id === stageFilter), [projectsWithStage, stageFilter]);
 
   useEffect(() => {
-    if (!visibleProjects.some((project: any) => project.id === selectedProject)) {
-      setSelectedProject(visibleProjects[0]?.id || null);
+    if (lifecycleLoading) return;
+    if (requestedProject.project) {
+      setSelectedProject(requestedProject.project.id);
+      const currentStage = getProjectCurrentStageInfo(requestedProject.project.id, lifecycleStates).stage.id;
+      setActiveStage(STAGES.some((stage) => stage.id === initialStageId) ? String(initialStageId) : currentStage);
+      return;
+    }
+    if (!initialProjectReference && !selectedProject && allProjects[0]) {
+      setSelectedProject(allProjects[0].id);
+      setActiveStage(getProjectCurrentStageInfo(allProjects[0].id, lifecycleStates).stage.id);
+    }
+  }, [allProjects.length, initialProjectReference, initialStageId, lifecycleLoading, requestedProject.project?.id]);
+
+  useEffect(() => {
+    if (selectedProject && !visibleProjects.some((project: any) => project.id === selectedProject)) {
+      const next = visibleProjects[0];
+      setSelectedProject(next?.id || null);
+      if (next) setActiveStage(next.lifecycleInfo.stage.id);
     }
   }, [visibleProjects, selectedProject]);
 
-  const activeProj = allProjects.find((p: any) => p.id === selectedProject) || allProjects[0];
+  const activeProj = allProjects.find((p: any) => p.id === selectedProject);
   const activeProjectSurveys = activeProj ? surveyRecords.filter((record: any) => record.projectId === activeProj.id) : [];
   
   // Safe accessor for current project state
@@ -255,6 +280,17 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
   const stageFiles = Array.isArray(stageState.files) ? stageState.files : [];
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (activeProj && STAGES.some((stage) => stage.id === activeStage)) onSelectionChange?.(activeProj, activeStage);
+  }, [activeProj, activeStage, onSelectionChange]);
+
+  const selectProject = (projectId: string) => {
+    const project = allProjects.find((item: any) => item.id === projectId);
+    if (!project) return;
+    setSelectedProject(project.id);
+    setActiveStage(getProjectCurrentStageInfo(project.id, lifecycleStates).stage.id);
+  };
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -369,18 +405,19 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
             <Folder className="w-5 h-5 text-indigo-600" />
             项目档案与流程
           </h2>
+          <button type="button" onClick={onBack} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="返回多项目看板"><ArrowLeft className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">项目列表筛选（当前工作阶段）</div>
           <div className="flex flex-wrap gap-1.5 mb-3 px-1">
             <button onClick={() => setStageFilter("all")} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === "all" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>全部项目</button>
-            {STAGES.slice(0, 4).map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === stage.id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
+            {STAGES.map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === stage.id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
           </div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">进行中的项目 ({visibleProjects.length})</div>
           {visibleProjects.map((p: any) => (
             <button
               key={p.id}
-              onClick={() => setSelectedProject(p.id)}
+              onClick={() => selectProject(p.id)}
               className={cn(
                 "w-full flex flex-col text-left px-4 py-3 rounded-xl transition-all duration-200 border",
                 selectedProject === p.id 
@@ -393,7 +430,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
               </div>
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
                 <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{p.projectNumber}</span>
-                <span>{p.manager}</span>
+                {p.manager && <span>{p.manager}</span>}
               </div>
             </button>
           ))}
@@ -407,21 +444,20 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
             <div className="p-4 md:p-6 bg-slate-50/50 border-b border-slate-200 shrink-0">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div className="min-w-0">
+                  <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 md:hidden"><ArrowLeft className="h-3.5 w-3.5" />返回多项目看板</button>
                   <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{activeProj.name}</h1>
                   <div className="flex flex-wrap items-center gap-3 mt-3">
                     <span className="font-mono bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md text-xs font-medium">项目编号: {getProjectNumber(activeProj)}</span>
-                    <span className="text-slate-500 text-sm flex items-center gap-1.5"><Briefcase className="w-4 h-4" />负责人: {activeProj.manager}</span>
-                    <span className="text-slate-500 text-sm flex items-center gap-1.5"><Clock className="w-4 h-4" />竣工计划: {activeProj.dueDate}</span>
+                    {activeProj.manager && <span className="text-slate-500 text-sm flex items-center gap-1.5"><Briefcase className="w-4 h-4" />负责人: {activeProj.manager}</span>}
+                    {activeProj.dueDate && <span className="text-slate-500 text-sm flex items-center gap-1.5"><Clock className="w-4 h-4" />竣工计划: {activeProj.dueDate}</span>}
                   </div>
                 </div>
-                <select
-                  value={selectedProject}
-                  onChange={(event) => setSelectedProject(event.target.value)}
-                  className="md:hidden w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
-                  aria-label="选择项目"
-                >
-                  {visibleProjects.map((project: any) => <option key={project.id} value={project.id}>{project.projectNumber} · {project.name}</option>)}
-                </select>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  <select value={selectedProject || ""} onChange={(event) => selectProject(event.target.value)} className="md:hidden w-full sm:w-auto rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none" aria-label="选择项目">
+                    {visibleProjects.map((project: any) => <option key={project.id} value={project.id}>{project.projectNumber} · {project.name}</option>)}
+                  </select>
+                  <button type="button" onClick={() => onOpenProjectDetail?.(activeProj.id)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-600"><Eye className="h-4 w-4" />项目详情</button>
+                </div>
               </div>
             </div>
 
@@ -661,8 +697,9 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
             <Folder className="w-20 h-20 mb-4 text-slate-200 fill-slate-100" />
-            <p className="text-xl font-bold text-slate-600">暂无项目数据</p>
-            <p className="text-sm mt-2">请先在多项目看板中创建项目，这里将统一管理各项目的7大流程与档案</p>
+            <p className="text-xl font-bold text-slate-600">{requestedProject.conflict ? "项目编号存在冲突" : initialProjectReference ? "未找到指定项目" : "暂无项目数据"}</p>
+            <p className="text-sm mt-2">{requestedProject.conflict ? `编号 ${initialProjectReference} 对应多个项目，请先处理编号冲突` : initialProjectReference ? `项目编号或旧链接 ${initialProjectReference} 无法匹配当前项目` : "请先在多项目看板中创建项目，这里将统一管理各项目的9个流程与档案"}</p>
+            <button type="button" onClick={onBack} className="mt-5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">返回多项目看板</button>
           </div>
         )}
       </div>

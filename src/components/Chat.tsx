@@ -5,42 +5,6 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { readAndUploadFile } from "@/src/lib/fileUpload";
 
-const initialChannels = [
-  { id: "1", name: "全局公告", type: "announcement", unread: 2, members: ["所有人"] },
-  { id: "2", name: "智建公司 - A区商业综合体", type: "project", unread: 0, members: ["张伟", "李娜", "王强"] },
-  { id: "3", name: "智建公司 - B区住宅一期", type: "project", unread: 5, members: ["张伟", "陈杰"] },
-];
-
-const initialPosts = [
-  { 
-    id: 1, 
-    channelId: "1",
-    author: "张伟 (项目经理)", 
-    time: "今天 10:24", 
-    content: "A区商业综合体主体结构施工进度已达60%，请各班组注意安全规范，下午3点进行现场联合检查。",
-    type: "announcement",
-    attachments: []
-  },
-  { 
-    id: 2, 
-    channelId: "2",
-    author: "李娜 (安全员)", 
-    time: "今天 09:15", 
-    content: "上传了最新的《现场安全施工规范V2.0.pdf》，请所有新进场人员务必下载学习。",
-    type: "document",
-    attachments: [{ name: "现场安全施工规范V2.0.pdf", size: "2.4 MB", type: "pdf" }]
-  },
-  { 
-    id: 3, 
-    channelId: "3",
-    author: "王强 (高级电工)", 
-    time: "昨天 16:30", 
-    content: "地下室二层桥架安装完毕，附上现场照片，请监理查验。",
-    type: "update",
-    attachments: [{ name: "现场照片_桥架.jpg", size: "1.1 MB", type: "image" }]
-  },
-];
-
 export function Chat() {
   const [channels, setChannels] = useSyncedAppData("chatChannels", []);
   const [activeChannelId, setActiveChannelId] = useState(channels[0]?.id || "1");
@@ -406,7 +370,7 @@ export function Chat() {
                   type="text" 
                   value={newChannelName}
                   onChange={(e) => setNewChannelName(e.target.value)}
-                  placeholder="例如：智建公司 - A区商业综合体"
+                  placeholder="例如：项目协作群"
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 />
               </div>
