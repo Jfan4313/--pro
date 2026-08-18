@@ -1146,6 +1146,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
   const totalPhotos = sortedRecords.reduce((total, record) => total + (record.photos?.length || 0), 0);
   const completedRecords = sortedRecords.filter((record) => record.status === "completed").length;
   const allPhotos = sortedRecords.flatMap((record) => record.photos || []);
+  const projectNotes = [...new Set(sortedRecords.map((record) => record.notes?.trim()).filter(Boolean))].join("\n\n") || "暂无现场情况说明。";
   const reportNumber = `HZ-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(sortedRecords[0]?.projectId || "LOCAL").slice(0, 6).toUpperCase()}`;
 
   const categoryRows = photoCategoryGroups.map((group) => {
@@ -1174,11 +1175,6 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
       (groups[category.id] ||= []).push(photo);
       return groups;
     }, {});
-    const representativePhotos = Object.entries(photosByCategory).slice(0, 6).map(([categoryId, photos]) => ({
-      photo: photos[0],
-      category: getPhotoCategory(categoryId),
-      categoryCount: photos.length,
-    }));
     return `<section class="record-card">
       <div class="record-heading">
         <div><span class="record-index">${String(index + 1).padStart(2, "0")}</span><h2>${escapeReportHtml(getSurveySubject(record))}</h2></div>
@@ -1193,17 +1189,15 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
           <div><label>现场地址</label><p>${escapeReportHtml(record.address || "未填写")}</p></div>
           <div><label>勘察人员</label><p>${escapeReportHtml(record.surveyor || "未填写")}</p></div>
           <div><label>电压 / 容量</label><p>${escapeReportHtml(record.voltageLevel || "未填写")} · ${escapeReportHtml(record.transformerCapacity || "未填写")}</p></div>
-          <div><label>计量表位置</label><p>${escapeReportHtml(record.meterPosition || "未填写")}</p></div>
           <div><label>进场条件</label><p>${escapeReportHtml(record.accessCondition || "未填写")}</p></div>
           <div><label>网络信号</label><p>${escapeReportHtml(record.networkSignal || "未填写")}</p></div>
         `}
       </div>
-      <div class="record-notes"><label>现场情况</label><p>${escapeReportHtml(record.notes || "暂无补充说明。")}</p></div>
-      <div class="representative-heading"><strong>分类代表照片</strong><span>展示 ${representativePhotos.length} 张 / 全部 ${record.photos?.length || 0} 张</span></div>
-      ${representativePhotos.length ? `<div class="photo-grid">${representativePhotos.map(({ photo, category, categoryCount }) => `<figure>
-        <img src="${escapeReportHtml(uploadedUrl(photo.url))}" alt="${escapeReportHtml(category.label)}">
-        <figcaption><strong>${escapeReportHtml(category.label)}</strong><span>本类共 ${categoryCount} 张</span></figcaption>
-      </figure>`).join("")}</div>` : '<div class="empty">暂无现场照片</div>'}
+      <div class="representative-heading"><strong>分类现场照片</strong><span>全部 ${record.photos?.length || 0} 张</span></div>
+      ${Object.entries(photosByCategory).length ? Object.entries(photosByCategory).map(([categoryId, photos]) => { const category = getPhotoCategory(categoryId); return `<div class="photo-category"><div class="photo-category-heading"><strong>${escapeReportHtml(category.label)}</strong><span>${photos.length} 张</span></div><div class="photo-grid">${photos.map((photo, photoIndex) => `<figure>
+        <img src="${escapeReportHtml(uploadedUrl(photo.url))}" alt="${escapeReportHtml(category.label)} ${photoIndex + 1}">
+        <figcaption><strong>${escapeReportHtml(category.label)} ${photoIndex + 1}</strong><span>现场照片</span></figcaption>
+      </figure>`).join("")}</div></div>`; }).join("") : '<div class="empty">暂无现场照片</div>'}
     </section>`;
   }).join("");
   const buildingRecordSections = buildRecordSections(buildingRecords);
@@ -1259,6 +1253,9 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     .record-notes { margin-top: 8px; border-radius: 9px; padding: 8px 9px; background: #f8fafc; white-space: pre-wrap; }
     .representative-heading { display: flex; justify-content: space-between; gap: 10px; margin: 11px 0 7px; }
     .representative-heading span { color: #64748b; font-size: 9px; }
+    .photo-category { margin-top: 10px; }
+    .photo-category-heading { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 5px; color: #475569; font-size: 10px; }
+    .photo-category-heading span { color: #94a3b8; }
     .photo-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
     figure { margin: 0; border: 1px solid #e2e8f0; border-radius: 9px; overflow: hidden; break-inside: avoid; }
     figure img { display: block; width: 100%; height: 45mm; object-fit: cover; background: #f1f5f9; }
@@ -1286,6 +1283,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     <section class="section"><div class="title">天面与建筑结构总览</div>${buildingRecords.length ? `<table><thead><tr><th>序号</th><th>天面/建筑区域</th><th>日期与人员</th><th>类型</th><th>照片</th><th>状态</th></tr></thead><tbody>${buildingRecordRows}</tbody></table>` : '<div class="empty">暂无天面或建筑结构勘察记录</div>'}</section>
     <section class="section"><div class="title">电房总览</div>${electricalRecords.length ? `<table><thead><tr><th>序号</th><th>电房与位置</th><th>日期与人员</th><th>电气参数</th><th>照片</th><th>状态</th></tr></thead><tbody>${electricalRecordRows}</tbody></table>` : '<div class="empty">暂无电房勘察记录</div>'}</section>
     <section class="section"><div class="title">分类拍摄完成度</div>${categoryRows}</section>
+    <section class="section"><div class="title">项目现场情况</div><div class="record-notes"><p>${escapeReportHtml(projectNotes)}</p></div></section>
     <section class="section"><div class="title">天面与建筑结构详细信息</div></section>
     ${buildingRecordSections || '<div class="empty">暂无天面或建筑结构详细信息</div>'}
     <section class="section"><div class="title">各电房详细信息</div></section>
