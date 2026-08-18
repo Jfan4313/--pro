@@ -744,7 +744,16 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
   };
 
   const consolidateProjectArchive = async (projectId: string, savedRecord: SurveyRecord) => {
-    const projectRecords = allRecords.filter((record) => record.projectId === projectId);
+    // `allRecords` can still be one render behind immediately after a save.
+    // Read the latest local entity cache as well, otherwise a subsequent room
+    // save can rebuild the project archive from only the newest room and drop
+    // rooms that were saved moments earlier.
+    const cachedRecords = await offlineDb.listEntities<SurveyRecord>("site-surveys");
+    const recordsById = new Map<string, SurveyRecord>();
+    [...cachedRecords, ...allRecords, savedRecord].forEach((record) => {
+      if (record.projectId === projectId && record.id) recordsById.set(String(record.id), record);
+    });
+    const projectRecords = [...recordsById.values()];
     const existingArchive = projectRecords.find((record) => record.archiveType === "project");
     const existingSubjects = projectRecords.filter((record) => record.archiveType !== "project");
     if (!existingArchive && existingSubjects.length === 0) return;
@@ -1039,6 +1048,13 @@ function escapeReportHtml(value: unknown) {
     .replace(/'/g, "&#039;");
 }
 
+function naturalReportCompare(left: unknown, right: unknown) {
+  return String(left || "").localeCompare(String(right || ""), "zh-CN", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 function openSurveyPdfReport(record: SurveyRecord) {
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) {
@@ -1148,7 +1164,10 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
       ? record.childRecords
       : [record]
   )).filter((record, index, source) => !record.id || source.findIndex((item) => String(item.id) === String(record.id)) === index);
-  const sortedRecords = [...reportRecords].sort((a, b) => String(a.surveyDate).localeCompare(String(b.surveyDate)));
+  const sortedRecords = [...reportRecords].sort((a, b) => (
+    naturalReportCompare(getSurveySubject(a), getSurveySubject(b))
+    || naturalReportCompare(a.surveyDate, b.surveyDate)
+  ));
   const buildingRecords = sortedRecords.filter((record) => record.surveyScope === "building" || record.roomType === "building-structure");
   const electricalRecords = sortedRecords.filter((record) => !buildingRecords.includes(record));
   const totalPhotos = sortedRecords.reduce((total, record) => total + (record.photos?.length || 0), 0);
@@ -1183,12 +1202,13 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
       (groups[category.id] ||= []).push(photo);
       return groups;
     }, {});
+    const sortedPhotoCategories = Object.entries(photosByCategory).sort(([left], [right]) => naturalReportCompare(getPhotoCategory(left).label, getPhotoCategory(right).label));
     return `<section class="record-card">
       <div class="record-heading">
         <div><span class="record-index">${String(index + 1).padStart(2, "0")}</span><h2>${escapeReportHtml(getSurveySubject(record))}</h2></div>
         <span>${escapeReportHtml(record.surveyDate || "未填写日期")}</span>
       </div>
-      <div class="record-info">
+      <div class="record-info ${isBuildingRecord ? "building-info" : "electrical-info"}">
         ${isBuildingRecord ? `
           <div><label>天面/建筑区域</label><p>${escapeReportHtml(record.roomName || "未填写")}</p></div>
           <div><label>现场地址</label><p>${escapeReportHtml(record.address || "未填写")}</p></div>
@@ -1201,7 +1221,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
         `}
       </div>
       <div class="representative-heading"><strong>分类现场照片</strong><span>全部 ${record.photos?.length || 0} 张</span></div>
-      ${Object.entries(photosByCategory).length ? Object.entries(photosByCategory).map(([categoryId, photos]) => { const category = getPhotoCategory(categoryId); return `<div class="photo-category"><div class="photo-category-heading"><strong>${escapeReportHtml(category.label)}</strong><span>${photos.length} 张</span></div><div class="photo-grid">${photos.map((photo, photoIndex) => `<figure>
+      ${sortedPhotoCategories.length ? sortedPhotoCategories.map(([categoryId, photos]) => { const category = getPhotoCategory(categoryId); return `<div class="photo-category"><div class="photo-category-heading"><strong>${escapeReportHtml(category.label)}</strong><span>${photos.length} 张</span></div><div class="photo-grid">${photos.map((photo, photoIndex) => `<figure>
         <img src="${escapeReportHtml(uploadedUrl(photo.url))}" alt="${escapeReportHtml(category.label)} ${photoIndex + 1}">
         <figcaption><strong>${escapeReportHtml(category.label)} ${photoIndex + 1}</strong><span>现场照片</span></figcaption>
       </figure>`).join("")}</div></div>`; }).join("") : '<div class="empty">暂无现场照片</div>'}
@@ -1254,9 +1274,13 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     .record-heading > span { color: #64748b; }
     .record-index { display: flex; width: 27px; height: 27px; align-items: center; justify-content: center; border-radius: 8px; color: #fff; background: #4f46e5; font-weight: 800; }
     .record-info { display: grid; grid-template-columns: repeat(3,1fr); border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+    .record-info.electrical-info { grid-template-columns: repeat(4,1fr); }
     .record-info > div { min-height: 48px; border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 7px 8px; }
     .record-info > div:nth-child(3n) { border-right: 0; }
     .record-info > div:nth-last-child(-n+3) { border-bottom: 0; }
+    .electrical-info > div:nth-child(3n) { border-right: 1px solid #e2e8f0; }
+    .electrical-info > div:nth-child(4n) { border-right: 0; }
+    .electrical-info > div:nth-last-child(-n+4) { border-bottom: 0; }
     label { display: block; color: #64748b; font-size: 8px; }
     .record-info p,.record-notes p { margin: 2px 0 0; font-weight: 600; }
     .record-notes { margin-top: 8px; border-radius: 9px; padding: 8px 9px; background: #f8fafc; white-space: pre-wrap; }
@@ -1279,7 +1303,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     .actions .print { background: #4f46e5; color: #fff; }
     .actions .close { background: #e2e8f0; color: #334155; }
     @media print { .actions { display:none; } }
-    @media (max-width: 640px) { .metrics,.coverage-grid { grid-template-columns: repeat(2,1fr); } .photo-grid { grid-template-columns: repeat(2,1fr); } .record-info { grid-template-columns: repeat(2,1fr); } .record-info > div { border-right: 1px solid #e2e8f0 !important; border-bottom: 1px solid #e2e8f0 !important; } }
+    @media (max-width: 640px) { .metrics,.coverage-grid { grid-template-columns: repeat(2,1fr); } .photo-grid { grid-template-columns: repeat(2,1fr); } .record-info,.record-info.electrical-info { grid-template-columns: repeat(2,1fr); } .record-info > div { border-right: 1px solid #e2e8f0 !important; border-bottom: 1px solid #e2e8f0 !important; } .record-info > div:nth-child(2n) { border-right: 0 !important; } .record-info > div:nth-last-child(-n+2) { border-bottom: 0 !important; } }
   </style></head><body>
   <main class="report">
     <section class="cover"><div class="brand">智建协同 PRO · PROJECT SITE SURVEY</div><h1>项目现场勘察汇总报告</h1><p class="subtitle">${escapeReportHtml(projectName)}</p><div class="meta"><span>报告编号：${escapeReportHtml(reportNumber)}</span><span>生成时间：${escapeReportHtml(new Date().toLocaleString("zh-CN"))}</span></div></section>
