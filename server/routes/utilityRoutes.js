@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
+import { analyzeIntakeWithAI } from "../domain/aiService.js";
 import {
   buildProjectStoredFile,
   getProjectFolderName,
@@ -24,12 +25,12 @@ export function registerUtilityRoutes(app, context) {
     res.status(201).json({ id: crypto.randomUUID(), filename: safeName, url: `/uploads/${storedName}`, createdAt: nowIso() });
   });
 
-  app.post("/api/intake/analyze", (req, res) => {
+  app.post("/api/intake/analyze", async (req, res) => {
     const inputType = req.body?.inputType;
     if (!["text", "image", "audio"].includes(inputType)) {
       return res.status(400).json({ error: "invalid_input_type" });
     }
-    res.json(analyzeIntake(req.body || {}));
+    try { res.json(await analyzeIntakeWithAI(req.body || {})); } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
   });
 
   app.get("/api/file-settings", (_req, res) => {

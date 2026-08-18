@@ -270,7 +270,7 @@ export function SmartIntake({ setActiveTab }: { setActiveTab: (tab: string) => v
                     {inputType === "image" ? <ImageIcon className="w-6 h-6" /> : <AudioLines className="w-6 h-6" />}
                   </div>
                   <p className="text-sm font-medium text-slate-900">{inputType === "image" ? "上传聊天截图" : "上传口述音频"}</p>
-                  <p className="text-xs text-slate-500 mt-1">当前无 AI，附件会作为来源凭证保存，待办标题需手动补充。</p>
+                  <p className="text-xs text-slate-500 mt-1">图片或语音将交给服务端 AI 识别；未配置 AI 时仍会保存来源凭证并允许手动确认。</p>
                   <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
                     <FileUp className="w-4 h-4" />
                     选择文件
