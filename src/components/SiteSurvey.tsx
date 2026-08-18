@@ -56,6 +56,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [newProject, setNewProject] = useState({ name: "", type: "光伏发电" });
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
+  const [roomBeingEdited, setRoomBeingEdited] = useState<SurveyRoom | null>(null);
   const [newRoom, setNewRoom] = useState({ name: "", type: "high-voltage" });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -450,8 +451,33 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "请先选择或新增项目" }));
       return;
     }
+    setRoomBeingEdited(null);
     setNewRoom({ name: "", type: "high-voltage" });
     setIsRoomModalOpen(true);
+  };
+
+  const openRoomRenameModal = () => {
+    const room = projectRooms.find((item: SurveyRoom) => item.id === form.roomId);
+    if (!room) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "请先选择要修正名称的电房" }));
+      return;
+    }
+    setRoomBeingEdited(room);
+    setNewRoom({ name: room.name, type: room.type });
+    setIsRoomModalOpen(true);
+  };
+
+  const selectProject = (projectId: string) => {
+    if (projectId !== form.projectId && draftPhotos.length > 0) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前已有未保存照片，请先保存当前记录后再切换项目" }));
+      return;
+    }
+    if (projectId !== form.projectId && (editingRecord || retainedPhotos.length > 0)) {
+      setEditingRecord(null);
+      setRetainedPhotos([]);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "已结束原记录调整，切换后的内容将作为新勘察记录保存，原照片保持不变" }));
+    }
+    setForm((current) => ({ ...current, projectId, roomId: "", roomName: "" }));
   };
 
   const createRoom = (event: FormEvent) => {
@@ -480,11 +506,60 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
     window.dispatchEvent(new CustomEvent("show-toast", { detail: `${getRoomTypeLabel(room.type)}“${room.name}”已新增并选中` }));
   };
 
+  const renameRoom = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!roomBeingEdited) return;
+    const name = newRoom.name.trim();
+    if (!name) return;
+    if (projectRooms.some((room: SurveyRoom) => room.id !== roomBeingEdited.id && room.type === newRoom.type && room.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "该电房名称已存在，请换一个名称" }));
+      return;
+    }
+
+    const updatedRoom = { ...roomBeingEdited, name, type: newRoom.type };
+    await setBoardData((current: any) => (Array.isArray(current) ? current.map((column: any) => ({
+      ...column,
+      projects: (column.projects || []).map((project: any) => {
+        if (project.id !== form.projectId) return project;
+        const rooms = Array.isArray(project.surveyRooms) ? project.surveyRooms : [];
+        const exists = rooms.some((room: SurveyRoom) => room.id === updatedRoom.id);
+        return { ...project, surveyRooms: exists ? rooms.map((room: SurveyRoom) => room.id === updatedRoom.id ? updatedRoom : room) : [...rooms, updatedRoom] };
+      }),
+    })) : current));
+
+    const matchingRecords = allRecords.filter((record) => record.projectId === form.projectId && (record.roomId || `legacy-${record.roomType || "unknown"}-${record.roomName}`) === updatedRoom.id);
+    const matchingRecordIds = new Set(matchingRecords.map((record) => String(record.id)));
+    const updatedPending = pendingSurveys.map((pending) => matchingRecordIds.has(String(pending.id))
+      ? { ...pending, form: { ...pending.form, roomName: name, roomType: updatedRoom.type } }
+      : pending);
+    for (const pending of updatedPending) {
+      if (pending !== pendingSurveys.find((item) => item.id === pending.id)) await offlineDb.putEntity(PENDING_SURVEYS_RESOURCE, pending);
+    }
+    setPendingSurveys(updatedPending);
+
+    for (const record of matchingRecords.filter((item) => item.status !== "pending" && item.id)) {
+      const updatedRecord = { ...record, roomName: name, roomType: updatedRoom.type };
+      await queueEntityOperation("site-surveys", "upsert", updatedRecord);
+      setRecentlySavedRecords((current) => current.map((item) => item.id === updatedRecord.id ? updatedRecord : item));
+      setSelectedRecord((current) => current?.id === updatedRecord.id ? updatedRecord : current);
+      setEditingRecord((current) => current?.id === updatedRecord.id ? updatedRecord : current);
+    }
+    if (form.roomId === updatedRoom.id) setForm((current) => ({ ...current, roomName: name, roomType: updatedRoom.type }));
+    setIsRoomModalOpen(false);
+    setRoomBeingEdited(null);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `电房名称已修正为“${name}”，历史记录保持原照片归属` }));
+  };
+
   const selectSurveyScope = (scope: "building" | "electrical") => {
     if (scope === form.surveyScope) return;
     if (draftPhotos.length > 0) {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前已有未保存照片，请先保存当前记录后再切换勘察类型" }));
       return;
+    }
+    if (editingRecord || retainedPhotos.length > 0) {
+      setEditingRecord(null);
+      setRetainedPhotos([]);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "已结束原记录调整，切换后的内容将作为新勘察记录保存，原照片保持不变" }));
     }
     setForm((current) => ({
       ...current,
@@ -503,6 +578,14 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       return;
     }
     const room = projectRooms.find((item: SurveyRoom) => item.id === roomId);
+    if (roomId !== form.roomId && (editingRecord || retainedPhotos.length > 0)) {
+      // Photos retained while editing belong to the old room. Never reuse the
+      // old record id after changing rooms, otherwise the save updates the old
+      // room and effectively moves its photos to the new room.
+      setEditingRecord(null);
+      setRetainedPhotos([]);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "已切换电房，当前内容将作为新记录保存，原电房照片保持不变" }));
+    }
     setForm((current) => ({ ...current, roomId: room?.id || "", roomName: room?.name || "", roomType: room?.type || "high-voltage" }));
   };
 
@@ -740,7 +823,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="block">
                   <div className="mb-1.5 flex items-center justify-between gap-3"><label htmlFor="survey-project" className="text-sm font-semibold text-slate-700">所属项目</label><button type="button" onClick={openProjectModal} className="flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700"><Plus className="h-3.5 w-3.5" />新增项目</button></div>
-                  <select id="survey-project" value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value, roomId: "", roomName: "" })} className="survey-input"><option value="">请选择项目</option>{projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+                  <select id="survey-project" value={form.projectId} onChange={(event) => selectProject(event.target.value)} className="survey-input"><option value="">请选择项目</option>{projects.map((project: any) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
                   {projects.length === 0 && <p className="mt-1.5 text-xs text-amber-600">还没有项目，请先新增项目再开始勘察</p>}
                 </div>
                 <Field label="勘察日期"><input type="date" value={form.surveyDate} onChange={(event) => setForm({ ...form, surveyDate: event.target.value })} className="survey-input" /></Field>
@@ -748,7 +831,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
               </div>
               <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5"><button type="button" onClick={() => selectSurveyScope("building")} className={`rounded-xl px-3 py-3 text-sm font-bold transition-colors ${form.surveyScope === "building" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}>天面/建筑结构</button><button type="button" onClick={() => selectSurveyScope("electrical")} className={`rounded-xl px-3 py-3 text-sm font-bold transition-colors ${form.surveyScope === "electrical" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}>电气电房</button></div>
               {form.surveyScope === "building" ? <Field label="天面/建筑区域"><input value={form.roomName} onChange={(event) => setForm({ ...form, roomName: event.target.value, roomId: "", roomType: "building-structure" })} placeholder="例如：1号厂房天面、办公楼东侧屋顶" className="survey-input" /></Field> : <div>
-                <div className="mb-2 flex items-center justify-between gap-3"><label htmlFor="survey-room" className="text-sm font-semibold text-slate-700">所属电房</label><button type="button" onClick={openRoomModal} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm shadow-indigo-600/20"><Plus className="h-3.5 w-3.5" />新增电房</button></div>
+                <div className="mb-2 flex items-center justify-between gap-3"><label htmlFor="survey-room" className="text-sm font-semibold text-slate-700">所属电房</label><div className="flex items-center gap-2"><button type="button" onClick={openRoomRenameModal} disabled={!form.roomId} className="flex items-center gap-1 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"><Edit2 className="h-3.5 w-3.5" />修正名称</button><button type="button" onClick={openRoomModal} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm shadow-indigo-600/20"><Plus className="h-3.5 w-3.5" />新增电房</button></div></div>
                 <select id="survey-room" value={form.roomId} onChange={(event) => selectRoom(event.target.value)} className="survey-input"><option value="">请选择电房</option>{projectRooms.map((room: SurveyRoom) => <option key={room.id} value={room.id}>{getRoomTypeLabel(room.type)} · {room.name}</option>)}</select>
                 {form.projectId && projectRooms.length === 0 && <p className="mt-1.5 text-xs text-amber-600">该项目还没有电房，请先新增电房</p>}
               </div>}
@@ -833,11 +916,11 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       </div>}
       {isRoomModalOpen && <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="survey-new-room-title">
         <div className="w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
-          <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5"><div><h3 id="survey-new-room-title" className="text-lg font-bold text-slate-900">新增电房</h3><p className="mt-1 text-xs text-slate-500">归属于 {selectedProject?.name || "当前项目"}，每个电房的照片独立保存</p></div><button type="button" onClick={() => setIsRoomModalOpen(false)} className="rounded-full bg-slate-100 p-2 text-slate-500" aria-label="关闭新增电房窗口"><X className="h-4 w-4" /></button></div>
-          <form onSubmit={createRoom} className="space-y-4 p-5 sm:p-6">
+          <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5"><div><h3 id="survey-new-room-title" className="text-lg font-bold text-slate-900">{roomBeingEdited ? "修正电房名称" : "新增电房"}</h3><p className="mt-1 text-xs text-slate-500">归属于 {selectedProject?.name || "当前项目"}，每个电房的照片独立保存</p></div><button type="button" onClick={() => { setIsRoomModalOpen(false); setRoomBeingEdited(null); }} className="rounded-full bg-slate-100 p-2 text-slate-500" aria-label="关闭电房窗口"><X className="h-4 w-4" /></button></div>
+          <form onSubmit={roomBeingEdited ? renameRoom : createRoom} className="space-y-4 p-5 sm:p-6">
             <Field label="电房类型"><select value={newRoom.type} onChange={(event) => setNewRoom((current) => ({ ...current, type: event.target.value }))} className="survey-input">{ROOM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select></Field>
             <Field label="电房名称/编号"><input autoFocus required value={newRoom.name} onChange={(event) => setNewRoom((current) => ({ ...current, name: event.target.value }))} className="survey-input" placeholder={newRoom.type === "high-voltage" ? "例如：1号高压电房" : "例如：2号低压电房"} /></Field>
-            <div className="flex gap-3 pt-2"><button type="button" onClick={() => setIsRoomModalOpen(false)} className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600">取消</button><button type="submit" className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white"><Plus className="h-4 w-4" />新增并选中</button></div>
+            <div className="flex gap-3 pt-2"><button type="button" onClick={() => { setIsRoomModalOpen(false); setRoomBeingEdited(null); }} className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-600">取消</button><button type="submit" className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white">{roomBeingEdited ? <><Save className="h-4 w-4" />保存名称</> : <><Plus className="h-4 w-4" />新增并选中</>}</button></div>
           </form>
         </div>
       </div>}
