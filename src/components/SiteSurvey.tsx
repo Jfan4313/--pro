@@ -858,7 +858,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
                 window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前项目还没有已保存的勘察记录" }));
                 return;
               }
-              openSurveySummaryPdfReport(selectedProjectRecords, selectedProject?.name || selectedProjectRecords[0].projectName);
+              openSurveySummaryPdfReport(selectedProjectRecords, selectedProject?.name || selectedProjectRecords[0].projectName, (selectedProject as any)?.surveyNotes || "");
             }}
             className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/10 sm:w-auto"
           >
@@ -891,6 +891,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
                 <Field label="勘察日期"><input type="date" value={form.surveyDate} onChange={(event) => setForm({ ...form, surveyDate: event.target.value })} className="survey-input" /></Field>
                 <Field label="勘察人员"><input value={form.surveyor} onChange={(event) => setForm({ ...form, surveyor: event.target.value })} className="survey-input" /></Field>
               </div>
+              <Field label="项目现场情况"><textarea value={(selectedProject as any)?.surveyNotes || ""} onChange={(event) => { const notes = event.target.value; void setBoardData((current: any) => (Array.isArray(current) ? current.map((column: any) => ({ ...column, projects: (column.projects || []).map((project: any) => project.id === form.projectId ? { ...project, surveyNotes: notes } : project) })) : current)); }} placeholder="填写项目整体情况、施工限制、周边环境和统一备注，不需要按电房重复填写" className="survey-input min-h-28 resize-none" /></Field>
               <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5"><button type="button" onClick={() => selectSurveyScope("building")} className={`rounded-xl px-3 py-3 text-sm font-bold transition-colors ${form.surveyScope === "building" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}>天面/建筑结构</button><button type="button" onClick={() => selectSurveyScope("electrical")} className={`rounded-xl px-3 py-3 text-sm font-bold transition-colors ${form.surveyScope === "electrical" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}>电气电房</button></div>
               {form.surveyScope === "building" ? <Field label="天面/建筑区域"><input value={form.roomName} onChange={(event) => setForm({ ...form, roomName: event.target.value, roomId: "", roomType: "building-structure" })} placeholder="例如：1号厂房天面、办公楼东侧屋顶" className="survey-input" /></Field> : <div>
                 <div className="mb-2 flex items-center justify-between gap-3"><label htmlFor="survey-room" className="text-sm font-semibold text-slate-700">所属电房</label><div className="flex items-center gap-2"><button type="button" onClick={openRoomRenameModal} disabled={!form.roomId} className="flex items-center gap-1 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"><Edit2 className="h-3.5 w-3.5" />修正名称</button><button type="button" onClick={openRoomModal} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm shadow-indigo-600/20"><Plus className="h-3.5 w-3.5" />新增电房</button></div></div>
@@ -906,7 +907,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
                 <Field label="车辆进场条件"><select value={form.accessCondition} onChange={(event) => setForm({ ...form, accessCondition: event.target.value })} className="survey-input"><option>车辆可达</option><option>小型车辆可达</option><option>需人工搬运</option><option>待确认</option></select></Field>
                 <Field label="现场网络信号"><select value={form.networkSignal} onChange={(event) => setForm({ ...form, networkSignal: event.target.value })} className="survey-input"><option>良好</option><option>一般</option><option>较弱</option><option>无信号</option></select></Field>
               </div>}
-              <Field label="现场情况备注"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="记录设备现状、空间尺寸、施工限制、安全隐患等" className="survey-input min-h-28 resize-none" /></Field>
+              {form.surveyScope === "building" && <Field label="建筑结构补充说明"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="记录建筑结构本身的补充信息" className="survey-input min-h-28 resize-none" /></Field>}
 
               <div>
                 <div className="mb-3 flex items-center justify-between"><div><label className="text-sm font-semibold text-slate-700">分类拍摄 <span className="text-rose-500">*</span></label><p className="mt-0.5 text-[11px] font-medium text-indigo-600">{form.surveyScope === "building" ? `建筑结构 · ${form.roomName.trim() || "请填写区域"}` : `${getRoomTypeLabel(form.roomType)} · ${form.roomName.trim() || "请选择电房"}`}</p></div><span className="text-xs text-slate-400">{draftPhotos.length + retainedPhotos.length}/{MAX_SURVEY_PHOTOS}</span></div>
@@ -961,7 +962,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
         </div>
       </div>
 
-      {selectedRecord && <SurveyDetail record={selectedRecord} onEdit={() => editSurveyRecord(selectedRecord)} onEditChild={(child) => editSurveyRecord(child)} onOpenProjectReport={() => { const projectRecords = allRecords.filter((record) => record.projectId === selectedRecord.projectId); openSurveySummaryPdfReport(projectRecords, selectedRecord.projectName); }} onClose={() => setSelectedRecord(null)} />}
+      {selectedRecord && <SurveyDetail record={selectedRecord} onEdit={() => editSurveyRecord(selectedRecord)} onEditChild={(child) => editSurveyRecord(child)} onOpenProjectReport={() => { const projectRecords = allRecords.filter((record) => record.projectId === selectedRecord.projectId); const project = projects.find((item: any) => item.id === selectedRecord.projectId) as any; openSurveySummaryPdfReport(projectRecords, selectedRecord.projectName, project?.surveyNotes || ""); }} onClose={() => setSelectedRecord(null)} />}
       {isProjectModalOpen && <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="survey-new-project-title">
         <div className="w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
           <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
@@ -1126,7 +1127,7 @@ function openSurveyPdfReport(record: SurveyRecord) {
   reportWindow.document.close();
 }
 
-function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string) {
+function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string, projectNotes = "") {
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "浏览器阻止了报告窗口，请允许弹出窗口后重试" }));
@@ -1146,7 +1147,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
   const totalPhotos = sortedRecords.reduce((total, record) => total + (record.photos?.length || 0), 0);
   const completedRecords = sortedRecords.filter((record) => record.status === "completed").length;
   const allPhotos = sortedRecords.flatMap((record) => record.photos || []);
-  const projectNotes = [...new Set(sortedRecords.map((record) => record.notes?.trim()).filter(Boolean))].join("\n\n") || "暂无现场情况说明。";
+  const projectSituation = projectNotes.trim() || [...new Set(sortedRecords.map((record) => record.notes?.trim()).filter(Boolean))].join("\n\n") || "暂无现场情况说明。";
   const reportNumber = `HZ-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(sortedRecords[0]?.projectId || "LOCAL").slice(0, 6).toUpperCase()}`;
 
   const categoryRows = photoCategoryGroups.map((group) => {
@@ -1283,7 +1284,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     <section class="section"><div class="title">天面与建筑结构总览</div>${buildingRecords.length ? `<table><thead><tr><th>序号</th><th>天面/建筑区域</th><th>日期与人员</th><th>类型</th><th>照片</th><th>状态</th></tr></thead><tbody>${buildingRecordRows}</tbody></table>` : '<div class="empty">暂无天面或建筑结构勘察记录</div>'}</section>
     <section class="section"><div class="title">电房总览</div>${electricalRecords.length ? `<table><thead><tr><th>序号</th><th>电房与位置</th><th>日期与人员</th><th>电气参数</th><th>照片</th><th>状态</th></tr></thead><tbody>${electricalRecordRows}</tbody></table>` : '<div class="empty">暂无电房勘察记录</div>'}</section>
     <section class="section"><div class="title">分类拍摄完成度</div>${categoryRows}</section>
-    <section class="section"><div class="title">项目现场情况</div><div class="record-notes"><p>${escapeReportHtml(projectNotes)}</p></div></section>
+    <section class="section"><div class="title">项目现场情况</div><div class="record-notes"><p>${escapeReportHtml(projectSituation)}</p></div></section>
     <section class="section"><div class="title">天面与建筑结构详细信息</div></section>
     ${buildingRecordSections || '<div class="empty">暂无天面或建筑结构详细信息</div>'}
     <section class="section"><div class="title">各电房详细信息</div></section>
