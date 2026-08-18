@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText } from "lucide-react";
+import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -30,6 +30,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [scheduleData] = useSyncedAppData("scheduleData", []);
   const [lifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
+  const [archivedProjects, setArchivedProjects] = useSyncedAppData<any[]>("projectArchive", []);
 
   const getConstructProgress = (project: any) => {
     const projectSchedule = scheduleData.find((s: any) => s.id === project.id || s.name === project.name || (project.name && s.name && s.name.includes(project.name)));
@@ -62,6 +63,31 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
   const [editingProject, setEditingProject] = useState<any>(null);
   const [draggedItem, setDraggedItem] = useState<{ columnId: string, projectId: string } | null>(null);
   const [dragOverItem, setDragOverItem] = useState<{ columnId: string, projectId: string | null } | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+
+  const archiveProject = (project: any) => {
+    if (!window.confirm(`确定归档项目“${project.name}”吗？归档不会删除项目资料、合同、日程或成本记录。`)) return;
+    void setData((currentData: any[]) => currentData.map((column: any) => ({ ...column, projects: (column.projects || []).filter((item: any) => item.id !== project.id) })));
+    void setArchivedProjects((current: any[]) => [{ ...project, archiveStatus: "archived", archivedAt: new Date().toISOString() }, ...current.filter((item: any) => item.id !== project.id)]);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目已归档，业务资料仍然保留" }));
+  };
+
+  const restoreArchivedProject = (project: any) => {
+    const targetColumn = STAGES[0].id;
+    void setData((currentData: any[]) => currentData.map((column: any) => column.id === targetColumn ? { ...column, projects: [{ ...project, archiveStatus: undefined, archivedAt: undefined }, ...(column.projects || [])] } : column));
+    void setArchivedProjects((current: any[]) => current.filter((item: any) => item.id !== project.id));
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目已恢复到项目立项阶段" }));
+  };
+
+  const archiveSelectedProjects = () => {
+    if (selectedProjectIds.length === 0 || !window.confirm(`确定归档选中的 ${selectedProjectIds.length} 个项目吗？`)) return;
+    const selected = (Array.isArray(data) ? data : boardSeed).flatMap((column: any) => column.projects || []).filter((project: any) => selectedProjectIds.includes(project.id));
+    void setData((currentData: any[]) => currentData.map((column: any) => ({ ...column, projects: (column.projects || []).filter((project: any) => !selectedProjectIds.includes(project.id)) })));
+    void setArchivedProjects((current: any[]) => [...selected.map((project: any) => ({ ...project, archiveStatus: "archived", archivedAt: new Date().toISOString() })), ...current.filter((project: any) => !selectedProjectIds.includes(project.id))]);
+    setSelectedProjectIds([]);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `已归档 ${selected.length} 个项目` }));
+  };
 
   const handleDragStart = (e: React.DragEvent, columnId: string, projectId: string) => {
     e.dataTransfer.setData("text/plain", JSON.stringify({ columnId, projectId }));
@@ -267,6 +293,8 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
           <p className="text-slate-500 text-xs md:text-sm mt-1">全局监控各项目的所处阶段、施工与采购进度</p>
         </div>
         <div className="flex gap-2 md:gap-3 items-center">
+          <button type="button" onClick={() => setShowArchive((value) => !value)} className={cn("px-3 py-2 rounded-lg text-xs font-semibold border", showArchive ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600")}>项目归档 ({archivedProjects.length})</button>
+          {selectedProjectIds.length > 0 && <button type="button" onClick={archiveSelectedProjects} className="px-3 py-2 rounded-lg bg-amber-500 text-white text-xs font-bold">归档选中 ({selectedProjectIds.length})</button>}
           <button 
             onClick={() => {
               if (window.confirm('确定要重置看板数据吗？所有自定义项目将被清除。')) {
@@ -287,6 +315,8 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
           </button>
         </div>
       </div>
+
+      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">在建和已推进项目可归档到这里，归档只改变项目展示状态，不删除业务资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{archivedProjects.map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button></div>)}</div>}</div>}
 
       <div className="flex-1 overflow-y-auto pb-4 custom-scrollbar">
         <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -352,6 +382,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                       )}
                     >
                       <div className="flex justify-between items-start mb-3">
+                        <input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={(e) => { e.stopPropagation(); setSelectedProjectIds((current) => e.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id)); }} onClick={(e) => e.stopPropagation()} className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600" aria-label={`选择归档项目 ${project.name}`} />
                         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border", typeColors[project.type] || "bg-slate-100 text-slate-700 border-slate-200")}>
                           {project.type}
                         </span>
@@ -371,6 +402,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
+                            <button onClick={(e) => { e.stopPropagation(); archiveProject(project); }} className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors" title="归档项目"><Archive className="w-3.5 h-3.5" /></button>
                           </div>
                           {hasSafetyRisk && (
                             <div title="存在安全培训未完成人员" className="text-rose-500 bg-rose-50 p-1 rounded-md border border-rose-100 animate-pulse">
