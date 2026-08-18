@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { appendTaskToSchedule, buildTaskFromQuickIntake, deriveRisks, flattenProjects, flattenTasks, formatLocalDate } from "@/src/lib/management";
@@ -15,6 +15,22 @@ export function useDashboardOverview() {
   const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
   const [costData] = useSyncedAppData<any[]>("costDataV2", []);
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
+
+  // These records came from the original demo schedule seed. They are not
+  // user-entered risks and should not create overdue warnings in a workspace.
+  useEffect(() => {
+    const demoRiskTaskNames = new Set([
+      "方案深化与图纸审批",
+      "设备招标及订单下达",
+      "电房现场联合检查",
+    ]);
+    const hasDemoTasks = Array.isArray(tasks) && tasks.some((group: any) => (group.tasks || []).some((task: any) => demoRiskTaskNames.has(String(task.name || "").replace(/^.*：/, ""))));
+    if (!hasDemoTasks) return;
+    void setTasks((current: any[]) => (Array.isArray(current) ? current.map((group: any) => ({
+      ...group,
+      tasks: (group.tasks || []).filter((task: any) => !demoRiskTaskNames.has(String(task.name || "").replace(/^.*：/, ""))),
+    })).filter((group: any) => (group.tasks || []).length > 0) : current));
+  }, [tasks, setTasks]);
 
   const allFlatProjects = useMemo(() => flattenProjects(projects), [projects]);
   const allTasks = useMemo(() => flattenTasks(tasks), [tasks]);

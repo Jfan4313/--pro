@@ -252,6 +252,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
   // Safe accessor for current project state
   const projState = activeProj ? (lifecycleStates[activeProj.id] || {}) : {};
   const stageState = projState[activeStage] || { checklist: {}, fields: {} };
+  const stageFiles = Array.isArray(stageState.files) ? stageState.files : [];
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -274,16 +275,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
       });
       const fileType = expectedFile ? expectedFile.replace(/\.[^.]+$/, "") : baseName;
       
-      // Default files if the state is empty
-      const defaultFiles = stage.files.map((f, i) => ({
-        name: f,
-        originalBase: f.split('.')[0],
-        uploadTime: `2026-04-${(20 + i).toString().padStart(2, '0')} 14:30`,
-        version: "V1",
-        isCustom: false
-      }));
-
-      const currentFiles = stageState.files || defaultFiles;
+      const currentFiles = Array.isArray(stageState.files) ? stageState.files : [];
 
       try {
         const contentBase64 = await fileToBase64(file);
@@ -587,7 +579,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
                           </h3>
                         </div>
                         
-                        {(!stageState.files && stage.files.length === 0) || (stageState.files && stageState.files.length === 0) ? (
+                        {stageFiles.length === 0 ? (
                           <div className="px-6 py-16 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
                             <Folder className="w-16 h-16 mb-4 text-slate-200 fill-slate-100" />
                             <p className="text-base font-medium text-slate-600">该阶段暂无对应归档资料</p>
@@ -596,15 +588,7 @@ export function ProjectLifecycle({ onOpenSiteSurvey }: { onOpenSiteSurvey?: (pro
                         ) : (
                           <div className="divide-y divide-slate-100">
                             {(() => {
-                              const filesToRender = stageState.files || stage.files.map((f: string, i: number) => ({
-                                name: f,
-                                originalBase: f.split('.')[0],
-                                uploadTime: `2026-04-${(20 + i).toString().padStart(2, '0')} 14:30`,
-                                version: "V1",
-                                isCustom: false
-                              }));
-                              
-                              return filesToRender.map((fileObj: any, i: number) => {
+                              return stageFiles.map((fileObj: any, i: number) => {
                                 const fileName = fileObj.name;
                                 const isPdf = fileName.endsWith('.pdf');
                                 const isDwg = fileName.endsWith('.dwg');
