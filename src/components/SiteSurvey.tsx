@@ -1133,7 +1133,14 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     return;
   }
 
-  const sortedRecords = [...records].sort((a, b) => String(a.surveyDate).localeCompare(String(b.surveyDate)));
+  // Project archives are containers. Export their child records as independent
+  // sections so the PDF remains an information report instead of a photo bundle.
+  const reportRecords = records.flatMap((record) => (
+    record.archiveType === "project" && record.childRecords?.length
+      ? record.childRecords
+      : [record]
+  )).filter((record, index, source) => !record.id || source.findIndex((item) => String(item.id) === String(record.id)) === index);
+  const sortedRecords = [...reportRecords].sort((a, b) => String(a.surveyDate).localeCompare(String(b.surveyDate)));
   const buildingRecords = sortedRecords.filter((record) => record.surveyScope === "building" || record.roomType === "building-structure");
   const electricalRecords = sortedRecords.filter((record) => !buildingRecords.includes(record));
   const totalPhotos = sortedRecords.reduce((total, record) => total + (record.photos?.length || 0), 0);
