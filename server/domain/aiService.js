@@ -1,4 +1,19 @@
+import fs from "node:fs";
+import path from "node:path";
 import { analyzeIntake } from "./intakeAnalysis.js";
+
+const configPath = process.env.AI_CONFIG_PATH || path.resolve("data", "ai-config.json");
+let runtimeConfig = {};
+try { runtimeConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { runtimeConfig = {}; }
+
+export function getAIConfig() { return { endpoint: runtimeConfig.endpoint || process.env.AI_API_URL || "", model: runtimeConfig.model || process.env.AI_MODEL || "gpt-4o-mini", hasKey: Boolean(runtimeConfig.apiKey || process.env.AI_API_KEY), timeoutMs: Number(runtimeConfig.timeoutMs || process.env.AI_TIMEOUT_MS || 30000) }; }
+export function updateAIConfig(next) {
+  runtimeConfig = { ...runtimeConfig, endpoint: String(next.endpoint || "").trim(), model: String(next.model || "gpt-4o-mini").trim(), timeoutMs: Number(next.timeoutMs || 30000) };
+  if (next.apiKey) runtimeConfig.apiKey = String(next.apiKey).trim();
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(runtimeConfig, null, 2), { mode: 0o600 });
+  return getAIConfig();
+}
 
 function env(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
@@ -13,9 +28,10 @@ function extractJson(text) {
 }
 
 export async function analyzeIntakeWithAI(payload) {
-  const endpoint = env("AI_API_URL");
-  const apiKey = env("AI_API_KEY");
-  const model = env("AI_MODEL", "gpt-4o-mini");
+  const config = getAIConfig();
+  const endpoint = config.endpoint;
+  const apiKey = runtimeConfig.apiKey || env("AI_API_KEY");
+  const model = config.model;
   if (!endpoint || !apiKey) return analyzeIntake(payload);
 
   const prompt = `请从以下工作信息中提取任务，必须只返回 JSON：{"title":"","projectName":"","assignee":"","deadline":"YYYY-MM-DD","summary":"","confidence":0.0}。项目候选：${JSON.stringify(payload.projects || [])}。人员候选：${JSON.stringify(payload.personnel || [])}。输入类型：${payload.inputType}；文字：${payload.text || ""}；附件地址：${payload.attachmentUrl || ""}`;
@@ -23,7 +39,7 @@ export async function analyzeIntakeWithAI(payload) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model, temperature: 0.1, messages: [{ role: "system", content: "你是项目管理任务识别助手。" }, { role: "user", content: prompt }] }),
-    signal: AbortSignal.timeout(Number(env("AI_TIMEOUT_MS", "30000"))),
+    signal: AbortSignal.timeout(config.timeoutMs),
   });
   if (!response.ok) throw new Error(`AI request failed: ${response.status}`);
   const result = await response.json();

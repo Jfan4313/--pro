@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
-import { analyzeIntakeWithAI } from "../domain/aiService.js";
+import { analyzeIntakeWithAI, getAIConfig, updateAIConfig } from "../domain/aiService.js";
 import {
   buildProjectStoredFile,
   getProjectFolderName,
@@ -14,6 +14,15 @@ import { createUtilityServices } from "../services/utilityServices.js";
 export function registerUtilityRoutes(app, context) {
   const services = createUtilityServices(context);
   const { uploadsDir, nowIso } = context;
+
+  app.get("/api/ai-config", (req, res) => {
+    if (req.authUser?.role !== "admin") return res.status(403).json({ error: "admin_required" });
+    res.json(getAIConfig());
+  });
+  app.put("/api/ai-config", (req, res) => {
+    if (req.authUser?.role !== "admin") return res.status(403).json({ error: "admin_required" });
+    try { res.json(updateAIConfig(req.body || {})); } catch (error) { res.status(500).json({ error: "ai_config_save_failed", message: error.message }); }
+  });
 
   app.post("/api/upload", (req, res) => {
     const { filename, contentBase64 } = req.body;

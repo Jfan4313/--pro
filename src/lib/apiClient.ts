@@ -208,6 +208,12 @@ export const apiClient = {
       needsManualReview: boolean;
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
+  getAIConfig() {
+    return request<{ endpoint: string; model: string; hasKey: boolean; timeoutMs: number }>("/api/ai-config");
+  },
+  updateAIConfig(payload: { endpoint: string; model: string; apiKey?: string; timeoutMs: number }) {
+    return request<{ endpoint: string; model: string; hasKey: boolean; timeoutMs: number }>("/api/ai-config", { method: "PUT", body: payload });
+  },
   exportBackup() {
     return request<{ ok: boolean; path: string }>("/api/backup/export", { method: "POST" });
   },

@@ -6,6 +6,7 @@ import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient } from "@/src/lib/apiClient";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { flattenProjects } from "@/src/lib/management";
+import { useAuth } from "@/src/lib/auth";
 
 const defaultSettings = {
   notifications: {
@@ -26,6 +27,7 @@ const defaultSettings = {
 };
 
 export function Settings() {
+  const { user } = useAuth();
   const [settings, setSettings] = useSyncedAppData("appSettings", defaultSettings);
   const [boardData] = useProjectBoardData();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
@@ -33,6 +35,8 @@ export function Settings() {
   const [defaultFileRoot, setDefaultFileRoot] = React.useState("");
   const [isSavingFileRoot, setIsSavingFileRoot] = React.useState(false);
   const [isInitializingFolders, setIsInitializingFolders] = React.useState(false);
+  const [aiConfig, setAiConfig] = React.useState({ endpoint: "", model: "gpt-4o-mini", apiKey: "", timeoutMs: 30000, hasKey: false });
+  const [aiSaving, setAiSaving] = React.useState(false);
 
   const mergedSettings = {
     ...defaultSettings,
@@ -60,6 +64,13 @@ export function Settings() {
       mounted = false;
     };
   }, []);
+
+  React.useEffect(() => { if (user?.role === "admin") void apiClient.getAIConfig().then((config) => setAiConfig((current) => ({ ...current, ...config, apiKey: "" }))).catch(() => undefined); }, [user?.role]);
+
+  const saveAIConfig = async () => {
+    setAiSaving(true);
+    try { const saved = await apiClient.updateAIConfig(aiConfig); setAiConfig((current) => ({ ...current, ...saved, apiKey: "", hasKey: saved.hasKey })); window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI 配置已保存" })); } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI 配置保存失败，请确认管理员权限和服务端连接" })); } finally { setAiSaving(false); }
+  };
 
   const handleToggle = async (category: keyof typeof defaultSettings, key: string) => {
     const nextValue = !(mergedSettings as any)[category][key];
@@ -199,6 +210,8 @@ export function Settings() {
             />
           </div>
         </div>
+
+        {user?.role === "admin" && <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/50"><h3 className="text-lg font-medium text-slate-800">内置 AI 配置</h3><p className="mt-1 text-xs text-slate-500">API 密钥只保存在服务端，不会同步到浏览器或普通用户。</p></div><div className="p-6 space-y-4"><label className="block"><span className="form-label">API 地址</span><input value={aiConfig.endpoint} onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })} placeholder="https://api.example.com/v1/chat/completions" className="survey-input" /></label><div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="form-label">模型名称</span><input value={aiConfig.model} onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })} className="survey-input" /></label><label className="block"><span className="form-label">超时（毫秒）</span><input type="number" min="5000" value={aiConfig.timeoutMs} onChange={(event) => setAiConfig({ ...aiConfig, timeoutMs: Number(event.target.value) })} className="survey-input" /></label></div><label className="block"><span className="form-label">API 密钥 {aiConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span><input type="password" value={aiConfig.apiKey} onChange={(event) => setAiConfig({ ...aiConfig, apiKey: event.target.value })} placeholder={aiConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴 API Key"} className="survey-input" /></label><button type="button" onClick={() => void saveAIConfig()} disabled={aiSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{aiSaving ? "保存中…" : "保存 AI 配置"}</button></div></div>}
 
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
