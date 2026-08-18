@@ -503,11 +503,11 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">项目经理</label>
-                  <input name="manager" type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="姓名" />
+                    <input name="manager" type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="可暂不指定" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">预计竣工日期</label>
-                  <input name="dueDate" type="date" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    <input name="dueDate" type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
                 </div>
               </div>
               <div className="pt-4 flex justify-end gap-3">
