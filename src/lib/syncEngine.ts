@@ -19,6 +19,7 @@ let syncStatus: SyncStatus = {
   lastSyncedAt: null,
   error: null,
 };
+let activeFlush: Promise<void> | null = null;
 
 function updateSyncStatus(patch: Partial<SyncStatus>) {
   syncStatus = { ...syncStatus, ...patch };
@@ -70,6 +71,10 @@ export function onSyncEvent(listener: (detail: any) => void) {
 export async function queueAppDataUpdate<T>(key: string, value: T) {
   updateSyncStatus({ state: navigator.onLine ? "saving" : "offline", error: null });
   await offlineDb.putAppData(key, value, { pending: true });
+  // App data is last-write-wins. Coalesce older pending writes for the same
+  // key so rapid form edits do not create a long countdown in the header.
+  const existing = await offlineDb.getOutbox();
+  await Promise.all(existing.filter((item: any) => item.kind === "appData" && item.key === key).map((item: any) => offlineDb.deleteOutbox(item.id)));
   await offlineDb.queue({
     id: crypto.randomUUID(),
     kind: "appData",
@@ -110,6 +115,12 @@ export async function queueEntityOperation(resource: string, type: "upsert" | "d
 }
 
 export async function flushOutbox() {
+  if (activeFlush) return activeFlush;
+  activeFlush = flushOutboxInternal();
+  try { await activeFlush; } finally { activeFlush = null; }
+}
+
+async function flushOutboxInternal() {
   if (!navigator.onLine) {
     updateSyncStatus({ state: "offline", pending: (await offlineDb.getOutbox()).length });
     return;

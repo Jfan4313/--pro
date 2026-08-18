@@ -36,8 +36,8 @@ export function Header({ setActiveTab, onOpenProject }: { setActiveTab?: (tab: s
   const syncPresentation = {
     idle: { label: "已同步", className: "text-emerald-600 bg-emerald-50", icon: CheckCircle2 },
     saving: { label: "正在保存", className: "text-indigo-600 bg-indigo-50", icon: RefreshCw },
-    syncing: { label: syncStatus.pending ? `同步中 · ${syncStatus.pending}` : "正在同步", className: "text-indigo-600 bg-indigo-50", icon: RefreshCw },
-    offline: { label: syncStatus.pending ? `离线 · 待同步 ${syncStatus.pending}` : "当前离线", className: "text-amber-700 bg-amber-50", icon: CloudOff },
+    syncing: { label: "正在同步", className: "text-indigo-600 bg-indigo-50", icon: RefreshCw },
+    offline: { label: "当前离线", className: "text-amber-700 bg-amber-50", icon: CloudOff },
     error: { label: "同步失败", className: "text-rose-600 bg-rose-50", icon: AlertTriangle },
     conflict: { label: "存在同步冲突", className: "text-rose-600 bg-rose-50", icon: AlertTriangle },
   }[syncStatus.state];
