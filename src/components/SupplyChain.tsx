@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Truck, Clock, FileText, Search, Filter, ArrowRight, X, Building2, Phone, Star, Plus, MapPin } from "lucide-react";
+import { Truck, Clock, FileText, Search, Filter, ArrowRight, X, Building2, Phone, Star, Plus, MapPin, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -154,6 +154,13 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
     setIsNewSupplierModalOpen(false);
     setNewSupplierForm({ name: "", category: "", contact: "", phone: "", shippingAddress: "" });
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '供应商已添加' }));
+  };
+
+  const handleDeleteOrder = (order: any) => {
+    if (!order || !window.confirm(`确定删除采购订单“${order.id}”吗？删除后订单列表将不再显示。`)) return;
+    void setOrders((current: any[]) => current.filter((item: any) => item.id !== order.id));
+    setSelectedOrder(null);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "采购订单已删除" }));
   };
 
   return (
@@ -469,7 +476,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
           <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 p-5"><div><p className="text-xs font-bold text-emerald-600">采购订单详情</p><h3 className="mt-1 text-lg font-bold text-slate-900">{selectedOrder.id}</h3></div><button onClick={() => setSelectedOrder(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100" aria-label="关闭订单详情"><X className="h-5 w-5" /></button></div>
             <div className="grid grid-cols-2 gap-3 p-5 text-sm"><Detail label="关联项目" value={allProjects.find((project: any) => project.id === selectedOrder.projectId)?.name || "未关联项目"} /><Detail label="供应商" value={selectedOrder.supplier} /><Detail label="采购物品" value={selectedOrder.items} /><Detail label="订单金额" value={selectedOrder.amount} /><Detail label="下单日期" value={selectedOrder.orderDate} /><Detail label="预计交期" value={selectedOrder.expectedDate} /><Detail label="当前状态" value={statusConfig[selectedOrder.status as keyof typeof statusConfig]?.label || selectedOrder.status} /></div>
-            <div className="flex justify-end border-t border-slate-100 p-5"><button onClick={() => setSelectedOrder(null)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">关闭</button></div>
+            <div className="flex justify-between border-t border-slate-100 p-5"><button onClick={() => handleDeleteOrder(selectedOrder)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50"><Trash2 className="h-4 w-4" />删除订单</button><button onClick={() => setSelectedOrder(null)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">关闭</button></div>
           </div>
         </div>
       )}
