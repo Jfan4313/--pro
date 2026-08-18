@@ -6,10 +6,11 @@ const configPath = process.env.AI_CONFIG_PATH || path.resolve("data", "ai-config
 let runtimeConfig = {};
 try { runtimeConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { runtimeConfig = {}; }
 
-export function getAIConfig() { return { endpoint: runtimeConfig.endpoint || process.env.AI_API_URL || "", model: runtimeConfig.model || process.env.AI_MODEL || "gpt-4o-mini", hasKey: Boolean(runtimeConfig.apiKey || process.env.AI_API_KEY), timeoutMs: Number(runtimeConfig.timeoutMs || process.env.AI_TIMEOUT_MS || 30000) }; }
-export function updateAIConfig(next) {
-  runtimeConfig = { ...runtimeConfig, endpoint: String(next.endpoint || "").trim(), model: String(next.model || "gpt-4o-mini").trim(), timeoutMs: Number(next.timeoutMs || 30000) };
-  if (next.apiKey) runtimeConfig.apiKey = String(next.apiKey).trim();
+function userConfig(userId) { return runtimeConfig.users?.[userId] || runtimeConfig; }
+export function getAIConfig(userId = "default") { const config = userConfig(userId); return { endpoint: config.endpoint || process.env.AI_API_URL || "", model: config.model || process.env.AI_MODEL || "gpt-4o-mini", hasKey: Boolean(config.apiKey || process.env.AI_API_KEY), timeoutMs: Number(config.timeoutMs || process.env.AI_TIMEOUT_MS || 30000) }; }
+export function updateAIConfig(userId, next) {
+  runtimeConfig = { ...runtimeConfig, users: { ...(runtimeConfig.users || {}), [userId]: { ...userConfig(userId), endpoint: String(next.endpoint || "").trim(), model: String(next.model || "gpt-4o-mini").trim(), timeoutMs: Number(next.timeoutMs || 30000) } } };
+  if (next.apiKey) runtimeConfig.users[userId].apiKey = String(next.apiKey).trim();
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(runtimeConfig, null, 2), { mode: 0o600 });
   return getAIConfig();
@@ -27,10 +28,10 @@ function extractJson(text) {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-export async function analyzeIntakeWithAI(payload) {
-  const config = getAIConfig();
+export async function analyzeIntakeWithAI(payload, userId = "default") {
+  const config = getAIConfig(userId);
   const endpoint = config.endpoint;
-  const apiKey = runtimeConfig.apiKey || env("AI_API_KEY");
+  const apiKey = userConfig(userId).apiKey || env("AI_API_KEY");
   const model = config.model;
   if (!endpoint || !apiKey) return analyzeIntake(payload);
 

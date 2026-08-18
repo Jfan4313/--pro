@@ -17,11 +17,11 @@ export function registerUtilityRoutes(app, context) {
 
   app.get("/api/ai-config", (req, res) => {
     if (req.authUser?.role !== "admin") return res.status(403).json({ error: "admin_required" });
-    res.json(getAIConfig());
+    res.json(getAIConfig(req.authUser.id));
   });
   app.put("/api/ai-config", (req, res) => {
     if (req.authUser?.role !== "admin") return res.status(403).json({ error: "admin_required" });
-    try { res.json(updateAIConfig(req.body || {})); } catch (error) { res.status(500).json({ error: "ai_config_save_failed", message: error.message }); }
+    try { res.json(updateAIConfig(req.authUser.id, req.body || {})); } catch (error) { res.status(500).json({ error: "ai_config_save_failed", message: error.message }); }
   });
 
   app.post("/api/upload", (req, res) => {
@@ -39,7 +39,7 @@ export function registerUtilityRoutes(app, context) {
     if (!["text", "image", "audio"].includes(inputType)) {
       return res.status(400).json({ error: "invalid_input_type" });
     }
-    try { res.json(await analyzeIntakeWithAI(req.body || {})); } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
+    try { res.json(await analyzeIntakeWithAI(req.body || {}, req.authUser?.id || "default")); } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
   });
 
   app.get("/api/file-settings", (_req, res) => {
