@@ -161,9 +161,9 @@ export default function App() {
 
         {/* Global Toast */}
         {toastMsg && (
-          <div className="app-toast fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl shadow-slate-800/30 animate-in zoom-in-95 fade-in duration-200 z-[120] flex items-center justify-center gap-2 max-w-[min(90vw,32rem)] text-center">
-            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-            {toastMsg}
+          <div className="app-toast fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl shadow-slate-800/30 animate-in zoom-in-95 fade-in duration-200 z-[120] flex items-start justify-center gap-2 max-w-[min(90vw,32rem)] text-center">
+            <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-400 animate-pulse"></div>
+            <span className="min-w-0 whitespace-pre-wrap break-words leading-6">{toastMsg}</span>
           </div>
         )}
       </div>

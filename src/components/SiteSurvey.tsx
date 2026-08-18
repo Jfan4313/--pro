@@ -690,6 +690,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
           : await apiClient.create<SurveyRecord>("site-surveys", recordPayload);
         await offlineDb.deleteAppData(CURRENT_DRAFT_KEY).catch(() => undefined);
         await offlineDb.putEntity("site-surveys", savedRecord).catch(() => undefined);
+        await consolidateProjectArchive(form.projectId, savedRecord);
         setRecentlySavedRecords((current) => [savedRecord, ...current.filter((record) => record.id !== savedRecord.id)]);
         setForm({ ...emptyForm, projectId: form.projectId, surveyor: form.surveyor, surveyScope: form.surveyScope, roomType: form.surveyScope === "building" ? "building-structure" : "high-voltage" });
         setDraftPhotos([]);
@@ -720,6 +721,56 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const consolidateProjectArchive = async (projectId: string, savedRecord: SurveyRecord) => {
+    const projectRecords = allRecords.filter((record) => record.projectId === projectId);
+    const existingArchive = projectRecords.find((record) => record.archiveType === "project");
+    const existingSubjects = projectRecords.filter((record) => record.archiveType !== "project");
+    if (!existingArchive && existingSubjects.length === 0) return;
+
+    const children = [
+      savedRecord,
+      ...(existingArchive?.childRecords || []),
+      ...existingSubjects,
+    ].filter((record, index, source) => source.findIndex((item) => String(item.id) === String(record.id)) === index);
+    if (children.length < 2 && !existingArchive) return;
+
+    const project = projects.find((item: any) => item.id === projectId);
+    const isAllBuilding = children.every((record) => record.surveyScope === "building" || record.roomType === "building-structure");
+    const merged: SurveyRecord = {
+      ...(existingArchive || children[0]),
+      id: existingArchive?.id || globalThis.crypto?.randomUUID?.() || `survey-project-${Date.now()}`,
+      projectId,
+      projectName: project?.name || savedRecord.projectName,
+      roomId: `project-${projectId}`,
+      roomType: "project-summary",
+      roomName: `项目综合档案（${project?.name || savedRecord.projectName}）`,
+      surveyScope: isAllBuilding ? "building" : "electrical",
+      archiveType: "project",
+      childRecords: children.map((record) => ({ ...record, childRecords: undefined })),
+      notes: [`项目档案包含 ${children.length} 个独立子档案：${children.map((record) => record.roomName).filter(Boolean).join("、")}`, ...children.map((record) => record.notes).filter(Boolean)].join("\n"),
+      photos: children.flatMap((record) => record.photos || []).filter((photo, index, photos) => photos.findIndex((item) => item.id === photo.id) === index),
+      createdAt: existingArchive?.createdAt || new Date().toISOString(),
+      status: children.some((record) => record.status === "pending") ? "pending" : "completed",
+    };
+
+    await queueEntityOperation("site-surveys", "upsert", merged);
+    await offlineDb.putEntity("site-surveys", merged);
+    const recordsToDelete = [
+      ...projectRecords.filter((record) => record.archiveType !== "project" && record.id),
+      ...(savedRecord.id && !projectRecords.some((record) => String(record.id) === String(savedRecord.id)) ? [savedRecord] : []),
+    ];
+    const deletedIds = recordsToDelete.map((record) => String(record.id));
+    await Promise.all(recordsToDelete.map(async (record) => {
+      await deleteDocument(String(record.id));
+      await offlineDb.deleteEntity("site-surveys", String(record.id)).catch(() => undefined);
+      await offlineDb.deleteEntity(PENDING_SURVEYS_RESOURCE, String(record.id)).catch(() => undefined);
+    }));
+    setRecentlySavedRecords((current) => [merged, ...current.filter((record) => !deletedIds.includes(String(record.id)) && record.id !== merged.id)]);
+    setPendingSurveys((current) => current.filter((record) => !deletedIds.includes(String(record.id))));
+    setRemovedRecordIds((current) => [...new Set([...current, ...deletedIds])]);
+    setSelectedArchiveIds([]);
   };
 
   const toggleArchiveSelection = (recordId: string) => {
