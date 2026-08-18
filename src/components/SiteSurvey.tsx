@@ -654,9 +654,18 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
 
     setIsSaving(true);
     try {
+      const projectTransformerCapacity = String((project as any).surveyTransformerCapacity || "").trim();
       const pending: PendingSurvey = {
         id: editingRecord?.id || crypto.randomUUID(),
-        form: { ...form },
+        form: {
+          ...form,
+          // Voltage and meter position are no longer collected. Keep the
+          // project-level capacity as the single source of truth for legacy
+          // records that still carry these fields.
+          voltageLevel: "",
+          transformerCapacity: projectTransformerCapacity || form.transformerCapacity || "",
+          meterPosition: "",
+        },
         projectName: project.name,
         createdAt: editingRecord?.createdAt || new Date().toISOString(),
         photos: [
@@ -858,7 +867,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
                 window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前项目还没有已保存的勘察记录" }));
                 return;
               }
-              openSurveySummaryPdfReport(selectedProjectRecords, selectedProject?.name || selectedProjectRecords[0].projectName, (selectedProject as any)?.surveyNotes || "");
+              openSurveySummaryPdfReport(selectedProjectRecords, selectedProject?.name || selectedProjectRecords[0].projectName, (selectedProject as any)?.surveyNotes || "", (selectedProject as any)?.surveyTransformerCapacity || "");
             }}
             className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/10 sm:w-auto"
           >
@@ -891,6 +900,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
                 <Field label="勘察日期"><input type="date" value={form.surveyDate} onChange={(event) => setForm({ ...form, surveyDate: event.target.value })} className="survey-input" /></Field>
                 <Field label="勘察人员"><input value={form.surveyor} onChange={(event) => setForm({ ...form, surveyor: event.target.value })} className="survey-input" /></Field>
               </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="项目变压器总容量"><input value={(selectedProject as any)?.surveyTransformerCapacity || ""} onChange={(event) => { const capacity = event.target.value; void setBoardData((current: any) => (Array.isArray(current) ? current.map((column: any) => ({ ...column, projects: (column.projects || []).map((project: any) => project.id === form.projectId ? { ...project, surveyTransformerCapacity: capacity } : project) })) : current)); }} placeholder="例如：2×630kVA" className="survey-input" /></Field><div /></div>
               <Field label="项目现场情况"><textarea value={(selectedProject as any)?.surveyNotes || ""} onChange={(event) => { const notes = event.target.value; void setBoardData((current: any) => (Array.isArray(current) ? current.map((column: any) => ({ ...column, projects: (column.projects || []).map((project: any) => project.id === form.projectId ? { ...project, surveyNotes: notes } : project) })) : current)); }} placeholder="填写项目整体情况、施工限制、周边环境和统一备注，不需要按电房重复填写" className="survey-input min-h-28 resize-none" /></Field>
               <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5"><button type="button" onClick={() => selectSurveyScope("building")} className={`rounded-xl px-3 py-3 text-sm font-bold transition-colors ${form.surveyScope === "building" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}>天面/建筑结构</button><button type="button" onClick={() => selectSurveyScope("electrical")} className={`rounded-xl px-3 py-3 text-sm font-bold transition-colors ${form.surveyScope === "electrical" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}>电气电房</button></div>
               {form.surveyScope === "building" ? <Field label="天面/建筑区域"><input value={form.roomName} onChange={(event) => setForm({ ...form, roomName: event.target.value, roomId: "", roomType: "building-structure" })} placeholder="例如：1号厂房天面、办公楼东侧屋顶" className="survey-input" /></Field> : <div>
@@ -901,9 +911,6 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
               <div className="flex items-start gap-2 rounded-2xl border border-indigo-100 bg-indigo-50 px-3.5 py-3 text-xs leading-5 text-indigo-700"><Building2 className="mt-0.5 h-4 w-4 shrink-0" /><p>当前照片仅归入 <strong>{form.surveyScope === "building" ? `建筑结构 · ${form.roomName.trim() || "待填写区域"}` : `${getRoomTypeLabel(form.roomType)} · ${form.roomName.trim() || "待选择电房"}`}</strong>，建筑结构与各电房照片分别保存。</p></div>
               <Field label="现场地址"><input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder={form.surveyScope === "building" ? "填写建筑区域所在位置" : "填写电房所在位置"} className="survey-input" /></Field>
               {form.surveyScope === "electrical" && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="电压等级"><select value={form.voltageLevel} onChange={(event) => setForm({ ...form, voltageLevel: event.target.value })} className="survey-input"><option>0.4kV</option><option>10kV</option><option>35kV</option><option>110kV</option></select></Field>
-                <Field label="变压器容量"><input value={form.transformerCapacity} onChange={(event) => setForm({ ...form, transformerCapacity: event.target.value })} placeholder="例如：2×1250kVA" className="survey-input" /></Field>
-                <Field label="计量表位置"><input value={form.meterPosition} onChange={(event) => setForm({ ...form, meterPosition: event.target.value })} placeholder="例如：高压柜右侧" className="survey-input" /></Field>
                 <Field label="车辆进场条件"><select value={form.accessCondition} onChange={(event) => setForm({ ...form, accessCondition: event.target.value })} className="survey-input"><option>车辆可达</option><option>小型车辆可达</option><option>需人工搬运</option><option>待确认</option></select></Field>
                 <Field label="现场网络信号"><select value={form.networkSignal} onChange={(event) => setForm({ ...form, networkSignal: event.target.value })} className="survey-input"><option>良好</option><option>一般</option><option>较弱</option><option>无信号</option></select></Field>
               </div>}
@@ -962,7 +969,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
         </div>
       </div>
 
-      {selectedRecord && <SurveyDetail record={selectedRecord} onEdit={() => editSurveyRecord(selectedRecord)} onEditChild={(child) => editSurveyRecord(child)} onOpenProjectReport={() => { const projectRecords = allRecords.filter((record) => record.projectId === selectedRecord.projectId); const project = projects.find((item: any) => item.id === selectedRecord.projectId) as any; openSurveySummaryPdfReport(projectRecords, selectedRecord.projectName, project?.surveyNotes || ""); }} onClose={() => setSelectedRecord(null)} />}
+      {selectedRecord && <SurveyDetail record={selectedRecord} onEdit={() => editSurveyRecord(selectedRecord)} onEditChild={(child) => editSurveyRecord(child)} onOpenProjectReport={() => { const projectRecords = allRecords.filter((record) => record.projectId === selectedRecord.projectId); const project = projects.find((item: any) => item.id === selectedRecord.projectId) as any; openSurveySummaryPdfReport(projectRecords, selectedRecord.projectName, project?.surveyNotes || "", project?.surveyTransformerCapacity || ""); }} onClose={() => setSelectedRecord(null)} />}
       {isProjectModalOpen && <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="survey-new-project-title">
         <div className="w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
           <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
@@ -1051,10 +1058,10 @@ function openSurveyPdfReport(record: SurveyRecord) {
     ["现场地址", record.address || "未填写", "记录类型", "建筑结构"],
   ] : [
     ["所属项目", record.projectName || "未填写", "电房", getSurveySubject(record)],
+    ["变压器容量", record.transformerCapacity || "未填写", "记录类型", "电气电房"],
     ["勘察日期", record.surveyDate || "未填写", "勘察人员", record.surveyor || "未填写"],
-    ["现场地址", record.address || "未填写", "电压等级", record.voltageLevel || "未填写"],
-    ["变压器容量", record.transformerCapacity || "未填写", "计量表位置", record.meterPosition || "未填写"],
-    ["车辆进场条件", record.accessCondition || "未填写", "现场网络", record.networkSignal || "未填写"],
+    ["现场地址", record.address || "未填写", "车辆进场条件", record.accessCondition || "未填写"],
+    ["现场网络", record.networkSignal || "未填写", "照片数量", `${record.photos?.length || 0} 张`],
   ];
   const photoSections = Object.entries(photosByCategory).map(([categoryId, photos]) => {
     const category = getPhotoCategory(categoryId);
@@ -1127,7 +1134,7 @@ function openSurveyPdfReport(record: SurveyRecord) {
   reportWindow.document.close();
 }
 
-function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string, projectNotes = "") {
+function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string, projectNotes = "", projectTransformerCapacity = "") {
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "浏览器阻止了报告窗口，请允许弹出窗口后重试" }));
@@ -1162,7 +1169,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     <td>${index + 1}</td>
     <td><strong>${escapeReportHtml(getSurveySubject(record))}</strong><br><span class="muted">${escapeReportHtml(record.address || "未填写地址")}</span></td>
     <td>${escapeReportHtml(record.surveyDate || "未填写")}<br><span class="muted">${escapeReportHtml(record.surveyor || "未填写")}</span></td>
-    <td>${record.surveyScope === "building" || record.roomType === "building-structure" ? "天面/建筑结构" : `${escapeReportHtml(record.voltageLevel || "未填写")}<br><span class="muted">${escapeReportHtml(record.transformerCapacity || "未填写容量")}</span>`}</td>
+    <td>${record.surveyScope === "building" || record.roomType === "building-structure" ? "天面/建筑结构" : "电气电房"}</td>
     <td>${getPhotoCategoryCount(record.photos || [])} 类 / ${record.photos?.length || 0} 张</td>
     <td><span class="status ${record.status === "completed" ? "synced" : "pending"}">${record.status === "completed" ? "已归档" : "本机待上传"}</span></td>
   </tr>`).join("");
@@ -1189,7 +1196,6 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
         ` : `
           <div><label>现场地址</label><p>${escapeReportHtml(record.address || "未填写")}</p></div>
           <div><label>勘察人员</label><p>${escapeReportHtml(record.surveyor || "未填写")}</p></div>
-          <div><label>电压 / 容量</label><p>${escapeReportHtml(record.voltageLevel || "未填写")} · ${escapeReportHtml(record.transformerCapacity || "未填写")}</p></div>
           <div><label>进场条件</label><p>${escapeReportHtml(record.accessCondition || "未填写")}</p></div>
           <div><label>网络信号</label><p>${escapeReportHtml(record.networkSignal || "未填写")}</p></div>
         `}
@@ -1221,6 +1227,8 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     .metric { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 11px; background: #f8fafc; }
     .metric strong { display: block; color: #312e81; font-size: 19px; line-height: 1.2; }
     .metric span { color: #64748b; font-size: 9px; }
+    .project-summary { display: grid; grid-template-columns: minmax(0, 1fr); border: 1px solid #c7d2fe; border-radius: 12px; padding: 11px 13px; background: #eef2ff; }
+    .project-summary p { margin: 3px 0 0; color: #312e81; font-size: 15px; font-weight: 800; }
     .section { margin-top: 16px; }
     .title { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; font-size: 15px; font-weight: 800; }
     .title:before { content:""; width: 4px; height: 16px; border-radius: 3px; background: #4f46e5; }
@@ -1281,8 +1289,9 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
       <div class="metric"><strong>${totalPhotos}</strong><span>现场照片</span></div>
       <div class="metric"><strong>${completedRecords}/${sortedRecords.length}</strong><span>已同步归档</span></div>
     </section>
+    <section class="section"><div class="title">项目基础信息</div><div class="project-summary"><div><label>变压器总容量</label><p>${escapeReportHtml(projectTransformerCapacity.trim() || "未填写")}</p></div></div></section>
     <section class="section"><div class="title">天面与建筑结构总览</div>${buildingRecords.length ? `<table><thead><tr><th>序号</th><th>天面/建筑区域</th><th>日期与人员</th><th>类型</th><th>照片</th><th>状态</th></tr></thead><tbody>${buildingRecordRows}</tbody></table>` : '<div class="empty">暂无天面或建筑结构勘察记录</div>'}</section>
-    <section class="section"><div class="title">电房总览</div>${electricalRecords.length ? `<table><thead><tr><th>序号</th><th>电房与位置</th><th>日期与人员</th><th>电气参数</th><th>照片</th><th>状态</th></tr></thead><tbody>${electricalRecordRows}</tbody></table>` : '<div class="empty">暂无电房勘察记录</div>'}</section>
+    <section class="section"><div class="title">电房总览</div>${electricalRecords.length ? `<table><thead><tr><th>序号</th><th>电房与位置</th><th>日期与人员</th><th>类型</th><th>照片</th><th>状态</th></tr></thead><tbody>${electricalRecordRows}</tbody></table>` : '<div class="empty">暂无电房勘察记录</div>'}</section>
     <section class="section"><div class="title">分类拍摄完成度</div>${categoryRows}</section>
     <section class="section"><div class="title">项目现场情况</div><div class="record-notes"><p>${escapeReportHtml(projectSituation)}</p></div></section>
     <section class="section"><div class="title">天面与建筑结构详细信息</div></section>
