@@ -15,6 +15,7 @@ const statusConfig = {
 };
 
 const typeColors: Record<string, string> = {
+  "光伏项目": "bg-amber-100 text-amber-700 border-amber-200",
   "绿色建筑": "bg-pink-100 text-pink-700 border-pink-200",
   "市政景观": "bg-teal-100 text-teal-700 border-teal-200",
   "储能系统": "bg-purple-100 text-purple-700 border-purple-200",
@@ -22,7 +23,13 @@ const typeColors: Record<string, string> = {
   "光伏发电": "bg-amber-100 text-amber-700 border-amber-200",
   "风力发电": "bg-blue-100 text-blue-700 border-blue-200",
   "综合能源": "bg-indigo-100 text-indigo-700 border-indigo-200",
+  "储能项目": "bg-purple-100 text-purple-700 border-purple-200",
+  "充电桩项目": "bg-cyan-100 text-cyan-700 border-cyan-200",
+  "零碳园区": "bg-emerald-100 text-emerald-700 border-emerald-200",
+  "节能改造": "bg-orange-100 text-orange-700 border-orange-200",
 };
+const projectTypes = ["光伏项目", "储能项目", "充电桩项目", "零碳园区", "节能改造"];
+const businessModels = ["EPC", "EMC"];
 
 export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: string) => void }) {
   const [data, setData, , boardSeed] = useProjectBoardData();
@@ -175,6 +182,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
       projectNumber: `PRJ-${String(nextProjectSequence).padStart(4, "0")}`,
       name: formData.get('name') as string,
       type: formData.get('type') as string,
+      businessModel: formData.get('businessModel') as string,
       manager: formData.get('manager') as string,
       dueDate: formData.get('dueDate') as string,
       constructProgress: 0,
@@ -418,6 +426,7 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                       <div className="flex items-start gap-2 mb-2">
                         <h4 className="font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">{project.name}</h4>
                         <span className="shrink-0 font-mono text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">{getProjectNumber(project)}</span>
+                        <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">{project.businessModel || "EPC"}</span>
                       </div>
                       
                       {(() => {
@@ -484,11 +493,12 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">项目类型</label>
                 <select name="type" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
-                  <option>绿色建筑</option>
-                  <option>市政景观</option>
-                  <option>储能系统</option>
-                  <option>光伏发电</option>
+                  {projectTypes.map((type) => <option key={type}>{type}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">合作模式</label>
+                <select name="businessModel" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white"><option value="EPC">EPC</option><option value="EMC">EMC</option></select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -542,9 +552,15 @@ export function ProjectBoard({ onOpenProject }: { onOpenProject?: (projectId: st
                     onChange={(e) => setEditingProject({...editingProject, type: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
                   >
-                    {Object.keys(typeColors).map(type => (
+                    {projectTypes.map(type => (
                       <option key={type} value={type}>{type}</option>
                     ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">合作模式</label>
+                  <select value={editingProject.businessModel || "EPC"} onChange={(e) => setEditingProject({...editingProject, businessModel: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white">
+                    {businessModels.map((model) => <option key={model} value={model}>{model}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
