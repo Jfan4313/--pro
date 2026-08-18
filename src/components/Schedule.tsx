@@ -805,40 +805,6 @@ export function Schedule() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
-          <div>
-            <h3 className="font-bold text-slate-900">任务管理视图</h3>
-            <p className="text-xs text-slate-500 mt-1">快速筛选项目经理需要处理的任务</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(["project", "mine", "overdue", "external", "externalOverdue", "unassigned", "quick"] as const).map((key) => (
-              <button
-                key={key}
-                onClick={() => setTaskFilter(key)}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-medium transition-colors", taskFilter === key ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
-              >
-                {taskFilterLabels[key]} ({taskBuckets[key].length})
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {visibleTaskList.slice(0, 6).map((task: any) => (
-            <div id={focusedTaskId === task.id ? `schedule-task-card-${task.id}` : undefined} key={`${task.projectId}-${task.id}`} className={cn("rounded-xl border bg-slate-50 p-3 transition-all", focusedTaskId === task.id ? "border-amber-400 ring-2 ring-amber-200 bg-amber-50" : "border-slate-100")}>
-            <div className="flex items-center justify-between gap-2"><div className="text-sm font-medium text-slate-900 line-clamp-1">{task.name}</div><div className="flex shrink-0 gap-1"><button onClick={() => editTaskDetails(task.projectId, task.id)} className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="修改任务"><Edit2 className="h-3.5 w-3.5" /></button><button onClick={() => deleteTask(task.projectId, task.id)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="删除任务"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
-              <div className="text-xs text-slate-500 mt-1">{task.projectName} · {task.responsibilityType || "内部人员"}：{task.assignee || "待指派"} · {task.deadline || "无截止"}</div>
-              {task.sourceSummary && <div className="text-xs text-slate-400 mt-2 line-clamp-1">来源：{task.sourceSummary}</div>}
-            </div>
-          ))}
-          {visibleTaskList.length === 0 && (
-            <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 py-8 text-center text-sm text-slate-400">
-              当前筛选暂无任务
-            </div>
-          )}
-        </div>
-      </div>
-
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden">
         {viewMode === 'calendar' ? (
           <div><div className="flex items-center justify-between border-b border-slate-100 p-5"><div><h3 className="font-semibold text-slate-800">所有项目日程日历</h3><p className="mt-1 text-xs text-slate-500">点击项目名称可切换到单独项目排期。</p></div><CalendarIcon className="h-5 w-5 text-indigo-500" /></div><div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{filteredData.flatMap((project: any) => (project.tasks || []).map((task: any) => ({ ...task, projectId: project.id, projectName: project.name }))).sort((a: any, b: any) => String(a.deadline || "").localeCompare(String(b.deadline || ""))).map((task: any) => <button type="button" key={`${task.projectId}-${task.id}`} onClick={() => { setSelectedProject(task.projectName); setViewMode("gantt"); setExpandedProjects((current) => current.includes(task.projectId) ? current : [...current, task.projectId]); }} className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-left hover:border-indigo-200 hover:bg-indigo-50/40"><div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-indigo-700">{task.deadline || "未设置日期"}</span><span className={cn("rounded-md px-2 py-1 text-[10px] font-bold", task.status === "completed" ? "bg-emerald-50 text-emerald-700" : task.status === "delayed" ? "bg-rose-50 text-rose-700" : "bg-white text-slate-500")}>{task.status === "completed" ? "已完成" : task.status === "delayed" ? "已延期" : "待处理"}</span></div><p className="mt-2 text-sm font-semibold text-slate-800">{task.name}</p><p className="mt-1 text-xs text-slate-500">{task.projectName} · {task.assignee || "待指派"}</p></button>)}</div></div>
