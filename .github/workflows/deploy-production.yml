@@ -43,6 +43,7 @@ jobs:
 
       - name: Package release
         run: |
+          printf '{"sha":"%s","time":"%s","version":"0.5.0"}\n' "$GITHUB_SHA" "$GITHUB_RUN_STARTED_AT" > server/build-info.json
           tar -czf zhijian-pro-release.tgz \
             dist server shared src public deploy node_modules \
             package.json package-lock.json

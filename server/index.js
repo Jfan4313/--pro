@@ -18,6 +18,9 @@ const clients = new Set();
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(rootDir, "dist");
 const packageVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8")).version;
+const buildInfoPath = path.join(rootDir, "server", "build-info.json");
+let buildInfo = {};
+try { buildInfo = JSON.parse(fs.readFileSync(buildInfoPath, "utf8")); } catch { buildInfo = {}; }
 const wecomNotifier = createWecomNotifier({ nowIso: () => new Date().toISOString() });
 
 function nowIso() {
@@ -71,7 +74,7 @@ const routeContext = {
 };
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, appVersion: packageVersion, buildSha: process.env.BUILD_SHA || "unknown", dbPath, serverVersion: getServerVersion() });
+  res.json({ ok: true, appVersion: packageVersion, buildSha: process.env.BUILD_SHA || buildInfo.sha || "unknown", buildTime: process.env.BUILD_TIME || buildInfo.time || "unknown", dbPath, serverVersion: getServerVersion() });
 });
 
 registerAuthRoutes(app, { ...routeContext, ...auth });
