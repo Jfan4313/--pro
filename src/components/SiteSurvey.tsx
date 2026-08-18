@@ -467,6 +467,18 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
     setIsRoomModalOpen(true);
   };
 
+  const clearSubjectFields = (current: SurveyForm, overrides: Partial<SurveyForm> = {}): SurveyForm => ({
+    ...current,
+    address: "",
+    voltageLevel: emptyForm.voltageLevel,
+    transformerCapacity: "",
+    meterPosition: "",
+    accessCondition: emptyForm.accessCondition,
+    networkSignal: emptyForm.networkSignal,
+    notes: "",
+    ...overrides,
+  });
+
   const selectProject = (projectId: string) => {
     if (projectId !== form.projectId && draftPhotos.length > 0) {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前已有未保存照片，请先保存当前记录后再切换项目" }));
@@ -477,7 +489,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       setRetainedPhotos([]);
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "已结束原记录调整，切换后的内容将作为新勘察记录保存，原照片保持不变" }));
     }
-    setForm((current) => ({ ...current, projectId, roomId: "", roomName: "" }));
+    setForm((current) => clearSubjectFields(current, { projectId, roomId: "", roomName: "" }));
   };
 
   const createRoom = (event: FormEvent) => {
@@ -499,7 +511,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
         ? { ...project, surveyRooms: [...(project.surveyRooms || []), room] }
         : project),
     })) : current));
-    setForm((current) => ({ ...current, surveyScope: "electrical", roomId: room.id, roomName: room.name, roomType: room.type }));
+    setForm((current) => clearSubjectFields(current, { surveyScope: "electrical", roomId: room.id, roomName: room.name, roomType: room.type }));
     setActivePhotoCategory("room-overview");
     setPhotoViewCategory("all");
     setIsRoomModalOpen(false);
@@ -561,8 +573,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       setRetainedPhotos([]);
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "已结束原记录调整，切换后的内容将作为新勘察记录保存，原照片保持不变" }));
     }
-    setForm((current) => ({
-      ...current,
+    setForm((current) => clearSubjectFields(current, {
       surveyScope: scope,
       roomId: "",
       roomName: "",
@@ -586,7 +597,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       setRetainedPhotos([]);
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "已切换电房，当前内容将作为新记录保存，原电房照片保持不变" }));
     }
-    setForm((current) => ({ ...current, roomId: room?.id || "", roomName: room?.name || "", roomType: room?.type || "high-voltage" }));
+    setForm((current) => clearSubjectFields(current, { roomId: room?.id || "", roomName: room?.name || "", roomType: room?.type || "high-voltage" }));
   };
 
   const editSurveyRecord = (record: SurveyRecord) => {
