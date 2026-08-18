@@ -126,7 +126,7 @@ export function Schedule() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [creationMode, setCreationMode] = useState<"single" | "template">("single");
   const [selectedTemplate, setSelectedTemplate] = useState(projectTemplates[0].id);
-  const [viewMode, setViewMode] = useState<"gantt" | "table">("gantt");
+  const [viewMode, setViewMode] = useState<"calendar" | "gantt" | "table">("calendar");
   const [expandedProjects, setExpandedProjects] = useState<string[]>([]);
   const [editingTask, setEditingTask] = useState<{projectId: string, taskId: string, taskName: string, deadline: string} | null>(null);
   const [editingDep, setEditingDep] = useState<{projectId: string, taskId: string, taskName: string, predecessorId: string | null} | null>(null);
@@ -739,6 +739,7 @@ export function Schedule() {
           </select>
           {canManageSchedule && selectedProject !== "全部项目" && <><button type="button" onClick={editWholeSchedule} className="px-3 py-2 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-50"><Edit2 className="mr-1 inline h-4 w-4" />编辑整份排期</button><button type="button" onClick={deleteWholeSchedule} className="px-3 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-sm font-medium hover:bg-rose-50"><Trash2 className="mr-1 inline h-4 w-4" />删除整份排期</button></>}
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+            <button onClick={() => setViewMode('calendar')} className={cn("px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm font-medium flex items-center transition-colors", viewMode === 'calendar' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}><CalendarIcon className="w-4 h-4 mr-1.5" />日程总览</button>
             <button 
               onClick={() => setViewMode('gantt')} 
               className={cn("px-2 md:px-3 py-1.5 rounded-md text-xs md:text-sm font-medium flex items-center transition-colors", viewMode === 'gantt' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900")}
@@ -839,7 +840,9 @@ export function Schedule() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] overflow-hidden">
-        {viewMode === 'gantt' ? (
+        {viewMode === 'calendar' ? (
+          <div><div className="flex items-center justify-between border-b border-slate-100 p-5"><div><h3 className="font-semibold text-slate-800">所有项目日程日历</h3><p className="mt-1 text-xs text-slate-500">点击项目名称可切换到单独项目排期。</p></div><CalendarIcon className="h-5 w-5 text-indigo-500" /></div><div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{filteredData.flatMap((project: any) => (project.tasks || []).map((task: any) => ({ ...task, projectId: project.id, projectName: project.name }))).sort((a: any, b: any) => String(a.deadline || "").localeCompare(String(b.deadline || ""))).map((task: any) => <button type="button" key={`${task.projectId}-${task.id}`} onClick={() => { setSelectedProject(task.projectName); setViewMode("gantt"); setExpandedProjects((current) => current.includes(task.projectId) ? current : [...current, task.projectId]); }} className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-left hover:border-indigo-200 hover:bg-indigo-50/40"><div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-indigo-700">{task.deadline || "未设置日期"}</span><span className={cn("rounded-md px-2 py-1 text-[10px] font-bold", task.status === "completed" ? "bg-emerald-50 text-emerald-700" : task.status === "delayed" ? "bg-rose-50 text-rose-700" : "bg-white text-slate-500")}>{task.status === "completed" ? "已完成" : task.status === "delayed" ? "已延期" : "待处理"}</span></div><p className="mt-2 text-sm font-semibold text-slate-800">{task.name}</p><p className="mt-1 text-xs text-slate-500">{task.projectName} · {task.assignee || "待指派"}</p></button>)}</div></div>
+        ) : viewMode === 'gantt' ? (
           <>
             <div className="p-5 border-b border-slate-100 bg-white flex items-center justify-between">
               <h3 className="font-semibold text-slate-800">项目甘特图 (简易版)</h3>

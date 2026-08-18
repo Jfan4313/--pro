@@ -95,11 +95,11 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
               <h3 className="font-bold text-lg text-slate-900">今日工作台</h3>
               <p className="text-sm text-slate-500 mt-1">先处理异常、待确认事项和今日任务</p>
             </div>
-            <button onClick={() => setActiveTab('schedule')} className="text-sm text-indigo-600 font-medium">进入任务管理</button>
+            <button onClick={() => setActiveTab('work-memo')} className="text-sm text-indigo-600 font-medium">进入我的任务</button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 border-b border-slate-100">
-            <WorkbenchMetric label="今日待办" value={todayTasks.length} tone="indigo" onClick={() => setActiveTab("schedule")} />
-            <WorkbenchMetric label="逾期任务" value={overdueTasks.length} tone="rose" onClick={() => setActiveTab("schedule")} />
+            <WorkbenchMetric label="今日待办" value={todayTasks.length} tone="indigo" onClick={() => setActiveTab("work-memo")} />
+            <WorkbenchMetric label="逾期任务" value={overdueTasks.length} tone="rose" onClick={() => setActiveTab("work-memo")} />
             <WorkbenchMetric label="待确认采集" value={pendingQuickIntakes.length} tone="amber" onClick={() => setActiveTab("work-memo")} />
             <WorkbenchMetric label="待审批/待确认" value={pendingApprovals} tone="slate" onClick={() => setActiveTab(pendingApprovalTab)} />
           </div>

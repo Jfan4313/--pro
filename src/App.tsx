@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { Sparkles } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { Dashboard } from "./components/Dashboard";
@@ -155,6 +156,7 @@ export default function App() {
         </main>
 
         <SmartIntake setActiveTab={setActiveTab} />
+        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="fixed bottom-6 right-6 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 transition hover:scale-105 hover:bg-indigo-700" title="新增工作任务" aria-label="新增工作任务"><Sparkles className="h-6 w-6" /></button>
         <FirstRunGuide setActiveTab={navigateToTab} />
 
         {/* Global Toast */}

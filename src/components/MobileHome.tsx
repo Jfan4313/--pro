@@ -37,15 +37,15 @@ export function MobileHome({
   };
   const dateText = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" }).format(new Date());
   const metrics = [
-    { label: "今日待办", value: todayTasks.length, tone: "bg-indigo-50 text-indigo-700", tab: "schedule" },
-    { label: "已逾期", value: overdueTasks.length, tone: "bg-rose-50 text-rose-700", tab: "schedule" },
+    { label: "今日待办", value: todayTasks.length, tone: "bg-indigo-50 text-indigo-700", tab: "work-memo" },
+    { label: "已逾期", value: overdueTasks.length, tone: "bg-rose-50 text-rose-700", tab: "work-memo" },
     { label: "待确认", value: pendingQuickIntakes.length, tone: "bg-amber-50 text-amber-700", tab: "schedule" },
     { label: "待审批", value: pendingApprovals, tone: "bg-slate-100 text-slate-700", tab: pendingApprovalTab },
   ];
 
   const actions = [
     { label: "现场勘察", note: "拍摄电房", icon: Camera, tab: "site-survey", tone: "bg-indigo-600 text-white" },
-    { label: "今日待办", note: "现场任务", icon: ClipboardList, tab: "schedule", tone: "bg-white text-slate-800" },
+    { label: "今日待办", note: "我的任务", icon: ClipboardList, tab: "work-memo", tone: "bg-white text-slate-800" },
     { label: "上传资料", note: "项目归档", icon: Upload, tab: "files", tone: "bg-white text-slate-800" },
     { label: "项目查询", note: "查看进度", icon: Search, tab: "board", tone: "bg-white text-slate-800" },
   ];
@@ -90,7 +90,7 @@ export function MobileHome({
       <section className="mt-5">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-bold text-slate-900">今日概览</h3>
-          <button onClick={() => setActiveTab("schedule")} className="text-xs font-semibold text-indigo-600">查看待办</button>
+          <button onClick={() => setActiveTab("work-memo")} className="text-xs font-semibold text-indigo-600">查看我的任务</button>
         </div>
         <div className="grid grid-cols-2 gap-3">
           {metrics.map((metric) => (

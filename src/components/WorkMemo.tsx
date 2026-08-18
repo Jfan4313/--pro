@@ -42,7 +42,7 @@ function isSamePerson(value: string, user: any) {
 export function WorkMemo() {
   const { user } = useAuth();
   const [records, setRecords] = useSyncedAppData<WorkMemoRecord[]>("workMemos", emptyMemo);
-  const [filter, setFilter] = useState<"all" | "mine" | "unconfirmed" | "overdue">("all");
+  const [filter, setFilter] = useState<"all" | "mine" | "company" | "unconfirmed" | "overdue">("all");
   const [isOpen, setIsOpen] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState<WorkMemoRecord | null>(null);
   const [form, setForm] = useState({ title: "", detail: "", projectName: "", targetType: "internal" as "internal" | "crew", crewName: "", crewContact: "", assignee: "", dueDate: formatLocalDate(), priority: "normal" as "normal" | "high" });
@@ -58,6 +58,7 @@ export function WorkMemo() {
 
   const visible = useMemo(() => records.filter(item => {
     if (filter === "mine") return isSamePerson(item.assignee, user);
+    if (filter === "company") return item.targetType === "internal";
     if (filter === "unconfirmed") return item.status === "feedback";
     if (filter === "overdue") return item.status !== "confirmed" && item.dueDate < today;
     return true;
@@ -109,7 +110,7 @@ export function WorkMemo() {
     </div>
 
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {[{ id: "all", label: "未完成", value: stats.total, tone: "text-indigo-600" }, { id: "mine", label: "我的待办", value: stats.mine, tone: "text-blue-600" }, { id: "unconfirmed", label: "待确认反馈", value: stats.unconfirmed, tone: "text-amber-600" }, { id: "overdue", label: "已逾期", value: stats.overdue, tone: "text-rose-600" }].map(item => <button key={item.id} onClick={() => setFilter(item.id as typeof filter)} className={cn("rounded-2xl border bg-white p-4 text-left shadow-sm transition", filter === item.id ? "border-slate-900 ring-1 ring-slate-900" : "border-slate-100 hover:border-slate-300")}><p className={cn("text-2xl font-bold", item.tone)}>{item.value}</p><p className="mt-1 text-xs font-medium text-slate-500">{item.label}</p></button>)}
+      {[{ id: "all", label: "未完成", value: stats.total, tone: "text-indigo-600" }, { id: "mine", label: "我的待办", value: stats.mine, tone: "text-blue-600" }, { id: "company", label: "公司任务", value: records.filter(item => item.targetType === "internal" && item.status !== "confirmed").length, tone: "text-violet-600" }, { id: "unconfirmed", label: "待确认反馈", value: stats.unconfirmed, tone: "text-amber-600" }, { id: "overdue", label: "已逾期", value: stats.overdue, tone: "text-rose-600" }].map(item => <button key={item.id} onClick={() => setFilter(item.id as typeof filter)} className={cn("rounded-2xl border bg-white p-4 text-left shadow-sm transition", filter === item.id ? "border-slate-900 ring-1 ring-slate-900" : "border-slate-100 hover:border-slate-300")}><p className={cn("text-2xl font-bold", item.tone)}>{item.value}</p><p className="mt-1 text-xs font-medium text-slate-500">{item.label}</p></button>)}
     </div>
 
     <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
