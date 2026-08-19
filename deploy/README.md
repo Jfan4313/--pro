@@ -122,5 +122,6 @@ Certbot 完成后，访问 `https://project.zero-carbon.online`。手机摄像�
 - 现场照片：`uploads/`
 - 项目资料：`project-files/`
 - 本地备份：`backups/`
+- 公司 AI 配置：`ai-config.json`（服务端保存，权限应为 `0600`）
 
 至少每天备份该目录。照片量开始增长后，应迁移至阿里云 OSS，避免占满 40GB 系统盘。

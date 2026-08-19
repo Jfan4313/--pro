@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { analyzeIntake } from "./intakeAnalysis.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const configPath = process.env.AI_CONFIG_PATH || path.join(projectRoot, "data", "ai-config.json");
+const dataDir = process.env.LOCAL_DATA_DIR ? path.resolve(process.env.LOCAL_DATA_DIR) : path.join(projectRoot, "data");
+const configPath = process.env.AI_CONFIG_PATH || path.join(dataDir, "ai-config.json");
 let runtimeConfig = {};
 try { runtimeConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { runtimeConfig = {}; }
 

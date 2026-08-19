@@ -21,11 +21,11 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:8787',
+          target: `http://127.0.0.1:${env.VITE_LOCAL_API_PORT || '8787'}`,
           changeOrigin: true,
         },
         '/uploads': {
-          target: 'http://127.0.0.1:8787',
+          target: `http://127.0.0.1:${env.VITE_LOCAL_API_PORT || '8787'}`,
           changeOrigin: true,
         },
       },

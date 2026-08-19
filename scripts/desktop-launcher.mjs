@@ -137,6 +137,7 @@ async function main() {
       // Keep API requests relative so the Vite proxy forwards them to the
       // backend without making LAN clients call their own localhost.
       VITE_LOCAL_API_URL: "",
+      VITE_LOCAL_API_PORT: String(backendPort),
     },
   }, "frontend");
 
