@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, CalendarDays, Camera, DollarSign, FileText, H
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { deriveRisks, flattenProjects, flattenTasks, getProjectNumber } from "@/src/lib/management";
-import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { getMissingDocs } from "./ExternalPartners";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { offlineDb } from "@/src/lib/offlineDb";

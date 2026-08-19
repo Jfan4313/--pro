@@ -4,7 +4,7 @@ import { useSyncedAppData } from "./useSyncedAppData";
 import { useUserSettings } from "./useUserSettings";
 import { flattenProjects } from "@/src/lib/management";
 import { ArchiveFolderState, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
-import { STAGES, getProjectCurrentStageInfo } from "@/src/components/ProjectLifecycle";
+import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 
 export function useArchiveReconciler(enabled = true) {
   const [boardData, , boardLoading] = useProjectBoardData();

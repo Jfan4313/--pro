@@ -5,7 +5,7 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenTasks, formatLocalDate } from "@/src/lib/management";
 import * as XLSX from "xlsx";
-import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { useAuth } from "@/src/lib/auth";
 
 const initialScheduleData: any[] = [

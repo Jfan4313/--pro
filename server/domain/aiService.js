@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { analyzeIntake } from "./intakeAnalysis.js";
 
-const configPath = process.env.AI_CONFIG_PATH || path.resolve("data", "ai-config.json");
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const configPath = process.env.AI_CONFIG_PATH || path.join(projectRoot, "data", "ai-config.json");
 let runtimeConfig = {};
 try { runtimeConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { runtimeConfig = {}; }
 
@@ -11,7 +13,10 @@ function env(name, fallback = "") { return String(process.env[name] || fallback)
 
 function persistConfig() {
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(runtimeConfig, null, 2), { mode: 0o600 });
+  const temporaryPath = `${configPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(runtimeConfig, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(temporaryPath, 0o600); } catch { /* Best effort on platforms without POSIX modes. */ }
+  fs.renameSync(temporaryPath, configPath);
   try { fs.chmodSync(configPath, 0o600); } catch { /* Best effort on platforms without POSIX modes. */ }
 }
 
@@ -27,6 +32,13 @@ function migrateLegacyConfig() {
 migrateLegacyConfig();
 
 function companyConfig(companyId = "company-default") { return runtimeConfig.companies?.[companyId] || {}; }
+
+export function resolveChatCompletionsEndpoint(endpoint) {
+  const normalized = String(endpoint || "").trim().replace(/\/+$/, "");
+  if (!normalized) return "";
+  if (/\/chat\/completions$/i.test(normalized)) return normalized;
+  return `${normalized}/chat/completions`;
+}
 
 export function getAIConfig(companyId = "company-default") {
   const config = companyConfig(companyId);
@@ -88,7 +100,7 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
   const startedAt = Date.now();
   const prompt = `请从以下工作信息中提取任务，必须只返回 JSON：{"title":"","projectName":"","assignee":"","deadline":"YYYY-MM-DD","summary":"","confidence":0.0}。项目候选：${JSON.stringify(payload.projects || [])}。人员候选：${JSON.stringify(payload.personnel || [])}。输入类型：${payload.inputType}；文字：${payload.text || ""}；附件地址：${payload.attachmentUrl || ""}`;
   try {
-    const response = await fetch(config.endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: config.model, temperature: 0.1, messages: [{ role: "system", content: "你是项目管理任务识别助手。" }, { role: "user", content: prompt }] }), signal: AbortSignal.timeout(config.timeoutMs) });
+    const response = await fetch(resolveChatCompletionsEndpoint(config.endpoint), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: config.model, temperature: 0.1, messages: [{ role: "system", content: "你是项目管理任务识别助手。" }, { role: "user", content: prompt }] }), signal: AbortSignal.timeout(config.timeoutMs) });
     if (!response.ok) throw new Error(`AI request failed: ${response.status}`);
     const result = await response.json();
     const usage = normalizeAIUsage(result);

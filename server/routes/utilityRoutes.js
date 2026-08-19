@@ -32,7 +32,16 @@ export function registerUtilityRoutes(app, context) {
     const user = authenticatedUser(req, res);
     if (!user) return;
     if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
-    try { res.json(updateAIConfig(user.companyId || "company-default", req.body || {})); } catch (error) { res.status(500).json({ error: "ai_config_save_failed", message: error.message }); }
+    const body = req.body || {};
+    if (typeof body.endpoint !== "string" || typeof body.model !== "string") {
+      return res.status(400).json({ error: "invalid_ai_config", message: "API 地址和模型名称不能为空且必须是文本" });
+    }
+    try {
+      res.json(updateAIConfig(user.companyId || "company-default", body));
+    } catch (error) {
+      console.error("Failed to persist company AI config:", error);
+      res.status(500).json({ error: "ai_config_save_failed", message: "服务端无法写入 AI 配置文件，请检查 data 目录权限" });
+    }
   });
 
   app.get("/api/user-settings", (req, res) => {

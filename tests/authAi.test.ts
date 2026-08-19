@@ -47,6 +47,12 @@ test("AI usage normalization supports common provider response shapes", () => {
   assert.deepEqual(ai.normalizeAIUsage({}), { inputTokens: null, outputTokens: null, totalTokens: null });
 });
 
+test("DeepSeek-compatible endpoints accept base URLs and full chat paths", () => {
+  assert.equal(ai.resolveChatCompletionsEndpoint("https://api.deepseek.com"), "https://api.deepseek.com/chat/completions");
+  assert.equal(ai.resolveChatCompletionsEndpoint("https://api.deepseek.com/"), "https://api.deepseek.com/chat/completions");
+  assert.equal(ai.resolveChatCompletionsEndpoint("https://api.deepseek.com/chat/completions"), "https://api.deepseek.com/chat/completions");
+});
+
 test("company AI configuration keeps keys secret and supports explicit clearing", () => {
   const saved = ai.updateAIConfig("company-default", { endpoint: "https://example.test/v1/chat/completions", model: "test-model", apiKey: "secret-key", timeoutMs: 9000 });
   assert.equal(saved.hasKey, true);

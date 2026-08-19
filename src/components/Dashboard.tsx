@@ -2,7 +2,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { ArrowUpRight, ArrowDownRight, Zap, AlertTriangle, Save, Download, Upload, Briefcase, CheckCircle2, Users, Package, FileText, ChevronRight } from 'lucide-react';
 import { useMemo, useRef, type ChangeEvent } from 'react';
 import { cn } from "@/src/lib/utils";
-import { STAGES } from './ProjectLifecycle';
+import { STAGES } from '@/src/lib/projectLifecycle';
 import { MobileHome } from './MobileHome';
 import { useDashboardOverview } from '@/src/features/dashboard/useDashboardOverview';
 import { DASHBOARD_DATA_KEYS, exportWorkspaceSnapshot, importWorkspaceSnapshot } from '@/src/features/dashboard/dashboardTools';

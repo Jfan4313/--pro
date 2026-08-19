@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, Clock3, Eye, FolderKanban, Search, UserRound } from "lucide-react";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
-import { getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
 import { getProjectNumber } from "@/src/lib/management";
 import { sortProjectsNaturally } from "@/src/lib/projectNumbering";

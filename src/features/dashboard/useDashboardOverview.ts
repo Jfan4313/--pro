@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { appendTaskToSchedule, buildTaskFromQuickIntake, deriveRisks, flattenProjects, flattenTasks, formatLocalDate } from "@/src/lib/management";
-import { getProjectCurrentStageInfo } from "@/src/components/ProjectLifecycle";
+import { getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 
 export function useDashboardOverview() {
   const [projects] = useProjectBoardData();

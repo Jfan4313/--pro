@@ -4,7 +4,7 @@ import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
-import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
 import { ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 

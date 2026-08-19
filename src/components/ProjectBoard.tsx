@@ -4,7 +4,7 @@ import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
-import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
+import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { getProjectNumber } from "@/src/lib/management";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
 import { sortProjectsNaturally } from "@/src/lib/projectNumbering";

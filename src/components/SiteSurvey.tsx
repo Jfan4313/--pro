@@ -10,7 +10,7 @@ import { flattenProjects } from "@/src/lib/management";
 import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { queueEntityOperation } from "@/src/lib/syncEngine";
-import { getLifecycleChecklist, STAGES } from "./ProjectLifecycle";
+import { getLifecycleChecklist, STAGES } from "@/src/lib/projectLifecycle";
 import {
   CURRENT_DRAFT_KEY,
   MAX_SURVEY_PHOTOS,

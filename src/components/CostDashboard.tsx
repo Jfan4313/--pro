@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { useSyncedAppData } from '../hooks/useSyncedAppData';
 import { useProjectBoardData } from '../hooks/useProjectBoardData';
 import { cn } from '../lib/utils';
-import { getProjectCurrentStageInfo } from './ProjectLifecycle';
+import { getProjectCurrentStageInfo } from '@/src/lib/projectLifecycle';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 

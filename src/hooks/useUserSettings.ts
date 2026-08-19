@@ -3,6 +3,7 @@ import { apiClient } from "@/src/lib/apiClient";
 import { useAuth } from "@/src/lib/auth";
 
 const EVENT_NAME = "zhijian-user-settings-changed";
+const settingsCache = new Map<string, { value?: unknown; promise?: Promise<unknown> }>();
 
 export function useUserSettings<T>(initialValue: T) {
   const { user } = useAuth();
@@ -17,7 +18,17 @@ export function useUserSettings<T>(initialValue: T) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    apiClient.getUserSettings<T>()
+    const cached = settingsCache.get(cacheKey) || {};
+    if (cached.value !== undefined) {
+      dataRef.current = cached.value as T;
+      setData(cached.value as T);
+    }
+    const request: Promise<{ value: T; updatedAt: string }> = (cached.promise as Promise<{ value: T; updatedAt: string }> | undefined) || apiClient.getUserSettings<T>().then((response) => {
+      settingsCache.set(cacheKey, { value: response.value });
+      return response;
+    });
+    settingsCache.set(cacheKey, { ...cached, promise: request });
+    request
       .then((response) => {
         if (cancelled) return;
         dataRef.current = response.value;
@@ -25,7 +36,11 @@ export function useUserSettings<T>(initialValue: T) {
         window.localStorage.setItem(cacheKey, JSON.stringify(response.value));
       })
       .catch(() => undefined)
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .finally(() => {
+        const current = settingsCache.get(cacheKey);
+        if (current?.promise === request) settingsCache.set(cacheKey, { value: current.value });
+        if (!cancelled) setLoading(false);
+      });
     const listener = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail?.cacheKey !== cacheKey) return;
@@ -40,6 +55,7 @@ export function useUserSettings<T>(initialValue: T) {
     const value = next instanceof Function ? next(dataRef.current) : next;
     dataRef.current = value;
     setData(value);
+    settingsCache.set(cacheKey, { value });
     window.localStorage.setItem(cacheKey, JSON.stringify(value));
     window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { cacheKey, value } }));
     await apiClient.updateUserSettings(value).catch(() => undefined);

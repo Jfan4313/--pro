@@ -3,34 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
-import { Dashboard } from "./components/Dashboard";
-import { ProjectBoard } from "./components/ProjectBoard";
-import { Schedule } from "./components/Schedule";
-import { CostDashboard } from "./components/CostDashboard";
-import { Personnel } from "./components/Personnel";
-import { Materials } from "./components/Materials";
-import { SupplyChain } from "./components/SupplyChain";
-import { Chat } from "./components/Chat";
-import { Contracts } from "./components/Contracts";
-import { Settings } from "./components/Settings";
-import { Organization } from "./components/Organization";
-import { ProjectLifecycle } from "./components/ProjectLifecycle";
 import { SmartIntake } from "./components/SmartIntake";
-import { ProjectDetail } from "./components/ProjectDetail";
-import { ExternalPartners } from "./components/ExternalPartners";
-import { ProjectFiles } from "./components/ProjectFiles";
-import { SiteSurvey } from "./components/SiteSurvey";
-import { ProjectAcceptance } from "./components/ProjectAcceptance";
-import { MobileProjects } from "./components/MobileProjects";
-import { MobileCollaboration } from "./components/MobileCollaboration";
-import { MobileWorkspace } from "./components/MobileWorkspace";
-import { AccountManagement } from "./components/AccountManagement";
-import { WorkMemo } from "./components/WorkMemo";
-import { VersionManagement } from "./components/VersionManagement";
 import { FirstRunGuide } from "./components/FirstRunGuide";
 import { LoginScreen, PasswordChangeScreen } from "./components/LoginScreen";
 import { useAuth } from "./lib/auth";
@@ -39,6 +16,30 @@ import { useWorkspaceMigrations } from "./hooks/useWorkspaceMigrations";
 import { flattenProjects, getProjectNumber } from "./lib/management";
 import { resolveProjectReference } from "./lib/projectNumbering";
 import { useArchiveReconciler } from "./hooks/useArchiveReconciler";
+
+const Dashboard = lazy(() => import("./components/Dashboard").then((module) => ({ default: module.Dashboard })));
+const ProjectBoard = lazy(() => import("./components/ProjectBoard").then((module) => ({ default: module.ProjectBoard })));
+const Schedule = lazy(() => import("./components/Schedule").then((module) => ({ default: module.Schedule })));
+const CostDashboard = lazy(() => import("./components/CostDashboard").then((module) => ({ default: module.CostDashboard })));
+const Personnel = lazy(() => import("./components/Personnel").then((module) => ({ default: module.Personnel })));
+const Materials = lazy(() => import("./components/Materials").then((module) => ({ default: module.Materials })));
+const SupplyChain = lazy(() => import("./components/SupplyChain").then((module) => ({ default: module.SupplyChain })));
+const Chat = lazy(() => import("./components/Chat").then((module) => ({ default: module.Chat })));
+const Contracts = lazy(() => import("./components/Contracts").then((module) => ({ default: module.Contracts })));
+const Settings = lazy(() => import("./components/Settings").then((module) => ({ default: module.Settings })));
+const Organization = lazy(() => import("./components/Organization").then((module) => ({ default: module.Organization })));
+const ProjectLifecycle = lazy(() => import("./components/ProjectLifecycle").then((module) => ({ default: module.ProjectLifecycle })));
+const ProjectDetail = lazy(() => import("./components/ProjectDetail").then((module) => ({ default: module.ProjectDetail })));
+const ExternalPartners = lazy(() => import("./components/ExternalPartners").then((module) => ({ default: module.ExternalPartners })));
+const ProjectFiles = lazy(() => import("./components/ProjectFiles").then((module) => ({ default: module.ProjectFiles })));
+const SiteSurvey = lazy(() => import("./components/SiteSurvey").then((module) => ({ default: module.SiteSurvey })));
+const ProjectAcceptance = lazy(() => import("./components/ProjectAcceptance").then((module) => ({ default: module.ProjectAcceptance })));
+const MobileProjects = lazy(() => import("./components/MobileProjects").then((module) => ({ default: module.MobileProjects })));
+const MobileCollaboration = lazy(() => import("./components/MobileCollaboration").then((module) => ({ default: module.MobileCollaboration })));
+const MobileWorkspace = lazy(() => import("./components/MobileWorkspace").then((module) => ({ default: module.MobileWorkspace })));
+const AccountManagement = lazy(() => import("./components/AccountManagement").then((module) => ({ default: module.AccountManagement })));
+const WorkMemo = lazy(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
+const VersionManagement = lazy(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
 
 const tabPermissions: Record<string, string> = {
   dashboard: "dashboard", board: "projects", "project-detail": "projects", lifecycle: "lifecycle", "site-survey": "survey",
@@ -180,6 +181,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
         <Header setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />
         <main className="app-main flex-1 overflow-y-auto flex flex-col">
+          <Suspense fallback={<div className="flex min-h-full items-center justify-center text-sm text-slate-500">正在加载模块…</div>}>
           {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
           {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div></>}
           {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
@@ -200,6 +202,7 @@ export default function App() {
           {activeTab === "settings" && <Settings />}
           {activeTab === "accounts" && <AccountManagement />}
           {activeTab === "version-management" && <VersionManagement />}
+          </Suspense>
         </main>
 
         <SmartIntake setActiveTab={setActiveTab} />
