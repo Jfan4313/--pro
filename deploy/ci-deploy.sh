@@ -84,17 +84,32 @@ done
   chmod 755 "$stage_dir" "$release_dir" "$stage_dir/npm-home"
   chown -R www-data:www-data "$stage_dir/npm-home"
   chown -R www-data:www-data "$release_dir"
+  reused_dependencies=0
   if [[ ! -d node_modules && -d "$APP_DIR/node_modules" ]] && cmp -s "$release_dir/package-lock.json" "$APP_DIR/package-lock.json"; then
     # Keep the deployment small: dependencies are already present on the
     # server and are read-only at runtime, so hard-link them instead of
     # duplicating hundreds of megabytes into the staging directory.
     cp -al "$APP_DIR/node_modules" "$release_dir/node_modules"
+    reused_dependencies=1
   fi
   if [[ ! -d node_modules ]]; then
-    runuser -u www-data -- env HOME="$stage_dir/npm-home" npm ci --omit=dev --no-audit --no-fund
+    echo "Installing production dependencies (10 minute timeout)."
+    timeout --signal=TERM 600 \
+      runuser -u www-data -- env HOME="$stage_dir/npm-home" \
+      npm ci --omit=dev --no-audit --no-fund
   fi
-  # npm install selects the native better-sqlite3 build for the server's Node
-  # version; do not rebuild a CI-host binary from the release archive.
+  if [[ "$reused_dependencies" -eq 1 ]]; then
+    # Hard links are safe for JavaScript dependencies, but a native addon is
+    # tied to the Node ABI it was compiled against. Give better-sqlite3 its own
+    # copy before rebuilding so the running release is never modified in place.
+    rm -rf node_modules/better-sqlite3
+    cp -a "$APP_DIR/node_modules/better-sqlite3" node_modules/better-sqlite3
+    chown -R www-data:www-data node_modules/better-sqlite3
+  fi
+  echo "Rebuilding better-sqlite3 for server Node.js $node_major (10 minute timeout)."
+  timeout --signal=TERM 600 \
+    runuser -u www-data -- env HOME="$stage_dir/npm-home" \
+    npm rebuild better-sqlite3 --build-from-source --no-audit --no-fund
 chown -R root:root "$release_dir"
 
 if [[ -e "$backup_dir" || -e "$failed_dir" ]]; then

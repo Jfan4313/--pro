@@ -65,9 +65,12 @@ jobs:
           DEPLOY_USER: root
         run: |
           RELEASE_CHECKSUM="$(cut -d ' ' -f1 zhijian-pro-release.sha256)"
-          ssh -i ~/.ssh/zhijian_pro_deploy \
+          timeout --signal=TERM 12m ssh -i ~/.ssh/zhijian_pro_deploy \
             -o BatchMode=yes \
+            -o ConnectTimeout=15 \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "deploy $GITHUB_SHA $RELEASE_CHECKSUM" \
             < zhijian-pro-release.tgz
