@@ -26,6 +26,18 @@ failed_dir="$BACKUP_ROOT/$release_sha.failed"
 targets=(dist server shared src public deploy package.json package-lock.json node_modules)
 service_stopped=0
 
+available_kb="$(df -Pk /opt | awk 'NR == 2 { print $4 }')"
+if [[ -z "$available_kb" || "$available_kb" -lt 1048576 ]]; then
+  echo "Insufficient free disk space under /opt: ${available_kb:-unknown} KB; at least 1048576 KB is required before deployment." >&2
+  exit 70
+fi
+
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+if [[ -z "$node_major" || "$node_major" -lt 20 ]]; then
+  echo "Unsupported server Node.js version: ${node_major:-unknown}; Node.js 20 LTS or newer is required." >&2
+  exit 71
+fi
+
 cleanup() {
   rm -rf "$stage_dir"
 }
