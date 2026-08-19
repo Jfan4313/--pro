@@ -1,5 +1,5 @@
 import React from "react";
-import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus, BarChart3, RefreshCw, KeyRound } from "lucide-react";
+import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus, BarChart3, RefreshCw, KeyRound, CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
@@ -44,7 +44,7 @@ export function Settings() {
   const [usageLoading, setUsageLoading] = React.useState(false);
   const [usageFilters, setUsageFilters] = React.useState({ from: "", to: "", userId: "", model: "", status: "" });
   const [companyAccounts, setCompanyAccounts] = React.useState<Array<{ id: string; name: string; username: string }>>([]);
-  const [aiDebug, setAiDebug] = React.useState<any>(null);
+  const [aiDebug, setAiDebug] = React.useState<Awaited<ReturnType<typeof apiClient.debugAI>> | null>(null);
   const [aiDebugging, setAiDebugging] = React.useState(false);
   const isAIManager = user?.role === "admin" || user?.role === "company_admin";
 
@@ -123,10 +123,24 @@ export function Settings() {
 
   const runAIDebug = async () => {
     setAiDebugging(true);
+    setAiDebug(null);
     try {
-      setAiDebug(await apiClient.debugAI({ endpoint: aiConfig.endpoint, model: aiConfig.model, apiKey: aiConfig.apiKey, timeoutMs: aiConfig.timeoutMs }));
+      const result = await apiClient.debugAI({ endpoint: aiConfig.endpoint, model: aiConfig.model, apiKey: aiConfig.apiKey, timeoutMs: aiConfig.timeoutMs });
+      setAiDebug(result);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `AI 连接成功：${result.model}，耗时 ${result.durationMs ?? 0} 毫秒` }));
     } catch (error: any) {
-      setAiDebug(error?.details || { ok: false, stage: "network", message: error?.message || "调试接口请求失败" });
+      const details = error?.details || {};
+      const failure = {
+        ok: false,
+        stage: String(details.stage || (error?.status === 401 ? "auth" : "network")),
+        model: String(details.model || aiConfig.model || "未设置"),
+        endpoint: String(details.endpoint || aiConfig.endpoint || ""),
+        configured: Boolean(details.configured),
+        durationMs: typeof details.durationMs === "number" ? details.durationMs : undefined,
+        message: String(details.message || (error?.status === 401 ? "登录已过期，请重新登录后再测试" : error?.message || "调试接口请求失败")),
+      };
+      setAiDebug(failure);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `AI 连接失败：${failure.message}` }));
     } finally { setAiDebugging(false); }
   };
 
@@ -260,6 +274,38 @@ export function Settings() {
         </div>
 
         {user && <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/50 flex items-center gap-2"><KeyRound className="h-5 w-5 text-indigo-600" /><div><h3 className="text-lg font-medium text-slate-800">公司 AI 配置</h3><p className="mt-1 text-xs text-slate-500">公司成员统一使用同一套模型配置；API Key 始终只保存在服务端。</p></div></div>{isAIManager ? <div className="p-6 space-y-4"><label className="block"><span className="form-label">API 地址</span><input value={aiConfig.endpoint} onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })} placeholder="https://api.deepseek.com" className="survey-input" /><span className="mt-1 block text-xs text-slate-500">可填写服务商基础地址，系统会自动调用 /chat/completions。</span></label><div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="form-label">模型名称</span><input value={aiConfig.model} onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })} className="survey-input" /></label><label className="block"><span className="form-label">超时（毫秒）</span><input type="number" min="5000" max="120000" value={aiConfig.timeoutMs} onChange={(event) => setAiConfig({ ...aiConfig, timeoutMs: Number(event.target.value) })} className="survey-input" /></label></div><label className="block"><span className="form-label">公司 API Key {aiConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span><input type="password" value={aiConfig.apiKey} onChange={(event) => setAiConfig({ ...aiConfig, apiKey: event.target.value })} placeholder={aiConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴公司 API Key"} className="survey-input" /></label><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void runAIDebug()} disabled={aiDebugging} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 disabled:opacity-60"><RefreshCw className={cn("h-4 w-4", aiDebugging && "animate-spin")} />{aiDebugging ? "调试中…" : "调试 AI 连接"}</button><button type="button" onClick={() => void saveAIConfig()} disabled={aiSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{aiSaving ? "保存中…" : "保存公司 AI 配置"}</button>{aiConfig.hasKey && <button type="button" onClick={() => void clearAIKey()} disabled={aiSaving} className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 disabled:opacity-60">清除 AI Key</button>}</div></div> : <div className="p-6"><p className="text-sm font-semibold text-slate-800">{aiConfig.configured ? "公司 AI 已配置" : "公司 AI 尚未配置"}</p><p className="mt-1 text-xs text-slate-500">当前模型：{aiConfig.model || "未设置"}。地址和密钥仅公司管理员可查看。</p></div>}</div>}
+
+        {user && isAIManager && (aiDebugging || aiDebug) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "rounded-xl border p-4 shadow-sm",
+              aiDebugging ? "border-indigo-200 bg-indigo-50" : aiDebug?.ok ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50",
+            )}
+          >
+            <div className="flex items-start gap-3">
+              {aiDebugging
+                ? <RefreshCw className="mt-0.5 h-5 w-5 animate-spin text-indigo-600" />
+                : aiDebug?.ok
+                  ? <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" />
+                  : <XCircle className="mt-0.5 h-5 w-5 text-rose-600" />}
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-slate-900">{aiDebugging ? "正在测试 AI 连接…" : aiDebug?.ok ? "AI 连接成功" : "AI 连接失败"}</p>
+                {!aiDebugging && aiDebug && (
+                  <>
+                    <p className="mt-1 text-sm text-slate-700">{aiDebug.ok ? "服务商已正常返回测试任务，可以使用公司 AI 功能。" : aiDebug.message || "服务商没有正常响应，请检查配置。"}</p>
+                    <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                      <div><dt className="font-semibold text-slate-800">模型</dt><dd>{aiDebug.model || "未设置"}</dd></div>
+                      <div><dt className="font-semibold text-slate-800">耗时</dt><dd>{aiDebug.durationMs != null ? `${aiDebug.durationMs} 毫秒` : "未返回"}</dd></div>
+                      <div className="sm:col-span-2"><dt className="font-semibold text-slate-800">测试地址</dt><dd className="break-all">{aiDebug.endpoint || "未设置"}</dd></div>
+                    </dl>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2"><BarChart3 className="h-5 w-5 text-violet-600" /><div><h3 className="text-lg font-medium text-slate-800">AI Token 用量</h3><p className="mt-1 text-xs text-slate-500">{isAIManager ? "查看本公司各帐号用量" : "仅显示当前帐号的用量"}；服务商未返回 Token 时不做估算。</p></div></div><div className="p-6 space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><input type="date" value={usageFilters.from} onChange={(event) => setUsageFilters({ ...usageFilters, from: event.target.value })} className="survey-input" aria-label="开始日期" /><input type="date" value={usageFilters.to} onChange={(event) => setUsageFilters({ ...usageFilters, to: event.target.value })} className="survey-input" aria-label="结束日期" />{isAIManager && <select value={usageFilters.userId} onChange={(event) => setUsageFilters({ ...usageFilters, userId: event.target.value })} className="survey-input"><option value="">全部帐号</option>{companyAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}（{account.username}）</option>)}</select>}<input value={usageFilters.model} onChange={(event) => setUsageFilters({ ...usageFilters, model: event.target.value })} placeholder="模型名称" className="survey-input" /><select value={usageFilters.status} onChange={(event) => setUsageFilters({ ...usageFilters, status: event.target.value })} className="survey-input"><option value="">全部状态</option><option value="success">成功</option><option value="error">失败</option><option value="timeout">超时</option></select></div><button type="button" onClick={() => void loadUsage()} disabled={usageLoading} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${usageLoading ? "animate-spin" : ""}`} />查询用量</button><div className="grid grid-cols-2 gap-3 md:grid-cols-5"><UsageMetric label="调用次数" value={usage?.summary.calls || 0} /><UsageMetric label="成功" value={usage?.summary.successes || 0} /><UsageMetric label="失败/超时" value={usage?.summary.failures || 0} /><UsageMetric label="输入 Token" value={usage?.summary.inputTokens || 0} /><UsageMetric label="总 Token" value={usage?.summary.totalTokens || 0} /></div>{isAIManager && usage?.byUser?.length ? <div className="overflow-x-auto"><table className="w-full min-w-[580px] text-sm"><thead><tr className="border-b border-slate-100 text-left text-xs text-slate-400"><th className="py-2">帐号</th><th>调用</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th></tr></thead><tbody>{usage.byUser.map((row) => <tr key={row.userId} className="border-b border-slate-50"><td className="py-3 font-medium text-slate-800">{row.name}<span className="ml-1 text-xs font-normal text-slate-400">@{row.username}</span></td><td>{row.calls}</td><td>{Number(row.inputTokens).toLocaleString()}</td><td>{Number(row.outputTokens).toLocaleString()}</td><td className="font-semibold">{Number(row.totalTokens).toLocaleString()}</td></tr>)}</tbody></table></div> : null}<div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><thead><tr className="border-b border-slate-100 text-left text-xs text-slate-400"><th className="py-2">时间</th>{isAIManager && <th>帐号</th>}<th>模型</th><th>状态</th><th>输入</th><th>输出</th><th>总量</th><th>耗时</th></tr></thead><tbody>{usage?.records?.map((row) => <tr key={row.id} className="border-b border-slate-50"><td className="py-3 text-slate-500">{new Date(row.createdAt).toLocaleString()}</td>{isAIManager && <td>{row.userName}</td>}<td>{row.model}</td><td className={row.status === "success" ? "text-emerald-600" : "text-rose-600"}>{row.status === "success" ? "成功" : row.status === "timeout" ? "超时" : "失败"}</td><td>{row.inputTokens ?? "未提供"}</td><td>{row.outputTokens ?? "未提供"}</td><td>{row.totalTokens ?? "未提供"}</td><td>{row.durationMs}ms</td></tr>)}</tbody></table>{!usageLoading && !usage?.records?.length && <p className="py-8 text-center text-sm text-slate-400">暂无 AI 调用记录</p>}</div></div></div>
 

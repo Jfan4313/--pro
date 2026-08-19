@@ -87,4 +87,25 @@ test("remote AI calls record successful and failed usage events without estimati
   }
 });
 
+test("AI connection debug reuses the saved company key when the form key is blank", async () => {
+  ai.updateAIConfig("company-default", { endpoint: "https://example.test/v1/chat/completions", model: "debug-model", apiKey: "saved-company-key", timeoutMs: 9000 });
+  const originalFetch = globalThis.fetch;
+  let authorization = "";
+  try {
+    globalThis.fetch = async (_input, init) => {
+      authorization = new Headers(init?.headers).get("Authorization") || "";
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: "调试测试", deadline: "2026-08-20", confidence: 0.9 }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const result = await ai.debugAI(
+      { id: "user-1", companyId: "company-default" },
+      null,
+      { endpoint: "https://example.test/v1/chat/completions", model: "debug-model", apiKey: "", timeoutMs: 9000 },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(authorization, "Bearer saved-company-key");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test.after(() => fs.rmSync(configDir, { recursive: true, force: true }));

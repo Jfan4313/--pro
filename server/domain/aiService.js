@@ -193,13 +193,23 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null, aiOver
 
 export async function debugAI(actor = {}, db = null, aiOverride = null) {
   const companyId = actor.companyId || "company-default";
-  const config = aiOverride ? { ...getAIConfig(companyId), endpoint: String(aiOverride.endpoint || "").trim(), model: String(aiOverride.model || "gpt-4o-mini").trim() || "gpt-4o-mini", timeoutMs: Number(aiOverride.timeoutMs || 30000), hasKey: Boolean(aiOverride.apiKey) } : getAIConfig(companyId);
+  const storedConfig = getAIConfig(companyId);
+  const suppliedApiKey = String(aiOverride?.apiKey || "").trim();
+  const effectiveApiKey = suppliedApiKey || getAIKey(companyId);
+  const config = aiOverride ? {
+    ...storedConfig,
+    endpoint: String(aiOverride.endpoint ?? storedConfig.endpoint ?? "").trim(),
+    model: String(aiOverride.model ?? storedConfig.model ?? "gpt-4o-mini").trim() || "gpt-4o-mini",
+    timeoutMs: Math.max(5000, Math.min(120000, Number(aiOverride.timeoutMs || storedConfig.timeoutMs || 30000))),
+    hasKey: Boolean(effectiveApiKey),
+  } : storedConfig;
   const startedAt = Date.now();
   if (!config.endpoint || !config.hasKey) {
     return { ok: false, stage: "config", model: config.model, endpoint: config.endpoint, configured: false, message: "AI 地址或 API Key 未配置" };
   }
   try {
-    const result = await analyzeIntakeWithAI({ inputType: "text", text: "请生成一个标题为调试测试的任务，截止日期为明天。", projects: [], personnel: [] }, actor, db, aiOverride);
+    const effectiveOverride = aiOverride ? { endpoint: config.endpoint, model: config.model, timeoutMs: config.timeoutMs, apiKey: effectiveApiKey } : null;
+    const result = await analyzeIntakeWithAI({ inputType: "text", text: "请生成一个标题为调试测试的任务，截止日期为明天。", projects: [], personnel: [] }, actor, db, effectiveOverride);
     return { ok: true, stage: "chat_completions", model: config.model, endpoint: config.endpoint, configured: true, durationMs: Date.now() - startedAt, result: { title: result.title, deadline: result.deadline } };
   } catch (error) {
     return { ok: false, stage: "chat_completions", model: config.model, endpoint: config.endpoint, configured: true, durationMs: Date.now() - startedAt, message: error?.message || "AI 请求失败" };
