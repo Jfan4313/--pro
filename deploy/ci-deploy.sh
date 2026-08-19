@@ -48,8 +48,12 @@ done
   chmod 755 "$stage_dir" "$release_dir" "$stage_dir/npm-home"
   chown -R www-data:www-data "$stage_dir/npm-home"
   chown -R www-data:www-data "$release_dir"
+  if [[ ! -d node_modules && -d "$APP_DIR/node_modules" ]] && cmp -s "$release_dir/package-lock.json" "$APP_DIR/package-lock.json"; then
+    cp -a "$APP_DIR/node_modules" "$release_dir/node_modules"
+    chown -R www-data:www-data "$release_dir/node_modules"
+  fi
   if [[ ! -d node_modules ]]; then
-    runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
+    runuser -u www-data -- env HOME="$stage_dir/npm-home" npm ci --omit=dev --no-audit --no-fund
   fi
   # npm install selects the native better-sqlite3 build for the server's Node
   # version; do not rebuild a CI-host binary from the release archive.
