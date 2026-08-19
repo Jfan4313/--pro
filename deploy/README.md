@@ -128,6 +128,8 @@ Certbot 完成后，访问 `https://project.zero-carbon.online`。手机摄像�
 - 现场照片：`uploads/`
 - 项目资料：`project-files/`
 - 本地备份：`backups/`
+
+CI 部署回滚副本位于 `/var/lib/zhijian-pro/deploy-backups`。部署脚本默认只保留上一份成功发布版本，并在成功发布后清理更早版本和失败副本；可通过 `DEPLOY_BACKUP_RETENTION_COUNT` 调整保留数量。完整代码版本由 GitHub 保存；该目录只用于发布回滚，不是业务数据备份。
 - 公司 AI 配置：`ai-config.json`（服务端保存，权限应为 `0600`）
 
 至少每天备份该目录。照片量开始增长后，应迁移至阿里云 OSS，避免占满 40GB 系统盘。

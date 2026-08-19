@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 APP_DIR="/opt/zhijian-pro"
 BACKUP_ROOT="/var/lib/zhijian-pro/deploy-backups"
+BACKUP_RETENTION_COUNT="${DEPLOY_BACKUP_RETENTION_COUNT:-1}"
 SERVICE_NAME="zhijian-pro"
 HEALTH_URL="http://127.0.0.1:8787/api/health"
 ORIGINAL_COMMAND="${SSH_ORIGINAL_COMMAND:-}"
@@ -42,6 +43,28 @@ cleanup() {
   rm -rf "$stage_dir"
 }
 trap cleanup EXIT
+
+cleanup_old_backups() {
+  local kept=0 backup_path
+  [[ "$BACKUP_RETENTION_COUNT" =~ ^[1-9][0-9]*$ ]] || {
+    echo "Invalid DEPLOY_BACKUP_RETENTION_COUNT: $BACKUP_RETENTION_COUNT" >&2
+    exit 72
+  }
+
+  while IFS= read -r backup_path; do
+    if (( kept < BACKUP_RETENTION_COUNT )); then
+      kept=$((kept + 1))
+    else
+      rm -rf -- "$backup_path"
+    fi
+  done < <(
+    find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name '*.failed' \
+      -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2-
+  )
+
+  find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '*.failed' \
+    -exec rm -rf -- {} +
+}
 
 mkdir -p "$release_dir" "$BACKUP_ROOT"
 cat > "$archive_path"
@@ -133,4 +156,5 @@ fi
 
 service_stopped=0
 trap - ERR
+cleanup_old_backups
 echo "Deployment $release_sha succeeded."
