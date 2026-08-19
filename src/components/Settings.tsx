@@ -7,6 +7,7 @@ import { apiClient } from "@/src/lib/apiClient";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { flattenProjects } from "@/src/lib/management";
 import { useAuth } from "@/src/lib/auth";
+import { ArchiveFolderState, chooseLocalArchiveProvider, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 
 const defaultSettings = {
   notifications: {
@@ -31,9 +32,9 @@ export function Settings() {
   const [settings, setSettings] = useSyncedAppData("appSettings", defaultSettings);
   const [boardData] = useProjectBoardData();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
-  const [fileRootInput, setFileRootInput] = React.useState("");
-  const [defaultFileRoot, setDefaultFileRoot] = React.useState("");
-  const [isSavingFileRoot, setIsSavingFileRoot] = React.useState(false);
+  const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
+  const [archiveRootName, setArchiveRootName] = React.useState("");
+  const [archivePermission, setArchivePermission] = React.useState<"granted" | "prompt" | "denied" | "unsupported">("unsupported");
   const [isInitializingFolders, setIsInitializingFolders] = React.useState(false);
   const [aiConfig, setAiConfig] = React.useState({ endpoint: "", model: "gpt-4o-mini", apiKey: "", timeoutMs: 30000, hasKey: false });
   const [aiSaving, setAiSaving] = React.useState(false);
@@ -50,15 +51,13 @@ export function Settings() {
 
   React.useEffect(() => {
     let mounted = true;
-    apiClient.getFileSettings()
-      .then((remote) => {
+    getLocalArchiveProvider()
+      .then(async (provider) => {
         if (!mounted) return;
-        setDefaultFileRoot(remote.defaultRootPath);
-        setFileRootInput(mergedSettings.fileManagement.rootPath || remote.rootPath);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setFileRootInput(mergedSettings.fileManagement.rootPath || "");
+        const availability = await provider?.checkAvailability();
+        if (!mounted || !availability) return;
+        setArchiveRootName(availability.rootName || "已授权文件夹");
+        setArchivePermission(availability.permission);
       });
     return () => {
       mounted = false;
@@ -82,53 +81,31 @@ export function Settings() {
       },
     }));
 
-    if (category === "fileManagement") {
-      try {
-        await apiClient.updateFileSettings({
-          rootPath: fileRootInput || mergedSettings.fileManagement.rootPath || defaultFileRoot,
-          autoRename: key === "autoRename" ? nextValue : mergedSettings.fileManagement.autoRename,
-          autoCreateFolders: key === "autoCreateFolders" ? nextValue : mergedSettings.fileManagement.autoCreateFolders,
-        });
-      } catch {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: '本地后端未连接，设置已先保存在本机' }));
-        return;
-      }
+    if (category === "fileManagement" && key === "autoCreateFolders" && nextValue) {
+      window.dispatchEvent(new CustomEvent("archive-root-changed"));
     }
 
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '设置已保存' }));
   };
 
-  const saveFileRoot = async () => {
-    const rootPath = fileRootInput.trim();
-    if (!rootPath) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '请先填写文件保存位置' }));
-      return;
-    }
-
-    setIsSavingFileRoot(true);
+  const chooseArchiveRoot = async () => {
     try {
-      const saved = await apiClient.updateFileSettings({
-        rootPath,
-        autoRename: mergedSettings.fileManagement.autoRename,
-        autoCreateFolders: mergedSettings.fileManagement.autoCreateFolders,
-      });
-      setDefaultFileRoot(saved.defaultRootPath);
-      setFileRootInput(saved.rootPath);
-      setSettings((prev: any) => ({
-        ...prev,
-        fileManagement: {
-          ...defaultSettings.fileManagement,
-          ...(prev.fileManagement || {}),
-          rootPath: saved.rootPath,
-          autoRename: saved.autoRename,
-          autoCreateFolders: saved.autoCreateFolders,
-        },
-      }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件保存位置已更新' }));
-    } catch (error) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '保存失败，请检查本地后端和文件夹权限' }));
-    } finally {
-      setIsSavingFileRoot(false);
+      const provider = await chooseLocalArchiveProvider();
+      const availability = await provider.checkAvailability();
+      setArchiveRootName(availability.rootName || "已授权文件夹");
+      setArchivePermission(availability.permission);
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '本机归档文件夹已授权，正在补建项目目录' }));
+    } catch (error: any) {
+      if (error?.name !== "AbortError") window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件夹授权失败，请使用最新版 Chrome/Edge 并允许读写' }));
+    }
+  };
+
+  const restoreArchivePermission = async () => {
+    const granted = await requestLocalArchivePermission().catch(() => false);
+    setArchivePermission(granted ? "granted" : "denied");
+    if (granted) {
+      window.dispatchEvent(new CustomEvent("archive-root-changed"));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '归档权限已恢复，正在自动补建目录' }));
     }
   };
 
@@ -141,15 +118,27 @@ export function Settings() {
 
     setIsInitializingFolders(true);
     try {
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) throw new Error("archive_permission_required");
       let count = 0;
+      const updates: Record<string, ArchiveFolderState> = {};
       for (const project of projects) {
         const stageInfo = getProjectCurrentStageInfo(project.id, lifecycleStates);
-        await apiClient.initProjectFolders(project.id, { project, stages: STAGES.slice(0, stageInfo.index + 1) });
+        const result = await provider.ensureProjectStructure(project, getCurrentAndNextStages(STAGES, stageInfo.index), archiveFolderStates[project.id]?.projectFolder);
+        updates[project.id] = {
+          status: "ready",
+          storageProvider: "local-folder",
+          projectFolder: result.projectFolder,
+          generatedThroughStageId: result.generatedThroughStageId,
+          updatedAt: new Date().toISOString(),
+        };
         count += 1;
       }
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `已为 ${count} 个项目生成当前阶段资料夹` }));
-    } catch {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: '生成失败，请检查本地后端和文件保存位置' }));
+      await setArchiveFolderStates((current) => ({ ...current, ...updates }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `已为 ${count} 个项目生成当前及下一阶段资料夹` }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.message === "archive_permission_required" ? '请先授权本机归档文件夹' : '生成失败，请检查本机文件夹权限' }));
     } finally {
       setIsInitializingFolders(false);
     }
@@ -220,30 +209,16 @@ export function Settings() {
           </div>
           <div className="p-6 space-y-6">
             <div>
-              <label className="block text-sm font-medium text-slate-900 mb-2">项目资料保存位置</label>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input
-                  type="text"
-                  value={fileRootInput}
-                  onChange={(event) => setFileRootInput(event.target.value)}
-                  placeholder={defaultFileRoot || "请选择本地项目资料文件夹"}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                />
-                <button
-                  onClick={saveFileRoot}
-                  disabled={isSavingFileRoot}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60 transition-colors"
-                >
-                  <Save className="w-4 h-4" />
-                  {isSavingFileRoot ? "保存中" : "保存位置"}
-                </button>
+              <label className="block text-sm font-medium text-slate-900 mb-2">本机项目资料归档文件夹</label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
+                  {archiveRootName || "尚未选择本机文件夹"}
+                  {archiveRootName && <span className={cn("ml-2 text-xs", archivePermission === "granted" ? "text-emerald-600" : "text-amber-600")}>{archivePermission === "granted" ? "可读写" : "需要恢复权限"}</span>}
+                </div>
+                <button onClick={() => void chooseArchiveRoot()} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"><FolderOpen className="h-4 w-4" />{archiveRootName ? "重新选择" : "选择文件夹"}</button>
+                {archiveRootName && archivePermission !== "granted" && <button onClick={() => void restoreArchivePermission()} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700">恢复授权</button>}
               </div>
-              <p className="text-xs text-slate-500 mt-2">
-                软件上传的项目资料会按项目和阶段自动归档到这里；不填写时使用默认位置。
-              </p>
-              {defaultFileRoot && (
-                <p className="text-xs text-slate-400 mt-1">默认位置：{defaultFileRoot}</p>
-              )}
+              <p className="mt-2 text-xs text-slate-500">新资料仅写入本机授权目录；项目与文件索引仍可同步，其他设备不能直接下载原文件。</p>
             </div>
 
             <div className="h-px bg-slate-100"></div>
@@ -252,7 +227,7 @@ export function Settings() {
               <div>
                 <h4 className="text-sm font-semibold text-slate-900">为现有项目生成资料夹</h4>
                 <p className="text-xs text-slate-500 mt-1">
-                  当前识别到 {projectCount} 个项目，只生成各项目当前阶段及以前阶段的资料夹。
+                  当前识别到 {projectCount} 个项目，生成各项目当前阶段及下一阶段资料夹。
                 </p>
               </div>
               <button
@@ -276,8 +251,8 @@ export function Settings() {
             />
             <SettingToggle
               icon={FolderOpen}
-              title="新项目自动生成立项资料夹"
-              description="新项目先只生成立项阶段资料夹，进入后续阶段时再生成对应资料夹"
+              title="自动生成项目资料夹"
+              description="新项目生成当前及下一阶段资料夹，阶段推进后继续自动补建"
               checked={mergedSettings.fileManagement.autoCreateFolders}
               onChange={() => handleToggle('fileManagement', 'autoCreateFolders')}
             />

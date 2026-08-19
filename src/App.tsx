@@ -38,6 +38,7 @@ import { useProjectBoardData } from "./hooks/useProjectBoardData";
 import { useWorkspaceMigrations } from "./hooks/useWorkspaceMigrations";
 import { flattenProjects, getProjectNumber } from "./lib/management";
 import { resolveProjectReference } from "./lib/projectNumbering";
+import { useArchiveReconciler } from "./hooks/useArchiveReconciler";
 
 const tabPermissions: Record<string, string> = {
   dashboard: "dashboard", board: "projects", "project-detail": "projects", lifecycle: "lifecycle", "site-survey": "survey",
@@ -50,6 +51,7 @@ const tabPermissions: Record<string, string> = {
 export default function App() {
   const { user, loading: authLoading, can } = useAuth();
   useWorkspaceMigrations();
+  useArchiveReconciler(Boolean(user));
   const [projectBoardData] = useProjectBoardData();
   const allProjects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
   const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || "dashboard");

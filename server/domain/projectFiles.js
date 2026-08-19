@@ -11,7 +11,7 @@ export function sanitizePathSegment(value = "未命名") {
 }
 
 export function getProjectCode(project = {}) {
-  return sanitizePathSegment(project.projectCode || project.code || project.id || "PROJECT");
+  return sanitizePathSegment(project.projectNumber || project.projectCode || project.code || project.id || "PROJECT");
 }
 
 export function getStageCode(stage = {}) {
@@ -27,6 +27,10 @@ export function getStageCleanName(stage = {}) {
 
 export function getProjectFolderName(project = {}) {
   return `${getProjectCode(project)}_${sanitizePathSegment(project.name || project.projectName || "未命名项目")}`;
+}
+
+function getLegacyProjectFolderName(project = {}) {
+  return `${sanitizePathSegment(project.projectCode || project.code || project.id || "PROJECT")}_${sanitizePathSegment(project.name || project.projectName || "未命名项目")}`;
 }
 
 export function getStageFolderName(stage = {}) {
@@ -103,8 +107,14 @@ export function buildProjectStoredFile({ project, stage, fileType, filename, tar
 }
 
 export function listProjectFilesFromDisk({ rootPath, project, stages = [] }) {
-  const projectFolder = getProjectFolderName(project);
-  const projectPath = path.join(rootPath, projectFolder);
+  let projectFolder = getProjectFolderName(project);
+  let projectPath = path.join(rootPath, projectFolder);
+  const legacyProjectFolder = getLegacyProjectFolderName(project);
+  const legacyProjectPath = path.join(rootPath, legacyProjectFolder);
+  if (!fs.existsSync(projectPath) && legacyProjectFolder !== projectFolder && fs.existsSync(legacyProjectPath)) {
+    projectFolder = legacyProjectFolder;
+    projectPath = legacyProjectPath;
+  }
   if (!fs.existsSync(projectPath)) {
     return { rootPath, projectFolder, projectPath, stages: [] };
   }

@@ -3,10 +3,11 @@ import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Do
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
-import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
+import { getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { getProjectNumber } from "@/src/lib/management";
 import { resolveProjectReference, sortProjectsNaturally } from "@/src/lib/projectNumbering";
+import { ArchiveFolderState, downloadLocalArchiveFile, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
 
 export const STAGES = [
   { 
@@ -214,15 +215,6 @@ export const getProjectCurrentStageInfo = (projectId: string, lifecycleStates: R
   };
 };
 
-function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
 function formatUploadTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -239,6 +231,8 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
 }) {
   const [boardData] = useProjectBoardData();
   const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
+  const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
+  const [appSettings] = useSyncedAppData<any>("appSettings", {});
   const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   
   const allProjects = useMemo(() => sortProjectsNaturally(Array.isArray(boardData)
@@ -324,26 +318,30 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
       const currentFiles = Array.isArray(stageState.files) ? stageState.files : [];
 
       try {
-        const contentBase64 = await fileToBase64(file);
-        const uploaded = await apiClient.uploadProjectStageFile({
-          projectId: activeProj.id,
-          stageId: stage.id,
+        const provider = await getLocalArchiveProvider();
+        const availability = await provider?.checkAvailability();
+        if (!provider || !availability?.available) throw new Error("archive_permission_required");
+        const uploaded = await provider.writeFile({
           project: activeProj,
           stage,
           fileType,
-          filename: file.name,
-          contentBase64,
+          file,
+          autoRename: appSettings?.fileManagement?.autoRename !== false,
+          projectFolder: archiveFolderStates[activeProj.id]?.projectFolder,
         });
 
         const newFileObj = {
           name: uploaded.storedName,
           originalName: uploaded.originalName,
-          originalBase: uploaded.originalBase,
-          uploadTime: formatUploadTime(uploaded.uploadedAt),
+          uploadTime: formatUploadTime(uploaded.createdAt),
           version: uploaded.version,
-          fileType: uploaded.fileType,
-          relativePath: uploaded.relativePath,
-          absolutePath: uploaded.absolutePath,
+          fileType,
+          storageProvider: uploaded.storageProvider,
+          storageKey: uploaded.storageKey,
+          size: uploaded.size,
+          contentType: uploaded.contentType,
+          checksum: uploaded.checksum,
+          createdAt: uploaded.createdAt,
           isCustom: true,
           archived: true,
         };
@@ -358,10 +356,25 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
             }
           }
         }));
+        await setArchiveFolderStates((current) => ({
+          ...current,
+          [activeProj.id]: {
+            status: "ready",
+            storageProvider: "local-folder",
+            projectFolder: uploaded.storageKey.split("/")[0],
+            generatedThroughStageId: current[activeProj.id]?.generatedThroughStageId || stage.id,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
         
         window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件已规范命名并保存到项目资料夹' }));
-      } catch (error) {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件保存失败，请检查本地后端和保存位置' }));
+      } catch (error: any) {
+        const message = error?.message === "archive_permission_required"
+          ? "请先在项目资料或系统设置中授权本机归档文件夹"
+          : error?.message === "archive_file_exists"
+            ? "同名文件已存在；请开启自动规范命名或调整文件名"
+            : "文件保存失败，请检查本机归档目录权限";
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: message }));
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
@@ -690,7 +703,11 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                       <button
                                         onClick={() => {
-                                          if (fileObj.relativePath) {
+                                          if (fileObj.storageProvider === "local-folder" && fileObj.storageKey) {
+                                            void downloadLocalArchiveFile(fileObj.storageKey, fileObj.storedName || fileObj.name).catch(() => {
+                                              window.dispatchEvent(new CustomEvent('show-toast', { detail: '原文件仅能在已授权的归档电脑下载' }));
+                                            });
+                                          } else if (fileObj.relativePath) {
                                             window.open(getProjectFileDownloadUrl(fileObj.relativePath), "_blank");
                                           } else {
                                             window.dispatchEvent(new CustomEvent('show-toast', { detail: '这是待上传清单，请先上传真实文件' }));

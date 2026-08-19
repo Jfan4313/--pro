@@ -6,11 +6,12 @@ import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { cn } from "@/src/lib/utils";
-import { offlineDb } from "@/src/lib/offlineDb";
+import { ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData] = useProjectBoardData();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
+  const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const projects = React.useMemo(() => flattenProjects(boardData), [boardData]);
   const [stageFilter, setStageFilter] = React.useState("all");
   const [projectSearch, setProjectSearch] = React.useState("");
@@ -20,13 +21,8 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [isLoading, setIsLoading] = React.useState(false);
   const [backendError, setBackendError] = React.useState("");
   const [isLocationPanelOpen, setIsLocationPanelOpen] = React.useState(false);
-  const [fileRootInput, setFileRootInput] = React.useState("");
-  const [defaultFileRoot, setDefaultFileRoot] = React.useState("");
-  const [isSavingLocation, setIsSavingLocation] = React.useState(false);
   const [localFolderName, setLocalFolderName] = React.useState("");
-  const [localFiles, setLocalFiles] = React.useState<Array<{ name: string; path: string; size: number; updatedAt: number }>>([]);
-  const [localFolderHandle, setLocalFolderHandle] = React.useState<any>(null);
-  const [localPermission, setLocalPermission] = React.useState<"unknown" | "granted" | "prompt" | "denied">("unknown");
+  const [localPermission, setLocalPermission] = React.useState<"unknown" | "granted" | "prompt" | "denied" | "unsupported">("unknown");
 
   const selectedProject = projects.find((project: any) => project.id === selectedProjectId) || projects[0];
   const visibleProjects = React.useMemo(() => {
@@ -38,11 +34,11 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     });
   }, [projects, stageFilter, lifecycleStates, projectSearch]);
   const currentStageInfo = selectedProject ? getProjectCurrentStageInfo(selectedProject.id, lifecycleStates) : null;
-  const availableStages = currentStageInfo ? STAGES.slice(0, currentStageInfo.index + 1) : STAGES.slice(0, 1);
-  const archivedStages = availableStages.map((stage) => ({
+  const availableStages = currentStageInfo ? getCurrentAndNextStages(STAGES, currentStageInfo.index) : STAGES.slice(0, 2);
+  const archivedStages = STAGES.map((stage) => ({
     stage,
     folder: (projectFiles?.stages || []).find((item: any) => item.stageId === stage.id || item.stageName === stage.name),
-  })).filter(({ folder }) => (folder?.files || []).length > 0);
+  })).filter(({ stage, folder }) => availableStages.some((item) => item.id === stage.id) || (folder?.files || []).length > 0);
   const totalFiles = React.useMemo(() => {
     return (projectFiles?.stages || []).reduce((sum: number, stage: any) => sum + (stage.files || []).length, 0);
   }, [projectFiles]);
@@ -56,111 +52,130 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     if (!selectedProject) return;
     setIsLoading(true);
     setBackendError("");
+    const stagesById = new Map(STAGES.map((stage) => [stage.id, { stageId: stage.id, stageName: stage.name, files: [] as any[] }]));
     try {
-      const settings = await apiClient.getFileSettings();
-      setFileRoot(settings.rootPath);
-      setDefaultFileRoot(settings.defaultRootPath);
-      const result = await apiClient.listProjectFiles(selectedProject.id, { project: selectedProject, stages: STAGES });
-      setProjectFiles(result);
-    } catch {
-      setProjectFiles(null);
-      setBackendError("本地后端未连接，无法读取项目资料目录");
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      setLocalPermission(availability?.permission || "unsupported");
+      setLocalFolderName(availability?.rootName || "");
+      setFileRoot(availability?.rootName || "未授权本机文件夹");
+      if (provider && availability?.available) {
+        const localFiles = await provider.listFiles({ project: selectedProject, stages: STAGES, projectFolder: archiveFolderStates[selectedProject.id]?.projectFolder });
+        for (const file of localFiles) {
+          const folder = stagesById.get(file.stageId);
+          folder?.files.push({
+            name: file.storedName,
+            storedName: file.storedName,
+            bucket: file.bucket,
+            size: file.size,
+            updatedAt: file.createdAt,
+            storageProvider: file.storageProvider,
+            storageKey: file.storageKey,
+          });
+        }
+      }
+
+      for (const stage of STAGES) {
+        const indexedFiles = lifecycleStates[selectedProject.id]?.[stage.id]?.files || [];
+        const folder = stagesById.get(stage.id);
+        for (const file of indexedFiles) {
+          if (file.storageProvider !== "local-folder" || !file.storageKey) continue;
+          if (folder?.files.some((existing: any) => existing.storageKey === file.storageKey)) continue;
+          folder?.files.push({
+            ...file,
+            name: file.storedName || file.name,
+            bucket: "已归档",
+            updatedAt: file.createdAt || file.uploadTime,
+            localUnavailable: !availability?.available,
+          });
+        }
+      }
+
+      try {
+        const legacy = await apiClient.listProjectFiles(selectedProject.id, { project: selectedProject, stages: STAGES });
+        for (const stage of legacy.stages || []) {
+          const folder = stagesById.get(stage.stageId);
+          for (const file of stage.files || []) folder?.files.push({ ...file, storageProvider: "legacy-server", storageKey: file.relativePath });
+        }
+      } catch {
+        setBackendError("服务器历史归档暂不可读取；本机资料仍可正常使用");
+      }
+      setProjectFiles({ stages: Array.from(stagesById.values()) });
+    } catch (error: any) {
+      setProjectFiles({ stages: Array.from(stagesById.values()) });
+      setBackendError(error?.message === "archive_permission_required" ? "本机归档文件夹需要重新授权" : "读取本机项目资料失败");
     } finally {
       setIsLoading(false);
     }
-  }, [selectedProject]);
+  }, [selectedProject, archiveFolderStates, lifecycleStates]);
 
-  const openLocationPanel = async () => {
-    try {
-      const settings = await apiClient.getFileSettings();
-      setFileRootInput(settings.rootPath);
-      setDefaultFileRoot(settings.defaultRootPath);
-    } catch {
-      setFileRootInput(fileRoot);
-    }
-    setIsLocationPanelOpen(true);
-  };
-
-  const saveLocation = async () => {
-    const rootPath = fileRootInput.trim();
-    if (!rootPath) {
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "请填写本机资料归档文件夹路径" }));
-      return;
-    }
-    setIsSavingLocation(true);
-    try {
-      const saved = await apiClient.updateFileSettings({ rootPath });
-      setFileRoot(saved.rootPath);
-      setFileRootInput(saved.rootPath);
-      setIsLocationPanelOpen(false);
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目资料归档位置已保存" }));
-    } catch {
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "保存失败，请确认本地服务已启动且目录可写" }));
-    } finally {
-      setIsSavingLocation(false);
-    }
-  };
+  const openLocationPanel = async () => setIsLocationPanelOpen(true);
 
   React.useEffect(() => {
     loadFiles();
   }, [loadFiles]);
 
-  React.useEffect(() => {
-    void offlineDb.getAppData<any>("projectFilesDirectoryHandle").then(async (handle) => {
-      if (!handle) return;
-      setLocalFolderHandle(handle);
-      const permission = await handle.queryPermission?.({ mode: "readwrite" });
-      setLocalPermission(permission || "prompt");
-      if (permission === "granted") setLocalFolderName(handle.name || "已授权文件夹");
-    }).catch(() => undefined);
-  }, []);
-
   const initFolders = async () => {
     if (!selectedProject) return;
     setIsLoading(true);
     try {
-      await apiClient.initProjectFolders(selectedProject.id, { project: selectedProject, stages: availableStages });
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前阶段资料夹已生成" }));
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) throw new Error("archive_permission_required");
+      const result = await provider.ensureProjectStructure(selectedProject, availableStages, archiveFolderStates[selectedProject.id]?.projectFolder);
+      await setArchiveFolderStates((current) => ({
+        ...current,
+        [selectedProject.id]: {
+          status: "ready",
+          storageProvider: "local-folder",
+          projectFolder: result.projectFolder,
+          generatedThroughStageId: result.generatedThroughStageId,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前及下一阶段资料夹已生成" }));
       await loadFiles();
-    } catch {
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "生成失败，请检查本地后端和文件保存位置" }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message === "archive_permission_required" ? "请先授权本机归档文件夹" : "生成失败，请检查本机文件夹权限" }));
     } finally {
       setIsLoading(false);
     }
   };
 
   const chooseLocalFolder = async () => {
-    const picker = (window as any).showDirectoryPicker;
-    if (!picker) {
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前浏览器不支持文件夹授权，请使用最新版 Chrome/Edge，或在桌面端启动本地服务" }));
-      return;
-    }
     try {
-      const handle = await picker({ mode: "readwrite" });
-      await offlineDb.putAppData("projectFilesDirectoryHandle", handle);
-      setLocalFolderHandle(handle);
-      setLocalPermission("granted");
-      const files: Array<{ name: string; path: string; size: number; updatedAt: number }> = [];
-      const walk = async (directory: any, prefix = "") => {
-        for await (const entry of directory.values()) {
-          const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-          if (entry.kind === "file") {
-            const file = await entry.getFile();
-            files.push({ name: file.name, path, size: file.size, updatedAt: file.lastModified });
-          } else if (files.length < 500) {
-            await walk(entry, path);
-          }
-          if (files.length >= 500) break;
-        }
-      };
-      await walk(handle);
-      setLocalFolderName(handle.name || "已授权文件夹");
-      setLocalFiles(files.sort((a, b) => b.updatedAt - a.updatedAt));
-      setFileRoot(handle.name || "已授权本地文件夹");
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已授权访问“${handle.name}”，读取 ${files.length} 个文件` }));
+      const provider = await chooseLocalArchiveProvider();
+      const availability = await provider.checkAvailability();
+      setLocalPermission(availability.permission);
+      setLocalFolderName(availability.rootName || "已授权文件夹");
+      setFileRoot(availability.rootName || "已授权本地文件夹");
+      setIsLocationPanelOpen(false);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已授权访问“${availability.rootName}”，正在补建项目目录` }));
+      await loadFiles();
     } catch (error: any) {
       if (error?.name !== "AbortError") window.dispatchEvent(new CustomEvent("show-toast", { detail: "文件夹授权失败，请重新选择并允许浏览器访问" }));
     }
+  };
+
+  const restoreLocalPermission = async () => {
+    const granted = await requestLocalArchivePermission().catch(() => false);
+    setLocalPermission(granted ? "granted" : "denied");
+    if (granted) {
+      window.dispatchEvent(new CustomEvent("archive-root-changed"));
+      await loadFiles();
+    }
+  };
+
+  const downloadFile = async (file: any) => {
+    if (file.storageProvider === "local-folder" && file.storageKey) {
+      try {
+        await downloadLocalArchiveFile(file.storageKey, file.storedName || file.name);
+      } catch {
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "原文件仅能在已授权的归档电脑下载" }));
+      }
+      return;
+    }
+    if (file.relativePath || file.storageKey) window.open(getProjectFileDownloadUrl(file.relativePath || file.storageKey), "_blank");
   };
 
   return (
@@ -177,7 +192,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
           </button>
           <button onClick={initFolders} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm flex items-center">
             <FolderOpen className="w-4 h-4 mr-2" />
-            生成当前阶段资料夹
+            生成当前及下一阶段
           </button>
           <button onClick={() => void openLocationPanel()} className="px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors shadow-sm flex items-center">
             <FolderSearch className="w-4 h-4 mr-2" />
@@ -211,19 +226,18 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
 
       {backendError && (
         <div className="rounded-2xl border border-amber-100 bg-amber-50 p-5 text-sm text-amber-700">
-          {backendError}。如果你是在公网使用，请点击“选择本地文件夹”授予浏览器访问权限；桌面端也可以用本地服务读取完整目录。
+          {backendError}。新资料仅保存在本机授权目录，服务器历史资料仍会在服务恢复后显示。
         </div>
       )}
 
-      {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">云端归档位置与本机已授权文件夹分开管理，浏览器授权可在当前设备持久保存。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><input value={fileRootInput} onChange={(event) => setFileRootInput(event.target.value)} placeholder={defaultFileRoot || "/Users/你的用户名/Documents/项目资料"} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" /><button onClick={() => void saveLocation()} disabled={isSavingLocation} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">{isSavingLocation ? "保存中…" : "保存云端归档位置"}</button><button onClick={() => void chooseLocalFolder()} className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100">{localFolderHandle ? "重新授权本地文件夹" : "选择本地文件夹"}</button><button onClick={() => void apiClient.openFileRoot().catch(() => window.dispatchEvent(new CustomEvent("show-toast", { detail: "无法打开云端目录，请确认本地服务已启动" })))} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">打开云端目录</button></div>{defaultFileRoot && <p className="mt-2 text-xs text-slate-400">云端默认位置：{defaultFileRoot}</p>}{localFolderName && <p className="mt-2 text-xs text-emerald-600">本机已授权文件夹：{localFolderName} · 权限 {localPermission === "granted" ? "可读写" : "需重新授权"}</p>}</div>}
-
-      {localFiles.length > 0 && <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">本地文件夹浏览</h3><p className="mt-1 text-xs text-slate-500">{localFolderName} · 已读取 {localFiles.length} 个文件</p></div><button onClick={() => void chooseLocalFolder()} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">重新授权</button></div><div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-2">{localFiles.map((file) => <div key={file.path} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2.5"><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-800" title={file.path}>{file.name}</p><p className="truncate text-xs text-slate-400">{file.path} · {formatSize(file.size)}</p></div><FileText className="h-4 w-4 shrink-0 text-emerald-600" /></div>)}</div></div>}
+      {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">本机项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">文件内容只写入当前电脑；项目和文件索引可同步到其他设备。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{localFolderName || "尚未选择本机文件夹"}{localFolderName && <span className={cn("ml-2 text-xs", localPermission === "granted" ? "text-emerald-600" : "text-amber-600")}>{localPermission === "granted" ? "可读写" : "需要恢复权限"}</span>}</div><button onClick={() => void chooseLocalFolder()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white">{localFolderName ? "重新选择" : "选择本机文件夹"}</button>{localFolderName && localPermission !== "granted" && <button onClick={() => void restoreLocalPermission()} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700">恢复授权</button>}</div></div>}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div>
             <h3 className="font-bold text-slate-900">{selectedProject ? `${getProjectNumber(selectedProject)} · ${selectedProject.name}` : "暂无项目"}</h3>
-          <p className="text-xs text-slate-500 mt-1">当前阶段：{currentStageInfo?.stage.name || "项目立项"}。只显示当前阶段及以前阶段。</p>
+          <p className="text-xs text-slate-500 mt-1">当前阶段：{currentStageInfo?.stage.name || "项目立项"}。显示已有资料以及当前、下一阶段目录。</p>
+          {selectedProject && <p className={cn("mt-1 text-xs", archiveFolderStates[selectedProject.id]?.status === "ready" ? "text-emerald-600" : archiveFolderStates[selectedProject.id]?.status === "error" ? "text-rose-600" : "text-amber-600")}>目录状态：{archiveFolderStates[selectedProject.id]?.status === "ready" ? "已生成" : archiveFolderStates[selectedProject.id]?.status === "error" ? "生成失败，可点击上方按钮重试" : "待归档电脑生成"}</p>}
           </div>
         </div>
 
@@ -244,13 +258,13 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
 
                 <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
                     {files.map((file: any) => (
-                      <div key={file.relativePath} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
+                      <div key={file.storageKey || file.relativePath || file.name} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-sm font-medium text-slate-900 truncate" title={file.name}>{file.name}</div>
-                          <div className="text-xs text-slate-400 mt-1">{file.bucket} · {formatSize(file.size)} · {formatTime(file.updatedAt)}</div>
+                          <div className="text-xs text-slate-400 mt-1">{file.bucket} · {formatSize(file.size)} · {formatTime(file.updatedAt)} · {file.storageProvider === "local-folder" ? "本机" : "服务器历史"}</div>
                         </div>
                         <button
-                          onClick={() => window.open(getProjectFileDownloadUrl(file.relativePath), "_blank")}
+                          onClick={() => void downloadFile(file)}
                           className="shrink-0 p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"
                           title="下载"
                         >

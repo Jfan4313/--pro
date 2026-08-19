@@ -1,0 +1,132 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import {
+  getArchiveProjectFolder,
+  getArchiveStageFolder,
+  getCurrentAndNextStages,
+  LocalFolderStorageProvider,
+} from "../src/lib/archiveStorage";
+import { getProjectFolderName, listProjectFilesFromDisk } from "../server/domain/projectFiles.js";
+
+class MemoryFileHandle {
+  readonly kind = "file";
+  writes = 0;
+  file: File;
+
+  constructor(readonly name: string) {
+    this.file = new File([], name);
+  }
+
+  async getFile() {
+    return this.file;
+  }
+
+  async createWritable() {
+    let next: Blob = new Blob();
+    return {
+      write: async (value: Blob) => { next = value; },
+      close: async () => {
+        this.writes += 1;
+        this.file = new File([next], this.name, { type: next.type, lastModified: Date.now() });
+      },
+    };
+  }
+}
+
+class MemoryDirectoryHandle {
+  readonly kind = "directory";
+  readonly entries = new Map<string, MemoryDirectoryHandle | MemoryFileHandle>();
+
+  constructor(readonly name: string) {}
+
+  async queryPermission() {
+    return "granted";
+  }
+
+  async getDirectoryHandle(name: string, options: { create?: boolean } = {}) {
+    const existing = this.entries.get(name);
+    if (existing instanceof MemoryDirectoryHandle) return existing;
+    if (!options.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+    const directory = new MemoryDirectoryHandle(name);
+    this.entries.set(name, directory);
+    return directory;
+  }
+
+  async getFileHandle(name: string, options: { create?: boolean } = {}) {
+    const existing = this.entries.get(name);
+    if (existing instanceof MemoryFileHandle) return existing;
+    if (!options.create) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+    const file = new MemoryFileHandle(name);
+    this.entries.set(name, file);
+    return file;
+  }
+
+  async *values() {
+    yield* this.entries.values();
+  }
+}
+
+const stages = [
+  { id: "1_initiation", name: "① 项目立项", files: ["项目概况表.pdf"] },
+  { id: "2_preliminary", name: "② 初步设计", files: ["初步设计方案.pdf"] },
+  { id: "3_business", name: "③ 商务沟通", files: [] },
+];
+const project = { id: "p-1", projectNumber: "PRJ-0001", name: "测试 / 项目" };
+
+test("uses the stable project number and current-plus-next stage window", () => {
+  assert.equal(getArchiveProjectFolder(project), "PRJ-0001_测试_项目");
+  assert.equal(getArchiveStageFolder(stages[0]), "01_项目立项");
+  assert.deepEqual(getCurrentAndNextStages(stages, 1).map((stage) => stage.id), ["2_preliminary", "3_business"]);
+  assert.deepEqual(getCurrentAndNextStages(stages, 2).map((stage) => stage.id), ["3_business"]);
+});
+
+test("local provider creates an idempotent structure and never overwrites its checklist", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const first = await provider.ensureProjectStructure(project, stages.slice(0, 2));
+  const projectDirectory = root.entries.get(first.projectFolder) as MemoryDirectoryHandle;
+  const stageDirectory = projectDirectory.entries.get("01_项目立项") as MemoryDirectoryHandle;
+  const checklist = stageDirectory.entries.get("文件清单.json") as MemoryFileHandle;
+  assert.ok(stageDirectory.entries.has("待提交"));
+  assert.ok(stageDirectory.entries.has("已归档"));
+  assert.equal(checklist.writes, 1);
+
+  await provider.ensureProjectStructure(project, stages.slice(0, 2), first.projectFolder);
+  assert.equal(checklist.writes, 1);
+});
+
+test("local provider versions files and exposes provider-neutral indexes", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const file = new File(["hello"], "方案.pdf", { type: "application/pdf" });
+  const first = await provider.writeFile({ project, stage: stages[0], file, fileType: "方案" });
+  const second = await provider.writeFile({ project, stage: stages[0], file, fileType: "方案", projectFolder: first.storageKey.split("/")[0] });
+
+  assert.equal(first.version, "V1");
+  assert.equal(second.version, "V2");
+  assert.equal(first.storageProvider, "local-folder");
+  assert.match(first.checksum, /^[a-f0-9]{64}$/);
+  assert.notEqual(first.storageKey, second.storageKey);
+
+  const listed = await provider.listFiles({ project, stages: [stages[0]], projectFolder: first.storageKey.split("/")[0] });
+  assert.equal(listed.length, 2);
+  assert.deepEqual(listed.map((item) => item.version), ["V1", "V2"]);
+  assert.equal((await provider.readFile(first.storageKey)).size, 5);
+});
+
+test("legacy server folders remain readable after project-number naming is enabled", (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "archive-legacy-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const legacyProject = { id: "p-legacy", projectNumber: "PRJ-0099", name: "历史项目" };
+  assert.equal(getProjectFolderName(legacyProject), "PRJ-0099_历史项目");
+  const archived = path.join(root, "p-legacy_历史项目", "01_项目立项", "已归档");
+  fs.mkdirSync(archived, { recursive: true });
+  fs.writeFileSync(path.join(archived, "历史资料.pdf"), "legacy");
+
+  const listed = listProjectFilesFromDisk({ rootPath: root, project: legacyProject, stages: [{ id: "1_initiation", name: "① 项目立项" }] });
+  assert.equal(listed.projectFolder, "p-legacy_历史项目");
+  assert.equal(listed.stages[0].files[0].name, "历史资料.pdf");
+});

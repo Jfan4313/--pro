@@ -4,10 +4,10 @@ import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
-import { apiClient } from "@/src/lib/apiClient";
 import { getProjectNumber } from "@/src/lib/management";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
 import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
+import { ArchiveFolderState, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
 
 const statusConfig = {
   normal: { icon: Clock, color: "text-slate-400", tooltip: "进度正常" },
@@ -39,7 +39,9 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [scheduleData] = useSyncedAppData("scheduleData", []);
   const [lifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
+  const [appSettings] = useSyncedAppData<any>("appSettings", {});
   const [archivedProjects, setArchivedProjects] = useSyncedAppData<any[]>("projectArchive", []);
+  const [, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const { conflicts: projectNumberConflicts, reserveProjectNumber } = useProjectNumbering();
 
   const getConstructProgress = (project: any) => {
@@ -207,10 +209,41 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
       return newData;
     });
 
-    apiClient.initProjectFolders(newProject.id, { project: newProject, stages: [STAGES[0]] })
-      .catch(() => {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目已创建，资料夹稍后可在生命周期上传时自动生成' }));
-      });
+    const pendingState: ArchiveFolderState = {
+      status: "pending",
+      storageProvider: "local-folder",
+      updatedAt: new Date().toISOString(),
+    };
+    await setArchiveFolderStates((current) => ({ ...current, [newProject.id]: pendingState }));
+
+    if (appSettings?.fileManagement?.autoCreateFolders === false) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目已创建；自动生成资料夹当前已关闭' }));
+    } else void getLocalArchiveProvider().then(async (provider) => {
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目已创建；本机归档目录未授权，已记录为待生成' }));
+        return;
+      }
+      try {
+        const result = await provider.ensureProjectStructure(newProject, getCurrentAndNextStages(STAGES, 0));
+        await setArchiveFolderStates((current) => ({
+          ...current,
+          [newProject.id]: {
+            status: "ready",
+            storageProvider: "local-folder",
+            projectFolder: result.projectFolder,
+            generatedThroughStageId: result.generatedThroughStageId,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+      } catch (error: any) {
+        await setArchiveFolderStates((current) => ({
+          ...current,
+          [newProject.id]: { ...pendingState, status: "error", error: error?.message || "archive_structure_failed", updatedAt: new Date().toISOString() },
+        }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目已创建，但本机资料夹生成失败，可在项目资料中重试' }));
+      }
+    });
 
     setIsModalOpen(false);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '新建项目成功' }));

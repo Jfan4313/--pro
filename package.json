@@ -10,6 +10,7 @@
     "dev:local": "node server/index.js & vite --port=3000 --host=0.0.0.0",
     "desktop": "node scripts/desktop-launcher.mjs",
     "build": "vite build",
+    "test": "tsx --test tests/*.test.ts",
     "start": "node server/index.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
