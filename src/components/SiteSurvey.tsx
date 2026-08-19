@@ -1063,15 +1063,15 @@ function naturalReportCompare(left: unknown, right: unknown) {
 }
 
 function lifecycleChecklistHtml(projectId: string, records: SurveyRecord[], lifecycleState: any = {}) {
+  const stage = STAGES[0];
+  const stageState = lifecycleState?.[stage.id] || {};
   const hasSurveyArchive = records.some((record) => record.projectId === projectId && record.archiveType !== "project");
-  return STAGES.map((stage) => {
-    const stageState = lifecycleState?.[stage.id] || {};
-    const items = getLifecycleChecklist(stage, stageState).map((item: any) => {
-      const completed = item.id === "site-survey" ? hasSurveyArchive : stageState.checklist?.[item.id] === true;
-      return `<div class="lifecycle-item ${completed ? "done" : "pending"}"><span class="lifecycle-mark">${completed ? "✓" : "○"}</span><span>${escapeReportHtml(item.label)}</span><strong>${completed ? "已完成" : "待跟进"}</strong></div>`;
-    }).join("");
-    return `<div class="lifecycle-stage"><h3>${escapeReportHtml(stage.name)}</h3>${items || '<div class="empty">本阶段暂无清单</div>'}</div>`;
+  const items = getLifecycleChecklist(stage, stageState).map((item: any) => {
+    const completed = item.id === "site-survey" ? hasSurveyArchive : stageState.checklist?.[item.id] === true;
+    return `<div class="lifecycle-item ${completed ? "done" : "pending"}"><span class="lifecycle-mark">${completed ? "✓" : "○"}</span><span>${escapeReportHtml(item.label)}</span><strong>${completed ? "已完成" : "待跟进"}</strong></div>`;
   }).join("");
+  const ownerNeeds = String(stageState.fields?.f5 || "").trim();
+  return `<div class="lifecycle-stage"><h3>${escapeReportHtml(stage.name)}</h3>${items || '<div class="empty">本阶段暂无清单</div>'}<div class="owner-needs"><strong>业主需求</strong><div>${escapeReportHtml(ownerNeeds || "暂无业主需求记录")}</div></div></div>`;
 }
 
 function openSurveyPdfReport(record: SurveyRecord, lifecycleState: any = {}) {
@@ -1134,6 +1134,8 @@ function openSurveyPdfReport(record: SurveyRecord, lifecycleState: any = {}) {
     .lifecycle-item.pending { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
     .lifecycle-mark { font-weight: 800; }
     .lifecycle-item strong { white-space: nowrap; font-size: 9px; }
+    .owner-needs { margin-top: 10px; border: 1px solid #c7d2fe; border-radius: 8px; padding: 8px; background: #eef2ff; color: #3730a3; white-space: pre-wrap; }
+    .owner-needs div { margin-top: 3px; color: #475569; }
     .photo-summary { display: flex; gap: 10px; margin: 8px 0 12px; }
     .badge { border-radius: 999px; background: #eef2ff; color: #4338ca; padding: 5px 10px; font-weight: 700; }
     .photo-section { margin-top: 15px; break-inside: avoid; }
@@ -1319,6 +1321,8 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     .lifecycle-item.pending { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
     .lifecycle-mark { font-weight: 800; }
     .lifecycle-item strong { white-space: nowrap; font-size: 9px; }
+    .owner-needs { margin-top: 10px; border: 1px solid #c7d2fe; border-radius: 8px; padding: 8px; background: #eef2ff; color: #3730a3; white-space: pre-wrap; }
+    .owner-needs div { margin-top: 3px; color: #475569; }
     .representative-heading { display: flex; justify-content: space-between; gap: 10px; margin: 11px 0 7px; }
     .representative-heading span { color: #64748b; font-size: 9px; }
     .photo-category { margin-top: 10px; }

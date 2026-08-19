@@ -29,7 +29,8 @@ export const STAGES = [
       { id: "f1", label: "建筑屋顶可利用面积估算(㎡)", type: "text", placeholder: "㎡" },
       { id: "f2", label: "电价水平及用电性质", type: "text", placeholder: "例如: 大工业/一般工商业" },
       { id: "f3", label: "项目概况分析", type: "textarea", placeholder: "填写初步收集的项目概况..." },
-      { id: "f4", label: "物业类型", type: "select", options: ["自主物业", "村物业", "租赁"], placeholder: "请选择物业类型" }
+      { id: "f4", label: "物业类型", type: "select", options: ["自主物业", "村物业", "租赁"], placeholder: "请选择物业类型" },
+      { id: "f5", label: "业主需求", type: "textarea", placeholder: "填写业主对屋面建设、用电、收益或合作方式等需求..." }
     ],
     files: ["无人机航拍.mp4", "项目概况表.pdf"] 
   },
