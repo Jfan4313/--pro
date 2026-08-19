@@ -31,6 +31,7 @@ import type { DraftPhoto, PendingSurvey, SurveyForm, SurveyPhoto, SurveyRecord, 
 
 export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => void; initialProjectId?: string | null }) {
   const [boardData, setBoardData, , boardSeed] = useProjectBoardData();
+  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const projects = useMemo(() => sortProjectsNaturally(flattenProjects(boardData)), [boardData]);
   const { reserveProjectNumber } = useProjectNumbering();
   const { data: records, deleteDocument } = useEntityList<SurveyRecord>("site-surveys", []);
@@ -931,11 +932,6 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
               </div>}
               {form.surveyScope === "building" && <Field label="建筑结构补充说明"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="记录建筑结构本身的补充信息" className="survey-input min-h-28 resize-none" /></Field>}
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field label="收资内容"><textarea value={form.materialsToCollect} onChange={(event) => setForm({ ...form, materialsToCollect: event.target.value })} placeholder="填写后续需要收集的资料，每行一项" className="survey-input min-h-32 resize-none" /></Field>
-                <Field label="下一步工作安排"><textarea value={form.nextSteps} onChange={(event) => setForm({ ...form, nextSteps: event.target.value })} placeholder="填写后续工作安排，每行一项" className="survey-input min-h-32 resize-none" /></Field>
-              </div>
-
               <div>
                 <div className="mb-3 flex items-center justify-between"><div><label className="text-sm font-semibold text-slate-700">分类拍摄 <span className="text-rose-500">*</span></label><p className="mt-0.5 text-[11px] font-medium text-indigo-600">{form.surveyScope === "building" ? `建筑结构 · ${form.roomName.trim() || "请填写区域"}` : `${getRoomTypeLabel(form.roomType)} · ${form.roomName.trim() || "请选择电房"}`}</p></div><span className="text-xs text-slate-400">{draftPhotos.length + retainedPhotos.length}/{MAX_SURVEY_PHOTOS}</span></div>
                 <div className="mb-4 space-y-3 rounded-2xl border border-slate-100 bg-slate-50 p-3">
@@ -989,7 +985,7 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
         </div>
       </div>
 
-      {selectedRecord && <SurveyDetail record={selectedRecord} onEdit={() => editSurveyRecord(selectedRecord)} onEditChild={(child) => editSurveyRecord(child)} onOpenProjectReport={() => { const projectRecords = allRecords.filter((record) => record.projectId === selectedRecord.projectId); const project = projects.find((item: any) => item.id === selectedRecord.projectId) as any; openSurveySummaryPdfReport(projectRecords, selectedRecord.projectName, project?.surveyNotes || "", project?.surveyTransformerCapacity || ""); }} onClose={() => setSelectedRecord(null)} />}
+      {selectedRecord && <SurveyDetail record={selectedRecord} onEdit={() => editSurveyRecord(selectedRecord)} onEditChild={(child) => editSurveyRecord(child)} onOpenProjectReport={() => { const projectRecords = allRecords.filter((record) => record.projectId === selectedRecord.projectId); const project = projects.find((item: any) => item.id === selectedRecord.projectId) as any; openSurveySummaryPdfReport(projectRecords, selectedRecord.projectName, project?.surveyNotes || "", project?.surveyTransformerCapacity || "", lifecycleStates[selectedRecord.projectId] || {}); }} onClose={() => setSelectedRecord(null)} />}
       {isProjectModalOpen && <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="survey-new-project-title">
         <div className="w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
           <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
@@ -1066,11 +1062,19 @@ function naturalReportCompare(left: unknown, right: unknown) {
   });
 }
 
-function joinReportItems(records: SurveyRecord[], field: "materialsToCollect" | "nextSteps") {
-  return [...new Set(records.flatMap((record) => String(record[field] || "").split("\n").map((item) => item.trim()).filter(Boolean)))].join("\n");
+function lifecycleChecklistHtml(projectId: string, records: SurveyRecord[], lifecycleState: any = {}) {
+  const hasSurveyArchive = records.some((record) => record.projectId === projectId && record.archiveType !== "project");
+  return STAGES.map((stage) => {
+    const stageState = lifecycleState?.[stage.id] || {};
+    const items = (stage.checklist || []).map((item: any) => {
+      const completed = item.id === "site-survey" ? hasSurveyArchive : stageState.checklist?.[item.id] === true;
+      return `<div class="lifecycle-item ${completed ? "done" : "pending"}"><span class="lifecycle-mark">${completed ? "✓" : "○"}</span><span>${escapeReportHtml(item.label)}</span><strong>${completed ? "已完成" : "待跟进"}</strong></div>`;
+    }).join("");
+    return `<div class="lifecycle-stage"><h3>${escapeReportHtml(stage.name)}</h3>${items || '<div class="empty">本阶段暂无清单</div>'}</div>`;
+  }).join("");
 }
 
-function openSurveyPdfReport(record: SurveyRecord) {
+function openSurveyPdfReport(record: SurveyRecord, lifecycleState: any = {}) {
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "浏览器阻止了报告窗口，请允许弹出窗口后重试" }));
@@ -1123,6 +1127,13 @@ function openSurveyPdfReport(record: SurveyRecord) {
     th { width: 14%; color: #64748b; background: #f8fafc; text-align: left; font-weight: 600; }
     td { width: 36%; font-weight: 600; }
     .notes { min-height: 64px; white-space: pre-wrap; border: 1px solid #e2e8f0; border-radius: 10px; padding: 11px; background: #f8fafc; color: #475569; }
+    .lifecycle-stage { margin-top: 10px; break-inside: avoid; }
+    .lifecycle-stage h3 { margin: 0 0 6px; color: #475569; font-size: 11px; }
+    .lifecycle-item { display: grid; grid-template-columns: 15px minmax(0,1fr) auto; gap: 6px; align-items: center; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 5px; padding: 6px 8px; background: #f8fafc; color: #475569; }
+    .lifecycle-item.done { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+    .lifecycle-item.pending { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
+    .lifecycle-mark { font-weight: 800; }
+    .lifecycle-item strong { white-space: nowrap; font-size: 9px; }
     .photo-summary { display: flex; gap: 10px; margin: 8px 0 12px; }
     .badge { border-radius: 999px; background: #eef2ff; color: #4338ca; padding: 5px 10px; font-weight: 700; }
     .photo-section { margin-top: 15px; break-inside: avoid; }
@@ -1148,7 +1159,7 @@ function openSurveyPdfReport(record: SurveyRecord) {
     <section class="section"><div class="title">现场基本信息</div><table>${infoRows.map((row) => `<tr>${row.map((cell, index) => index % 2 === 0 ? `<th>${escapeReportHtml(cell)}</th>` : `<td>${escapeReportHtml(cell)}</td>`).join("")}</tr>`).join("")}</table></section>
     <section class="section"><div class="title">现场情况与勘察结论</div><div class="notes">${escapeReportHtml(record.notes || "暂无补充说明。")}</div></section>
     <section class="section"><div class="title">分类影像记录</div><div class="photo-summary"><span class="badge">${getPhotoCategoryCount(record.photos || [])} 个类目</span><span class="badge">${record.photos?.length || 0} 张照片</span></div>${photoSections || '<div class="notes">暂无现场照片。</div>'}</section>
-    <section class="section"><div class="title">后续跟进工作需要</div><div class="notes"><strong>收资内容</strong>\n${escapeReportHtml(record.materialsToCollect || "暂无收资内容。")}\n\n<strong>下一步工作安排</strong>\n${escapeReportHtml(record.nextSteps || "暂无下一步工作安排。")}</div></section>
+    <section class="section"><div class="title">后续跟进工作需要</div><div class="lifecycle-list">${lifecycleChecklistHtml(record.projectId, [record], lifecycleState)}</div></section>
     <section class="signatures"><div class="signature">勘察人员签字：</div><div class="signature">项目负责人确认：</div><div class="signature">确认日期：</div></section>
     <footer>本报告由智建协同 Pro 根据现场勘察记录自动整理 · PDF 仅在当前设备生成，不占用云端存储</footer>
   </main>
@@ -1166,7 +1177,7 @@ function openSurveyPdfReport(record: SurveyRecord) {
   reportWindow.document.close();
 }
 
-function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string, projectNotes = "", projectTransformerCapacity = "") {
+function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string, projectNotes = "", projectTransformerCapacity = "", lifecycleState: any = {}) {
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) {
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "浏览器阻止了报告窗口，请允许弹出窗口后重试" }));
@@ -1190,8 +1201,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
   const completedRecords = sortedRecords.filter((record) => record.status === "completed").length;
   const allPhotos = sortedRecords.flatMap((record) => record.photos || []);
   const projectSituation = projectNotes.trim() || [...new Set(sortedRecords.map((record) => record.notes?.trim()).filter(Boolean))].join("\n\n") || "暂无现场情况说明。";
-  const materialsToCollect = joinReportItems(sortedRecords, "materialsToCollect") || "暂无收资内容。";
-  const nextSteps = joinReportItems(sortedRecords, "nextSteps") || "暂无下一步工作安排。";
+  const projectId = String(sortedRecords[0]?.projectId || "");
   const reportNumber = `HZ-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(sortedRecords[0]?.projectId || "LOCAL").slice(0, 6).toUpperCase()}`;
 
   const categoryRows = photoCategoryGroups.map((group) => {
@@ -1302,6 +1312,13 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     label { display: block; color: #64748b; font-size: 8px; }
     .record-info p,.record-notes p { margin: 2px 0 0; font-weight: 600; }
     .record-notes { margin-top: 8px; border-radius: 9px; padding: 8px 9px; background: #f8fafc; white-space: pre-wrap; }
+    .lifecycle-stage { margin-top: 10px; break-inside: avoid; }
+    .lifecycle-stage h3 { margin: 0 0 6px; color: #475569; font-size: 11px; }
+    .lifecycle-item { display: grid; grid-template-columns: 15px minmax(0,1fr) auto; gap: 6px; align-items: center; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 5px; padding: 6px 8px; background: #f8fafc; color: #475569; }
+    .lifecycle-item.done { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+    .lifecycle-item.pending { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
+    .lifecycle-mark { font-weight: 800; }
+    .lifecycle-item strong { white-space: nowrap; font-size: 9px; }
     .representative-heading { display: flex; justify-content: space-between; gap: 10px; margin: 11px 0 7px; }
     .representative-heading span { color: #64748b; font-size: 9px; }
     .photo-category { margin-top: 10px; }
@@ -1340,7 +1357,7 @@ function openSurveySummaryPdfReport(records: SurveyRecord[], projectName: string
     ${buildingRecordSections || '<div class="empty">暂无天面或建筑结构详细信息</div>'}
     <section class="section"><div class="title">各电房详细信息</div></section>
     ${electricalRecordSections || '<div class="empty">暂无电房详细信息</div>'}
-    <section class="section"><div class="title">后续跟进工作需要</div><div class="record-notes"><p><strong>收资内容</strong></p><p>${escapeReportHtml(materialsToCollect)}</p><p><strong>下一步工作安排</strong></p><p>${escapeReportHtml(nextSteps)}</p></div></section>
+    <section class="section"><div class="title">后续跟进工作需要</div><div class="lifecycle-list">${lifecycleChecklistHtml(projectId, sortedRecords, lifecycleState)}</div></section>
     <section class="signatures"><div class="signature">汇总人员签字：</div><div class="signature">项目负责人确认：</div><div class="signature">确认日期：</div></section>
     <footer>本报告由智建协同 Pro 根据当前项目的现场勘察记录自动整理 · PDF 仅在当前设备生成，不占用云端存储</footer>
   </main>
