@@ -51,7 +51,8 @@ done
   if [[ ! -d node_modules ]]; then
     runuser -u www-data -- env HOME="$stage_dir/npm-home" npm install --omit=dev --no-package-lock --no-audit --no-fund
   fi
-  runuser -u www-data -- env HOME="$stage_dir/npm-home" npm rebuild better-sqlite3 --build-from-source --no-audit --no-fund
+  # npm install selects the native better-sqlite3 build for the server's Node
+  # version; do not rebuild a CI-host binary from the release archive.
 chown -R root:root "$release_dir"
 
 if [[ -e "$backup_dir" || -e "$failed_dir" ]]; then
