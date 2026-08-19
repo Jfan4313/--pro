@@ -50,9 +50,6 @@ export const apiClient = {
   loginWithOtp(phone: string, code: string) {
     return request<{ token: string; expiresAt: string; user: any }>("/api/auth/login-otp", { method: "POST", body: { phone, code } });
   },
-  register(payload: { username: string; password: string; name: string; email?: string; phone?: string }) {
-    return request<{ token: string; expiresAt: string; user: any }>("/api/auth/register", { method: "POST", body: payload });
-  },
   getCurrentUser() {
     return request<{ user: any }>("/api/auth/me");
   },
@@ -64,6 +61,9 @@ export const apiClient = {
   },
   listAccounts() {
     return request<any[]>("/api/accounts");
+  },
+  listAccountDirectory() {
+    return request<Array<{ id: string; username: string; name: string; role: string; status: string; companyId: string }>>("/api/account-directory");
   },
   createAccount(payload: any) {
     return request<any>("/api/accounts", { method: "POST", body: payload });
@@ -209,10 +209,26 @@ export const apiClient = {
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
   getAIConfig() {
-    return request<{ endpoint: string; model: string; hasKey: boolean; timeoutMs: number }>("/api/ai-config");
+    return request<{ endpoint: string; model: string; hasKey: boolean; configured: boolean; timeoutMs: number; updatedAt?: string | null }>("/api/ai-config");
   },
-  updateAIConfig(payload: { endpoint: string; model: string; apiKey?: string; timeoutMs: number }) {
-    return request<{ endpoint: string; model: string; hasKey: boolean; timeoutMs: number }>("/api/ai-config", { method: "PUT", body: payload });
+  updateAIConfig(payload: { endpoint: string; model: string; apiKey?: string; clearApiKey?: boolean; timeoutMs: number }) {
+    return request<{ endpoint: string; model: string; hasKey: boolean; configured: boolean; timeoutMs: number; updatedAt?: string | null }>("/api/ai-config", { method: "PUT", body: payload });
+  },
+  getUserSettings<T>() {
+    return request<{ value: T; updatedAt: string }>("/api/user-settings");
+  },
+  updateUserSettings<T>(value: T) {
+    return request<{ value: T; updatedAt: string }>("/api/user-settings", { method: "PUT", body: { value } });
+  },
+  getAIUsage(params: { from?: string; to?: string; userId?: string; model?: string; status?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
+    return request<{
+      summary: { calls: number; successes: number; failures: number; inputTokens: number; outputTokens: number; totalTokens: number };
+      byUser: Array<{ userId: string; name: string; username: string; calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
+      records: Array<{ id: string; userId: string; userName: string; username: string; feature: string; model: string; inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; status: string; durationMs: number; createdAt: string }>;
+      pagination: { page: number; pageSize: number; total: number };
+    }>(`/api/ai-usage${query.size ? `?${query.toString()}` : ""}`);
   },
   exportBackup() {
     return request<{ ok: boolean; path: string }>("/api/backup/export", { method: "POST" });

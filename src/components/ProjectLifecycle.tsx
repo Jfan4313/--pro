@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
+import { useUserSettings } from "@/src/hooks/useUserSettings";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
@@ -267,7 +268,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   const [boardData] = useProjectBoardData();
   const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
-  const [appSettings] = useSyncedAppData<any>("appSettings", {});
+  const [appSettings] = useUserSettings<any>({});
   const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   
   const allProjects = useMemo(() => sortProjectsNaturally(Array.isArray(boardData)

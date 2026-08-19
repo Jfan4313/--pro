@@ -1,7 +1,8 @@
 import React from "react";
-import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus } from "lucide-react";
+import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus, BarChart3, RefreshCw, KeyRound } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
+import { useUserSettings } from "@/src/hooks/useUserSettings";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { apiClient } from "@/src/lib/apiClient";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
@@ -29,15 +30,20 @@ const defaultSettings = {
 
 export function Settings() {
   const { user } = useAuth();
-  const [settings, setSettings] = useSyncedAppData("appSettings", defaultSettings);
+  const [settings, setSettings] = useUserSettings(defaultSettings);
   const [boardData] = useProjectBoardData();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const [archiveRootName, setArchiveRootName] = React.useState("");
   const [archivePermission, setArchivePermission] = React.useState<"granted" | "prompt" | "denied" | "unsupported">("unsupported");
   const [isInitializingFolders, setIsInitializingFolders] = React.useState(false);
-  const [aiConfig, setAiConfig] = React.useState({ endpoint: "", model: "gpt-4o-mini", apiKey: "", timeoutMs: 30000, hasKey: false });
+  const [aiConfig, setAiConfig] = React.useState({ endpoint: "", model: "gpt-4o-mini", apiKey: "", timeoutMs: 30000, hasKey: false, configured: false, updatedAt: null as string | null });
   const [aiSaving, setAiSaving] = React.useState(false);
+  const [usage, setUsage] = React.useState<Awaited<ReturnType<typeof apiClient.getAIUsage>> | null>(null);
+  const [usageLoading, setUsageLoading] = React.useState(false);
+  const [usageFilters, setUsageFilters] = React.useState({ from: "", to: "", userId: "", model: "", status: "" });
+  const [companyAccounts, setCompanyAccounts] = React.useState<Array<{ id: string; name: string; username: string }>>([]);
+  const isAIManager = user?.role === "admin" || user?.role === "company_admin";
 
   const mergedSettings = {
     ...defaultSettings,
@@ -64,11 +70,36 @@ export function Settings() {
     };
   }, []);
 
-  React.useEffect(() => { if (user) void apiClient.getAIConfig().then((config) => setAiConfig((current) => ({ ...current, ...config, apiKey: "" }))).catch(() => undefined); }, [user]);
+  const loadUsage = React.useCallback(async () => {
+    if (!user) return;
+    setUsageLoading(true);
+    try {
+      const from = usageFilters.from ? new Date(`${usageFilters.from}T00:00:00`).toISOString() : "";
+      const to = usageFilters.to ? new Date(`${usageFilters.to}T23:59:59.999`).toISOString() : "";
+      const result = await apiClient.getAIUsage({ ...usageFilters, from, to, pageSize: 50 });
+      setUsage(result);
+    } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI 用量加载失败" })); }
+    finally { setUsageLoading(false); }
+  }, [user, usageFilters]);
+
+  React.useEffect(() => {
+    if (!user) return;
+    void apiClient.getAIConfig().then((config) => setAiConfig((current) => ({ ...current, ...config, apiKey: "" }))).catch(() => undefined);
+    void apiClient.getAIUsage({ pageSize: 50 }).then(setUsage).catch(() => undefined);
+    if (isAIManager) void apiClient.listAccounts().then(setCompanyAccounts).catch(() => undefined);
+  }, [user, isAIManager]);
 
   const saveAIConfig = async () => {
     setAiSaving(true);
     try { const saved = await apiClient.updateAIConfig(aiConfig); setAiConfig((current) => ({ ...current, ...saved, apiKey: "", hasKey: saved.hasKey })); window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI 配置已保存" })); } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI 配置保存失败，请确认管理员权限和服务端连接" })); } finally { setAiSaving(false); }
+  };
+
+  const clearAIKey = async () => {
+    if (!window.confirm("确定清除公司 AI Key 吗？清除后将改用服务端环境变量，若未配置则使用本地规则分析。")) return;
+    setAiSaving(true);
+    try { const saved = await apiClient.updateAIConfig({ ...aiConfig, apiKey: "", clearApiKey: true }); setAiConfig((current) => ({ ...current, ...saved, apiKey: "" })); window.dispatchEvent(new CustomEvent("show-toast", { detail: "公司 AI Key 已清除" })); }
+    catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI Key 清除失败" })); }
+    finally { setAiSaving(false); }
   };
 
   const handleToggle = async (category: keyof typeof defaultSettings, key: string) => {
@@ -145,7 +176,7 @@ export function Settings() {
   };
 
   return (
-    <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1000px] mx-auto">
+    <div className="p-4 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1100px] mx-auto w-full">
       <div>
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">系统设置</h2>
         <p className="text-slate-500 mt-1">管理您的账户偏好和系统通知</p>
@@ -200,7 +231,9 @@ export function Settings() {
           </div>
         </div>
 
-        {user && <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/50"><h3 className="text-lg font-medium text-slate-800">我的 AI 配置</h3><p className="mt-1 text-xs text-slate-500">这是当前账号的个人配置，仅本人使用；API Key 只保存在服务端，不会同步给其他账号。</p></div><div className="p-6 space-y-4"><label className="block"><span className="form-label">API 地址</span><input value={aiConfig.endpoint} onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })} placeholder="https://api.example.com/v1/chat/completions" className="survey-input" /></label><div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="form-label">模型名称</span><input value={aiConfig.model} onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })} className="survey-input" /></label><label className="block"><span className="form-label">超时（毫秒）</span><input type="number" min="5000" value={aiConfig.timeoutMs} onChange={(event) => setAiConfig({ ...aiConfig, timeoutMs: Number(event.target.value) })} className="survey-input" /></label></div><label className="block"><span className="form-label">个人 API Key {aiConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span><input type="password" value={aiConfig.apiKey} onChange={(event) => setAiConfig({ ...aiConfig, apiKey: event.target.value })} placeholder={aiConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴你的个人 API Key"} className="survey-input" /></label><button type="button" onClick={() => void saveAIConfig()} disabled={aiSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{aiSaving ? "保存中…" : "保存我的 AI 配置"}</button></div></div>}
+        {user && <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/50 flex items-center gap-2"><KeyRound className="h-5 w-5 text-indigo-600" /><div><h3 className="text-lg font-medium text-slate-800">公司 AI 配置</h3><p className="mt-1 text-xs text-slate-500">公司成员统一使用同一套模型配置；API Key 始终只保存在服务端。</p></div></div>{isAIManager ? <div className="p-6 space-y-4"><label className="block"><span className="form-label">API 地址</span><input value={aiConfig.endpoint} onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })} placeholder="https://api.example.com/v1/chat/completions" className="survey-input" /></label><div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="form-label">模型名称</span><input value={aiConfig.model} onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })} className="survey-input" /></label><label className="block"><span className="form-label">超时（毫秒）</span><input type="number" min="5000" max="120000" value={aiConfig.timeoutMs} onChange={(event) => setAiConfig({ ...aiConfig, timeoutMs: Number(event.target.value) })} className="survey-input" /></label></div><label className="block"><span className="form-label">公司 API Key {aiConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span><input type="password" value={aiConfig.apiKey} onChange={(event) => setAiConfig({ ...aiConfig, apiKey: event.target.value })} placeholder={aiConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴公司 API Key"} className="survey-input" /></label><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void saveAIConfig()} disabled={aiSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{aiSaving ? "保存中…" : "保存公司 AI 配置"}</button>{aiConfig.hasKey && <button type="button" onClick={() => void clearAIKey()} disabled={aiSaving} className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 disabled:opacity-60">清除 AI Key</button>}</div></div> : <div className="p-6"><p className="text-sm font-semibold text-slate-800">{aiConfig.configured ? "公司 AI 已配置" : "公司 AI 尚未配置"}</p><p className="mt-1 text-xs text-slate-500">当前模型：{aiConfig.model || "未设置"}。地址和密钥仅公司管理员可查看。</p></div>}</div>}
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2"><BarChart3 className="h-5 w-5 text-violet-600" /><div><h3 className="text-lg font-medium text-slate-800">AI Token 用量</h3><p className="mt-1 text-xs text-slate-500">{isAIManager ? "查看本公司各帐号用量" : "仅显示当前帐号的用量"}；服务商未返回 Token 时不做估算。</p></div></div><div className="p-6 space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><input type="date" value={usageFilters.from} onChange={(event) => setUsageFilters({ ...usageFilters, from: event.target.value })} className="survey-input" aria-label="开始日期" /><input type="date" value={usageFilters.to} onChange={(event) => setUsageFilters({ ...usageFilters, to: event.target.value })} className="survey-input" aria-label="结束日期" />{isAIManager && <select value={usageFilters.userId} onChange={(event) => setUsageFilters({ ...usageFilters, userId: event.target.value })} className="survey-input"><option value="">全部帐号</option>{companyAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}（{account.username}）</option>)}</select>}<input value={usageFilters.model} onChange={(event) => setUsageFilters({ ...usageFilters, model: event.target.value })} placeholder="模型名称" className="survey-input" /><select value={usageFilters.status} onChange={(event) => setUsageFilters({ ...usageFilters, status: event.target.value })} className="survey-input"><option value="">全部状态</option><option value="success">成功</option><option value="error">失败</option><option value="timeout">超时</option></select></div><button type="button" onClick={() => void loadUsage()} disabled={usageLoading} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${usageLoading ? "animate-spin" : ""}`} />查询用量</button><div className="grid grid-cols-2 gap-3 md:grid-cols-5"><UsageMetric label="调用次数" value={usage?.summary.calls || 0} /><UsageMetric label="成功" value={usage?.summary.successes || 0} /><UsageMetric label="失败/超时" value={usage?.summary.failures || 0} /><UsageMetric label="输入 Token" value={usage?.summary.inputTokens || 0} /><UsageMetric label="总 Token" value={usage?.summary.totalTokens || 0} /></div>{isAIManager && usage?.byUser?.length ? <div className="overflow-x-auto"><table className="w-full min-w-[580px] text-sm"><thead><tr className="border-b border-slate-100 text-left text-xs text-slate-400"><th className="py-2">帐号</th><th>调用</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th></tr></thead><tbody>{usage.byUser.map((row) => <tr key={row.userId} className="border-b border-slate-50"><td className="py-3 font-medium text-slate-800">{row.name}<span className="ml-1 text-xs font-normal text-slate-400">@{row.username}</span></td><td>{row.calls}</td><td>{Number(row.inputTokens).toLocaleString()}</td><td>{Number(row.outputTokens).toLocaleString()}</td><td className="font-semibold">{Number(row.totalTokens).toLocaleString()}</td></tr>)}</tbody></table></div> : null}<div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><thead><tr className="border-b border-slate-100 text-left text-xs text-slate-400"><th className="py-2">时间</th>{isAIManager && <th>帐号</th>}<th>模型</th><th>状态</th><th>输入</th><th>输出</th><th>总量</th><th>耗时</th></tr></thead><tbody>{usage?.records?.map((row) => <tr key={row.id} className="border-b border-slate-50"><td className="py-3 text-slate-500">{new Date(row.createdAt).toLocaleString()}</td>{isAIManager && <td>{row.userName}</td>}<td>{row.model}</td><td className={row.status === "success" ? "text-emerald-600" : "text-rose-600"}>{row.status === "success" ? "成功" : row.status === "timeout" ? "超时" : "失败"}</td><td>{row.inputTokens ?? "未提供"}</td><td>{row.outputTokens ?? "未提供"}</td><td>{row.totalTokens ?? "未提供"}</td><td>{row.durationMs}ms</td></tr>)}</tbody></table>{!usageLoading && !usage?.records?.length && <p className="py-8 text-center text-sm text-slate-400">暂无 AI 调用记录</p>}</div></div></div>
 
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
@@ -282,6 +315,10 @@ export function Settings() {
 
 function FileNameIcon({ className }: { className?: string }) {
   return <span className={cn("text-xs font-bold", className)}>Aa</span>;
+}
+
+function UsageMetric({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-xl bg-slate-50 p-3"><p className="text-lg font-bold text-slate-900">{Number(value).toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">{label}</p></div>;
 }
 
 function SettingToggle({ 

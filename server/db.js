@@ -117,6 +117,33 @@ CREATE TABLE IF NOT EXISTS auth_otp_codes (
   FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_auth_otp_phone_created ON auth_otp_codes(phone, createdAt);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  companyId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  value TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (companyId, userId),
+  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_usage_events (
+  id TEXT PRIMARY KEY,
+  companyId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  model TEXT NOT NULL,
+  inputTokens INTEGER,
+  outputTokens INTEGER,
+  totalTokens INTEGER,
+  status TEXT NOT NULL,
+  durationMs INTEGER NOT NULL DEFAULT 0,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_company_created ON ai_usage_events(companyId, createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_user_created ON ai_usage_events(userId, createdAt DESC);
 `);
 
 const now = new Date().toISOString();

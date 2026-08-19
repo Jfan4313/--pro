@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { createSessionToken, hashPassword, hashToken, publicUser, verifyPassword } from "../auth.js";
+import { canAssignRole, canManageAccount, createSessionToken, hashPassword, hashToken, publicUser, verifyPassword } from "../auth.js";
 
 function normalizePhone(value) { return String(value || "").replace(/[\s-]/g, "").trim(); }
 function isValidPhone(value) { return /^[0-9+]{6,20}$/.test(value); }
@@ -58,41 +58,7 @@ export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin,
   });
 
   app.post("/api/auth/register", (req, res) => {
-    const username = String(req.body?.username || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    const name = String(req.body?.name || "").trim();
-    const email = String(req.body?.email || "").trim();
-    const phone = String(req.body?.phone || "").trim();
-
-    if (!/^[a-z0-9._-]{3,32}$/.test(username)) return res.status(400).json({ error: "invalid_username" });
-    if (!name || name.length > 40) return res.status(400).json({ error: "invalid_name" });
-    if (password.length < 8 || password.length > 64 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return res.status(400).json({ error: "weak_password" });
-    if (email && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120)) return res.status(400).json({ error: "invalid_email" });
-    if (phone && (!/^[0-9+\s-]{6,24}$/.test(phone))) return res.status(400).json({ error: "invalid_phone" });
-    if (db.prepare("SELECT id FROM users WHERE lower(username) = ?").get(username)) return res.status(409).json({ error: "username_exists" });
-
-    const id = crypto.randomUUID();
-    const timestamp = nowIso();
-    db.prepare(`
-      INSERT INTO users (
-        id, username, name, email, phone, role, passwordHash, status,
-        permissions, mustChangePassword, companyId, createdAt, updatedAt
-      )
-      VALUES (?, ?, ?, ?, ?, 'project_manager', ?, 'active', NULL, 0, 'company-default', ?, ?)
-    `).run(id, username, name, email, phone, hashPassword(password), timestamp, timestamp);
-
-    const token = createSessionToken();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare(`
-      INSERT INTO auth_sessions (tokenHash, userId, createdAt, expiresAt, lastSeenAt, userAgent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(hashToken(token), id, timestamp, expiresAt, timestamp, req.header("User-Agent") || "");
-
-    res.status(201).json({
-      token,
-      expiresAt,
-      user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id)),
-    });
+    res.status(403).json({ error: "registration_disabled" });
   });
 
   app.get("/api/auth/me", requireAuth, (req, res) => {
@@ -118,8 +84,17 @@ export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin,
     res.json({ ok: true });
   });
 
-  app.get("/api/accounts", requireAccountManager, (_req, res) => {
-    const users = db.prepare("SELECT * FROM users ORDER BY createdAt ASC").all().map(publicUser);
+  app.get("/api/account-directory", requireAuth, (req, res) => {
+    const users = db.prepare("SELECT id, username, name, role, status, companyId FROM users WHERE companyId = ? AND status = 'active' ORDER BY name ASC")
+      .all(req.authUser.companyId || "company-default");
+    res.json(users);
+  });
+
+  app.get("/api/accounts", requireAccountManager, (req, res) => {
+    const rows = req.authUser.role === "admin"
+      ? db.prepare("SELECT * FROM users ORDER BY createdAt ASC").all()
+      : db.prepare("SELECT * FROM users WHERE companyId = ? ORDER BY createdAt ASC").all(req.authUser.companyId || "company-default");
+    const users = rows.map(publicUser);
     res.json(users);
   });
 
@@ -128,35 +103,43 @@ export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin,
     const password = String(req.body?.password || "");
     const name = String(req.body?.name || "").trim();
     const phone = normalizePhone(req.body?.phone);
+    const role = String(req.body?.role || "viewer");
     if (!/^[a-z0-9._+@-]{3,40}$/.test(username) || !name || (!password && !isValidPhone(phone)) || (password && password.length < 8)) return res.status(400).json({ error: "invalid_account_fields" });
+    if (!canAssignRole(req.authUser, role)) return res.status(403).json({ error: "role_assignment_forbidden" });
     if (db.prepare("SELECT id FROM users WHERE lower(username) = ?").get(username)) return res.status(409).json({ error: "username_exists" });
     if (phone && db.prepare("SELECT id FROM users WHERE phone = ?").get(phone)) return res.status(409).json({ error: "phone_exists" });
     const id = crypto.randomUUID();
     const timestamp = nowIso();
     db.prepare(`INSERT INTO users (id, username, name, email, phone, role, passwordHash, status, permissions, mustChangePassword, companyId, createdAt, updatedAt)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?)`)
-      .run(id, username, name, String(req.body?.email || ""), phone, String(req.body?.role || "viewer"), password ? hashPassword(password) : null, Array.isArray(req.body?.permissions) ? JSON.stringify(req.body.permissions) : null, req.authUser.companyId || "company-default", timestamp, timestamp);
+      .run(id, username, name, String(req.body?.email || ""), phone, role, password ? hashPassword(password) : null, null, req.authUser.companyId || "company-default", timestamp, timestamp);
     void wecomNotifier?.sendMarkdown(`### 新用户帐号已创建\n>姓名：${name}\n>手机号：${phone || "未填写"}\n>登录方式：${password ? "临时密码" : "开发模式一次性验证码"}`);
     res.status(201).json(publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id)));
   });
 
-  app.put("/api/accounts/:id", requireAdmin, (req, res) => {
+  app.put("/api/accounts/:id", requireAccountManager, (req, res) => {
     const existing = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "account_not_found" });
-    if (existing.id === req.authUser.id && req.body?.status === "disabled") return res.status(400).json({ error: "cannot_disable_self" });
+    const nextRole = String(req.body?.role ?? existing.role);
+    const nextStatus = String(req.body?.status ?? existing.status);
+    if (existing.id === req.authUser.id && (nextRole !== existing.role || nextStatus !== existing.status)) return res.status(400).json({ error: "cannot_change_own_role_or_status" });
+    if (existing.id !== req.authUser.id && !canManageAccount(req.authUser, existing)) return res.status(403).json({ error: "account_management_forbidden" });
+    if (!canAssignRole(req.authUser, nextRole)) return res.status(403).json({ error: "role_assignment_forbidden" });
     const timestamp = nowIso();
     db.prepare(`UPDATE users SET name = ?, email = ?, phone = ?, role = ?, status = ?, permissions = ?, updatedAt = ? WHERE id = ?`)
-      .run(String(req.body?.name ?? existing.name), String(req.body?.email ?? existing.email ?? ""), String(req.body?.phone ?? existing.phone ?? ""), String(req.body?.role ?? existing.role), String(req.body?.status ?? existing.status), Array.isArray(req.body?.permissions) ? JSON.stringify(req.body.permissions) : existing.permissions, timestamp, existing.id);
+      .run(String(req.body?.name ?? existing.name), String(req.body?.email ?? existing.email ?? ""), String(req.body?.phone ?? existing.phone ?? ""), nextRole, nextStatus, existing.permissions, timestamp, existing.id);
     if (req.body?.status === "disabled") db.prepare("DELETE FROM auth_sessions WHERE userId = ?").run(existing.id);
     res.json(publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(existing.id)));
   });
 
-  app.post("/api/accounts/:id/reset-password", requireAdmin, (req, res) => {
+  app.post("/api/accounts/:id/reset-password", requireAccountManager, (req, res) => {
+    const existing = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    if (!existing) return res.status(404).json({ error: "account_not_found" });
+    if (!canManageAccount(req.authUser, existing)) return res.status(403).json({ error: "account_management_forbidden" });
     const password = String(req.body?.password || "");
     if (password.length < 8) return res.status(400).json({ error: "password_too_short" });
     const timestamp = nowIso();
-    const result = db.prepare("UPDATE users SET passwordHash = ?, mustChangePassword = 1, updatedAt = ? WHERE id = ?").run(hashPassword(password), timestamp, req.params.id);
-    if (!result.changes) return res.status(404).json({ error: "account_not_found" });
+    db.prepare("UPDATE users SET passwordHash = ?, mustChangePassword = 1, updatedAt = ? WHERE id = ?").run(hashPassword(password), timestamp, req.params.id);
     db.prepare("DELETE FROM auth_sessions WHERE userId = ?").run(req.params.id);
     res.json({ ok: true });
   });

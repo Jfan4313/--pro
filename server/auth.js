@@ -4,13 +4,33 @@ const KEY_LENGTH = 64;
 
 export const ROLE_PERMISSIONS = {
   admin: ["*"],
-  project_manager: ["dashboard", "projects", "lifecycle", "survey", "files", "schedule", "acceptance", "contracts", "materials", "supply", "cost", "personnel", "partners", "collaboration", "organization"],
-  surveyor: ["dashboard", "projects", "survey", "files", "schedule", "collaboration"],
-  designer: ["dashboard", "projects", "lifecycle", "survey", "files", "collaboration"],
-  finance: ["dashboard", "projects", "contracts", "cost", "supply", "files"],
-  viewer: ["dashboard", "projects", "files"],
-  construction_leader: ["dashboard", "projects", "survey", "files", "schedule", "collaboration", "organization"],
+  company_admin: ["dashboard", "projects", "lifecycle", "survey", "files", "schedule", "acceptance", "contracts", "materials", "supply", "cost", "personnel", "partners", "collaboration", "organization", "accounts", "settings"],
+  project_manager: ["dashboard", "projects", "lifecycle", "survey", "files", "schedule", "acceptance", "contracts", "materials", "supply", "cost", "personnel", "partners", "collaboration", "organization", "settings"],
+  surveyor: ["dashboard", "projects", "survey", "files", "schedule", "collaboration", "settings"],
+  designer: ["dashboard", "projects", "lifecycle", "survey", "files", "collaboration", "settings"],
+  finance: ["dashboard", "projects", "contracts", "cost", "supply", "files", "settings"],
+  viewer: ["dashboard", "projects", "files", "settings"],
+  construction_leader: ["dashboard", "projects", "survey", "files", "schedule", "collaboration", "organization", "settings"],
 };
+
+export const COMPANY_MANAGEABLE_ROLES = ["project_manager", "surveyor", "designer", "finance", "viewer", "construction_leader"];
+
+export function isCompanyManager(user) {
+  return user?.role === "admin" || user?.role === "company_admin";
+}
+
+export function canManageAccount(actor, target) {
+  if (!actor || !target || actor.id === target.id) return false;
+  if (actor.role === "admin") return true;
+  return actor.role === "company_admin"
+    && actor.companyId === target.companyId
+    && COMPANY_MANAGEABLE_ROLES.includes(target.role);
+}
+
+export function canAssignRole(actor, role) {
+  if (actor?.role === "admin") return Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role);
+  return actor?.role === "company_admin" && COMPANY_MANAGEABLE_ROLES.includes(role);
+}
 
 export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.scryptSync(String(password), salt, KEY_LENGTH).toString("hex");
@@ -35,9 +55,15 @@ export function hashToken(token) {
 
 export function permissionsForUser(user) {
   if (!user) return [];
+  if (user.role === "admin") return ["*"];
   try {
     const custom = JSON.parse(user.permissions || "null");
-    if (Array.isArray(custom)) return custom;
+    if (Array.isArray(custom)) {
+      const permissions = new Set([...custom, "settings"]);
+      if (user.role === "company_admin") permissions.add("accounts");
+      else permissions.delete("accounts");
+      return [...permissions];
+    }
   } catch {
     // Fall back to role defaults.
   }

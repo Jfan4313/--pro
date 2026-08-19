@@ -197,7 +197,7 @@ export default function App() {
           {activeTab === "supply" && <><div className="md:hidden min-h-full"><MobileWorkspace module="supply" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><SupplyChain defaultTab={supplyChainTab} /></div></>}
           {activeTab === "chat" && <><div className="md:hidden min-h-full"><MobileCollaboration /></div><div className="hidden md:block h-full"><Chat /></div></>}
           {activeTab === "contracts" && <><div className="md:hidden min-h-full"><MobileWorkspace module="contracts" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Contracts /></div></>}
-          {activeTab === "settings" && <><div className="md:hidden min-h-full"><MobileWorkspace module="settings" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Settings /></div></>}
+          {activeTab === "settings" && <Settings />}
           {activeTab === "accounts" && <AccountManagement />}
           {activeTab === "version-management" && <VersionManagement />}
         </main>

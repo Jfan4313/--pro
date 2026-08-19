@@ -1,4 +1,4 @@
-import { hashToken } from "../auth.js";
+import { hashToken, isCompanyManager } from "../auth.js";
 
 export function createAuthMiddleware({ db, apiAuthRequired, nowIso }) {
   function findAuthenticatedUser(req) {
@@ -35,13 +35,7 @@ export function createAuthMiddleware({ db, apiAuthRequired, nowIso }) {
 
   function requireAccountManager(req, res, next) {
     return requireAuth(req, res, () => {
-      let customPermissions = [];
-      try { customPermissions = JSON.parse(req.authUser.permissions || "[]"); } catch { /* use role permissions below */ }
-      const canManageAccounts = req.authUser.role === "admin"
-        || req.authUser.role === "project_manager"
-        || customPermissions.includes("organization")
-        || customPermissions.includes("accounts");
-      if (!canManageAccounts) return res.status(403).json({ error: "organization_account_manager_required" });
+      if (!isCompanyManager(req.authUser)) return res.status(403).json({ error: "company_account_manager_required" });
       next();
     });
   }

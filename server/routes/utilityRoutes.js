@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
 import { analyzeIntakeWithAI, getAIConfig, updateAIConfig } from "../domain/aiService.js";
+import { isCompanyManager } from "../auth.js";
 import {
   buildProjectStoredFile,
   getProjectFolderName,
@@ -13,15 +14,75 @@ import { createUtilityServices } from "../services/utilityServices.js";
 
 export function registerUtilityRoutes(app, context) {
   const services = createUtilityServices(context);
-  const { uploadsDir, nowIso } = context;
+  const { db, uploadsDir, nowIso, parseJson } = context;
+
+  const currentUser = (req) => req.authUser || db.prepare("SELECT * FROM users WHERE id = 'admin-local'").get();
+  const authenticatedUser = (req, res) => {
+    if (!req.authUser) { res.status(401).json({ error: "authentication_required" }); return null; }
+    return req.authUser;
+  };
 
   app.get("/api/ai-config", (req, res) => {
-    if (req.authUser?.role !== "admin") return res.status(403).json({ error: "admin_required" });
-    res.json(getAIConfig(req.authUser.id));
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const config = getAIConfig(user.companyId || "company-default");
+    res.json(isCompanyManager(user) ? config : { configured: config.configured, model: config.model, hasKey: config.hasKey, endpoint: "", timeoutMs: config.timeoutMs, updatedAt: config.updatedAt });
   });
   app.put("/api/ai-config", (req, res) => {
-    if (req.authUser?.role !== "admin") return res.status(403).json({ error: "admin_required" });
-    try { res.json(updateAIConfig(req.authUser.id, req.body || {})); } catch (error) { res.status(500).json({ error: "ai_config_save_failed", message: error.message }); }
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
+    try { res.json(updateAIConfig(user.companyId || "company-default", req.body || {})); } catch (error) { res.status(500).json({ error: "ai_config_save_failed", message: error.message }); }
+  });
+
+  app.get("/api/user-settings", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const companyId = user.companyId || "company-default";
+    let row = db.prepare("SELECT value, updatedAt FROM user_settings WHERE companyId = ? AND userId = ?").get(companyId, user.id);
+    if (!row) {
+      const legacy = db.prepare("SELECT value FROM app_data WHERE key = 'appSettings'").get();
+      const timestamp = nowIso();
+      const value = parseJson(legacy?.value, {});
+      db.prepare("INSERT INTO user_settings (companyId, userId, value, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)").run(companyId, user.id, JSON.stringify(value), timestamp, timestamp);
+      row = { value: JSON.stringify(value), updatedAt: timestamp };
+    }
+    res.json({ value: parseJson(row.value, {}), updatedAt: row.updatedAt });
+  });
+
+  app.put("/api/user-settings", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const companyId = user.companyId || "company-default";
+    const value = req.body?.value && typeof req.body.value === "object" ? req.body.value : {};
+    const timestamp = nowIso();
+    db.prepare(`INSERT INTO user_settings (companyId, userId, value, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(companyId, userId) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`)
+      .run(companyId, user.id, JSON.stringify(value), timestamp, timestamp);
+    res.json({ value, updatedAt: timestamp });
+  });
+
+  app.get("/api/ai-usage", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const companyId = user.companyId || "company-default";
+    const manager = isCompanyManager(user);
+    const conditions = ["events.companyId = ?"];
+    const params = [companyId];
+    if (!manager) { conditions.push("events.userId = ?"); params.push(user.id); }
+    else if (req.query.userId) { conditions.push("events.userId = ?"); params.push(String(req.query.userId)); }
+    if (req.query.from) { conditions.push("events.createdAt >= ?"); params.push(String(req.query.from)); }
+    if (req.query.to) { conditions.push("events.createdAt <= ?"); params.push(String(req.query.to)); }
+    if (req.query.model) { conditions.push("events.model = ?"); params.push(String(req.query.model)); }
+    if (["success", "error", "timeout"].includes(String(req.query.status || ""))) { conditions.push("events.status = ?"); params.push(String(req.query.status)); }
+    const where = conditions.join(" AND ");
+    const pageSize = Math.max(1, Math.min(100, Number(req.query.pageSize || 20)));
+    const page = Math.max(1, Number(req.query.page || 1));
+    const summary = db.prepare(`SELECT COUNT(*) AS calls, SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successes, SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END) AS failures, COALESCE(SUM(inputTokens), 0) AS inputTokens, COALESCE(SUM(outputTokens), 0) AS outputTokens, COALESCE(SUM(totalTokens), 0) AS totalTokens FROM ai_usage_events events WHERE ${where}`).get(...params);
+    const byUser = db.prepare(`SELECT events.userId, users.name, users.username, COUNT(*) AS calls, COALESCE(SUM(events.inputTokens), 0) AS inputTokens, COALESCE(SUM(events.outputTokens), 0) AS outputTokens, COALESCE(SUM(events.totalTokens), 0) AS totalTokens FROM ai_usage_events events JOIN users ON users.id = events.userId WHERE ${where} GROUP BY events.userId, users.name, users.username ORDER BY totalTokens DESC, calls DESC`).all(...params);
+    const total = db.prepare(`SELECT COUNT(*) AS count FROM ai_usage_events events WHERE ${where}`).get(...params).count;
+    const records = db.prepare(`SELECT events.*, users.name AS userName, users.username FROM ai_usage_events events JOIN users ON users.id = events.userId WHERE ${where} ORDER BY events.createdAt DESC LIMIT ? OFFSET ?`).all(...params, pageSize, (page - 1) * pageSize);
+    res.json({ summary, byUser, records, pagination: { page, pageSize, total } });
   });
 
   app.post("/api/upload", (req, res) => {
@@ -39,7 +100,7 @@ export function registerUtilityRoutes(app, context) {
     if (!["text", "image", "audio"].includes(inputType)) {
       return res.status(400).json({ error: "invalid_input_type" });
     }
-    try { res.json(await analyzeIntakeWithAI(req.body || {}, req.authUser?.id || "default")); } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
+    try { res.json(await analyzeIntakeWithAI(req.body || {}, currentUser(req), db)); } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
   });
 
   app.get("/api/file-settings", (_req, res) => {

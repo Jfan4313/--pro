@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw, GripVertical } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
+import { useUserSettings } from "@/src/hooks/useUserSettings";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "./ProjectLifecycle";
 import { getProjectNumber } from "@/src/lib/management";
@@ -42,7 +43,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [scheduleData] = useSyncedAppData("scheduleData", []);
   const [lifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
-  const [appSettings] = useSyncedAppData<any>("appSettings", {});
+  const [appSettings] = useUserSettings<any>({});
   const [archivedProjects, setArchivedProjects] = useSyncedAppData<any[]>("projectArchive", []);
   const [, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const { conflicts: projectNumberConflicts, reserveProjectNumber } = useProjectNumbering();
@@ -85,8 +86,8 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
 
   React.useEffect(() => {
     let cancelled = false;
-    apiClient.listAccounts().then((accounts) => {
-      if (!cancelled) setProjectManagers(accounts.filter((account: any) => account.role === "project_manager" || account.role === "admin"));
+    apiClient.listAccountDirectory().then((accounts) => {
+      if (!cancelled) setProjectManagers(accounts.filter((account: any) => ["project_manager", "company_admin", "admin"].includes(account.role)));
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);

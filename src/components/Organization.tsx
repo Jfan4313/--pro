@@ -5,6 +5,7 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { createEmptyOrganization } from "@/src/lib/workspaceDefaults";
 import { apiClient } from "@/src/lib/apiClient";
 import { motion, AnimatePresence } from "motion/react";
+import { useAuth } from "@/src/lib/auth";
 
 type OrgNodeType = "company" | "department" | "team";
 
@@ -60,6 +61,8 @@ const initialOrgData = {
 };
 
 export function Organization() {
+  const { user } = useAuth();
+  const canManageSystemAccounts = user?.role === "admin" || user?.role === "company_admin";
   const [orgData, setOrgData] = useSyncedAppData<OrgNode>("organizationData", createEmptyOrganization() as OrgNode);
   const [personnelData, setPersonnelData] = useSyncedAppData("personnelData", []);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("org-1");
@@ -461,14 +464,14 @@ export function Organization() {
                 className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 w-64"
               />
             </div>
-            {selectedNode?.type === "team" && <button onClick={() => void openLeaderModal()} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"><UserRound className="h-4 w-4" />设置班组长</button>}
-            <button 
+            {canManageSystemAccounts && selectedNode?.type === "team" && <button onClick={() => void openLeaderModal()} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"><UserRound className="h-4 w-4" />设置班组长</button>}
+            {canManageSystemAccounts && <button
               onClick={() => void openAddMemberModal()}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
             >
               <UserPlus className="w-4 h-4" />
               添加成员
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -522,9 +525,8 @@ export function Organization() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2">
+            <div className="grid grid-cols-1 gap-2 bg-slate-50 p-2">
               <button type="button" onClick={() => setAddMemberMode("existing")} className={`rounded-xl px-3 py-2.5 text-sm font-semibold ${addMemberMode === "existing" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}><Users className="mr-1.5 inline h-4 w-4" />选择已有账号</button>
-              <button type="button" onClick={() => setAddMemberMode("new")} className={`rounded-xl px-3 py-2.5 text-sm font-semibold ${addMemberMode === "new" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}><UserRound className="mr-1.5 inline h-4 w-4" />新建系统账号</button>
             </div>
             {addMemberMode === "existing" ? <>
               <div className="p-4 border-b border-slate-100 shrink-0"><div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all"><Search className="w-4 h-4 text-slate-400 mr-2" /><input type="text" value={memberSearchQuery} onChange={(e) => setMemberSearchQuery(e.target.value)} placeholder="搜索姓名、登录账号、手机号或邮箱..." className="bg-transparent border-none outline-none text-sm w-full text-slate-700" /></div></div>

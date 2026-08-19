@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useProjectBoardData } from "./useProjectBoardData";
 import { useSyncedAppData } from "./useSyncedAppData";
+import { useUserSettings } from "./useUserSettings";
 import { flattenProjects } from "@/src/lib/management";
 import { ArchiveFolderState, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/components/ProjectLifecycle";
@@ -9,7 +10,7 @@ export function useArchiveReconciler(enabled = true) {
   const [boardData, , boardLoading] = useProjectBoardData();
   const [lifecycleStates, , lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [folderStates, setFolderStates, folderStatesLoading] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
-  const [appSettings, , settingsLoading] = useSyncedAppData<any>("appSettings", {});
+  const [appSettings, , settingsLoading] = useUserSettings<any>({});
 
   useEffect(() => {
     if (!enabled || boardLoading || lifecycleLoading || folderStatesLoading || settingsLoading || appSettings?.fileManagement?.autoCreateFolders === false) return;

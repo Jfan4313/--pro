@@ -42,7 +42,6 @@ interface AuthValue {
   login: (username: string, password: string) => Promise<void>;
   requestOtp: (phone: string) => Promise<{ devCode?: string; expiresIn: number; delivery: string }>;
   loginWithOtp: (phone: string, code: string) => Promise<void>;
-  register: (payload: { username: string; password: string; name: string; email?: string; phone?: string }) => Promise<void>;
   logout: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   can: (permission: string) => boolean;
@@ -113,13 +112,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     async loginWithOtp(phone, code) {
       const response = await apiClient.loginWithOtp(phone, code);
-      window.localStorage.setItem(AUTH_TOKEN_KEY, response.token);
-      window.localStorage.setItem(AUTH_EXPIRY_KEY, response.expiresAt);
-      storeUser(response.user);
-      window.dispatchEvent(new CustomEvent("zhijian-auth-changed"));
-    },
-    async register(payload) {
-      const response = await apiClient.register(payload);
       window.localStorage.setItem(AUTH_TOKEN_KEY, response.token);
       window.localStorage.setItem(AUTH_EXPIRY_KEY, response.expiresAt);
       storeUser(response.user);
