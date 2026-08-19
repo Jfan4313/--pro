@@ -39,6 +39,10 @@ migrateLegacyConfig();
 
 function companyConfig(companyId = "company-default") { return runtimeConfig.companies?.[companyId] || {}; }
 
+export function getAIKey(companyId = "company-default") {
+  return companyConfig(companyId).apiKey || env("AI_API_KEY");
+}
+
 export function resolveChatCompletionsEndpoint(endpoint) {
   const normalized = String(endpoint || "").trim().replace(/\/+$/, "");
   if (!normalized) return "";
@@ -82,7 +86,7 @@ function finiteToken(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
 }
 
-function resolveTranscriptionEndpoint(endpoint) {
+export function resolveTranscriptionEndpoint(endpoint) {
   const normalized = String(endpoint || "").trim().replace(/\/+$/, "");
   if (!normalized) return "";
   if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, "/audio/transcriptions");
@@ -90,7 +94,7 @@ function resolveTranscriptionEndpoint(endpoint) {
   return `${normalized}/audio/transcriptions`;
 }
 
-async function transcribeAudio(filePath, config, apiKey) {
+export async function transcribeAudio(filePath, config, apiKey) {
   if (!filePath || !fs.existsSync(filePath)) return "";
   const form = new FormData();
   form.append("file", new Blob([fs.readFileSync(filePath)]), path.basename(filePath));
@@ -102,7 +106,10 @@ async function transcribeAudio(filePath, config, apiKey) {
     body: form,
     signal: AbortSignal.timeout(config.timeoutMs),
   });
-  if (!response.ok) throw new Error(`Audio transcription failed: ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).slice(0, 300);
+    throw new Error(`Audio transcription failed: ${response.status}${detail ? ` - ${detail}` : ""}`);
+  }
   const result = await response.json();
   return String(result.text || result.transcript || "").trim();
 }
@@ -125,7 +132,7 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
   const companyId = actor.companyId || "company-default";
   const userId = actor.id || "admin-local";
   const config = getAIConfig(companyId);
-  const apiKey = companyConfig(companyId).apiKey || env("AI_API_KEY");
+  const apiKey = getAIKey(companyId);
   if (!config.endpoint || !apiKey) return analyzeIntake(payload);
 
   const startedAt = Date.now();
@@ -136,7 +143,10 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
   const prompt = `请从以下工作信息中提取一个或多个任务，必须只返回 JSON，不要 Markdown。格式：{"transcript":"","items":[{"title":"","summary":"","projectId":"","projectName":"","projectMatchType":"existing|new|unknown","assigneeIds":[],"assignees":[],"deadline":"YYYY-MM-DD","dueTime":"HH:mm","confidence":0.0}]}. 如果项目候选中能匹配全称、简称、编号、别名，projectMatchType 必须为 existing 并返回 projectId；否则如果说出了一个项目名称，标记 new；完全没有项目线索则标记 unknown。人员只能从候选人员中选择。项目候选：${JSON.stringify(payload.projects || [])}。人员候选：${JSON.stringify(payload.personnel || [])}。输入类型：${payload.inputType}；文字：${sourceText}；附件地址：${payload.attachmentUrl || ""}`;
   try {
     const response = await fetch(resolveChatCompletionsEndpoint(config.endpoint), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: config.model, temperature: 0.1, messages: [{ role: "system", content: "你是项目管理任务识别助手。" }, { role: "user", content: prompt }] }), signal: AbortSignal.timeout(config.timeoutMs) });
-    if (!response.ok) throw new Error(`AI request failed: ${response.status}`);
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 300);
+      throw new Error(`AI request failed: ${response.status}${detail ? ` - ${detail}` : ""}`);
+    }
     const result = await response.json();
     const usage = normalizeAIUsage(result);
     const content = result.choices?.[0]?.message?.content || result.output_text || "";
@@ -171,6 +181,27 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
   } catch (error) {
     const status = error?.name === "TimeoutError" || error?.name === "AbortError" ? "timeout" : "error";
     recordUsage(db, { companyId, userId, feature: "intake_analysis", model: config.model, inputTokens: null, outputTokens: null, totalTokens: null, status, durationMs: Date.now() - startedAt });
+    // Keep a successfully uploaded recording usable when the remote AI or
+    // transcription provider is temporarily unavailable. The confirmation
+    // screen can then be completed manually instead of losing the audio.
+    if (payload.inputType === "audio") {
+      return analyzeIntake({ ...payload, text: sourceText });
+    }
     throw error;
+  }
+}
+
+export async function debugAI(actor = {}, db = null) {
+  const companyId = actor.companyId || "company-default";
+  const config = getAIConfig(companyId);
+  const startedAt = Date.now();
+  if (!config.endpoint || !config.hasKey) {
+    return { ok: false, stage: "config", model: config.model, endpoint: config.endpoint, configured: false, message: "AI 地址或 API Key 未配置" };
+  }
+  try {
+    const result = await analyzeIntakeWithAI({ inputType: "text", text: "请生成一个标题为调试测试的任务，截止日期为明天。", projects: [], personnel: [] }, actor, db);
+    return { ok: true, stage: "chat_completions", model: config.model, endpoint: config.endpoint, configured: true, durationMs: Date.now() - startedAt, result: { title: result.title, deadline: result.deadline } };
+  } catch (error) {
+    return { ok: false, stage: "chat_completions", model: config.model, endpoint: config.endpoint, configured: true, durationMs: Date.now() - startedAt, message: error?.message || "AI 请求失败" };
   }
 }

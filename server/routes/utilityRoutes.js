@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
-import { analyzeIntakeWithAI, getAIConfig, updateAIConfig } from "../domain/aiService.js";
+import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIKey, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig } from "../domain/aiService.js";
 import { isCompanyManager } from "../auth.js";
 import {
   buildProjectStoredFile,
@@ -117,6 +117,28 @@ export function registerUtilityRoutes(app, context) {
       }
       res.json(await analyzeIntakeWithAI(body, currentUser(req), db));
     } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
+  });
+
+  app.post("/api/intake/transcribe", async (req, res) => {
+    const user = currentUser(req);
+    const attachmentUrl = String(req.body?.attachmentUrl || "");
+    if (!attachmentUrl) return res.status(400).json({ error: "audio_required", message: "缺少音频文件" });
+    const config = getAIConfig(user.companyId || "company-default");
+    const apiKey = getAIKey(user.companyId || "company-default");
+    if (!config.configured) return res.status(503).json({ error: "ai_not_configured", message: "AI 地址或 API Key 未配置", model: config.model, endpoint: resolveTranscriptionEndpoint(config.endpoint) });
+    try {
+      const filename = path.basename(attachmentUrl.split("?")[0]);
+      const transcript = await transcribeAudio(path.join(uploadsDir, filename), config, apiKey);
+      if (!transcript) return res.status(502).json({ error: "empty_transcript", message: "语音服务没有返回文字", model: config.model });
+      res.json({ transcript, model: config.model });
+    } catch (error) { res.status(502).json({ error: "transcription_failed", message: error.message, model: config.model, endpoint: resolveTranscriptionEndpoint(config.endpoint) }); }
+  });
+
+  app.post("/api/ai-debug", async (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const result = await debugAI(user, db);
+    res.status(result.ok ? 200 : 502).json(result);
   });
 
   app.get("/api/file-settings", (_req, res) => {

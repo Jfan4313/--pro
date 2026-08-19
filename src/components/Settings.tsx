@@ -44,6 +44,8 @@ export function Settings() {
   const [usageLoading, setUsageLoading] = React.useState(false);
   const [usageFilters, setUsageFilters] = React.useState({ from: "", to: "", userId: "", model: "", status: "" });
   const [companyAccounts, setCompanyAccounts] = React.useState<Array<{ id: string; name: string; username: string }>>([]);
+  const [aiDebug, setAiDebug] = React.useState<any>(null);
+  const [aiDebugging, setAiDebugging] = React.useState(false);
   const isAIManager = user?.role === "admin" || user?.role === "company_admin";
 
   const mergedSettings = {
@@ -117,6 +119,15 @@ export function Settings() {
     try { const saved = await apiClient.updateAIConfig({ ...aiConfig, apiKey: "", clearApiKey: true }); setAiConfig((current) => ({ ...current, ...saved, apiKey: "" })); window.dispatchEvent(new CustomEvent("show-toast", { detail: "公司 AI Key 已清除" })); }
     catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI Key 清除失败" })); }
     finally { setAiSaving(false); }
+  };
+
+  const runAIDebug = async () => {
+    setAiDebugging(true);
+    try {
+      setAiDebug(await apiClient.debugAI());
+    } catch (error: any) {
+      setAiDebug(error?.details || { ok: false, stage: "network", message: error?.message || "调试接口请求失败" });
+    } finally { setAiDebugging(false); }
   };
 
   const handleToggle = async (category: keyof typeof defaultSettings, key: string) => {
@@ -308,6 +319,8 @@ export function Settings() {
             />
           </div>
         </div>
+
+        {user && isAIManager && <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between gap-4"><div><h3 className="text-lg font-medium text-slate-800">AI 调试</h3><p className="mt-1 text-xs text-slate-500">检查地址、API Key、模型和语音识别接口是否可用；不会显示或保存 API Key。</p></div><button type="button" onClick={() => void runAIDebug()} disabled={aiDebugging} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"><RefreshCw className={cn("h-4 w-4", aiDebugging && "animate-spin")} />{aiDebugging ? "调试中…" : "开始调试"}</button></div>{aiDebug && <div className={cn("mx-6 my-5 rounded-lg border px-4 py-3 text-sm", aiDebug.ok ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-700")}><p className="font-semibold">{aiDebug.ok ? "AI 连接正常" : "AI 调试失败"}</p><div className="mt-2 grid gap-1 text-xs sm:grid-cols-2"><span>阶段：{aiDebug.stage || "未知"}</span><span>模型：{aiDebug.model || aiConfig.model || "未设置"}</span>{aiDebug.durationMs != null && <span>耗时：{aiDebug.durationMs}ms</span>}{aiDebug.endpoint && <span className="truncate">地址：{aiDebug.endpoint}</span>}</div>{aiDebug.message && <p className="mt-2 break-words">原因：{aiDebug.message}</p>}</div>}</div>}
 
         {/* Security Section (Placeholder for future) */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
