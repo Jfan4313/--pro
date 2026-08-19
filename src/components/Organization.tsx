@@ -231,23 +231,37 @@ export function Organization() {
 
   const handleCreateAndLinkAccount = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!newAccountForm.name.trim() || !newAccountForm.username.trim()) return showToast("请填写姓名和登录账号");
-    if (!newAccountForm.phone.trim() && !newAccountForm.password.trim()) return showToast("请填写手机号或临时密码");
+    const username = newAccountForm.username.trim().toLowerCase();
+    const phone = newAccountForm.phone.trim().replace(/[\s-]/g, "");
+    const password = newAccountForm.password.trim();
+    if (!newAccountForm.name.trim() || !username) return showToast("请填写姓名和登录账号");
+    if (!/^[a-z0-9._+@-]{3,40}$/.test(username)) return showToast("登录账号需为 3-40 位英文、数字或 . _ + @ -");
+    if (phone && !/^[0-9+]{6,20}$/.test(phone)) return showToast("手机号需填写 6-20 位数字，可包含 +");
+    if (!phone && !password) return showToast("请填写手机号或临时密码");
+    if (password && password.length < 8) return showToast("临时密码至少需要 8 位");
     setAccountSaving(true);
     try {
       const account = await apiClient.createAccount({
-        username: newAccountForm.username.trim(),
+        username,
         name: newAccountForm.name.trim(),
         email: newAccountForm.email.trim(),
-        phone: newAccountForm.phone.trim(),
+        phone,
         role: newAccountForm.role,
-        password: newAccountForm.password.trim(),
+        password,
       });
       setSystemAccounts((current) => [...current, account]);
       linkAccountToOrganization(account, newAccountForm.position.trim());
       resetNewAccountForm();
     } catch (error: any) {
-      showToast(error?.status === 409 ? "登录账号或手机号已存在，请改为选择已有账号" : "系统账号创建失败，请检查填写内容");
+      const errorCode = error?.details?.error || error?.message;
+      const message = error?.status === 409
+        ? "登录账号或手机号已存在，请改为选择已有账号"
+        : errorCode === "invalid_account_fields"
+          ? "账号信息不符合规则，请检查登录账号、手机号和临时密码"
+          : error?.status === 403
+            ? "当前账号没有创建系统账号的权限"
+            : "系统账号创建失败，请稍后重试";
+      showToast(message);
     } finally {
       setAccountSaving(false);
     }
