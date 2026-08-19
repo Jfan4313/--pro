@@ -137,7 +137,9 @@ export function registerUtilityRoutes(app, context) {
   app.post("/api/ai-debug", async (req, res) => {
     const user = authenticatedUser(req, res);
     if (!user) return;
-    const result = await debugAI(user, db);
+    const supplied = req.body && typeof req.body === "object" ? req.body : {};
+    const override = supplied.endpoint || supplied.model || supplied.apiKey ? { endpoint: supplied.endpoint, model: supplied.model, timeoutMs: supplied.timeoutMs, apiKey: supplied.apiKey } : null;
+    const result = await debugAI(user, db, override);
     res.status(result.ok ? 200 : 502).json(result);
   });
 

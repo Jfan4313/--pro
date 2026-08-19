@@ -128,11 +128,11 @@ function recordUsage(db, event) {
     .run(crypto.randomUUID(), event.companyId, event.userId, event.feature, event.model, event.inputTokens, event.outputTokens, event.totalTokens, event.status, event.durationMs, new Date().toISOString());
 }
 
-export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
+export async function analyzeIntakeWithAI(payload, actor = {}, db = null, aiOverride = null) {
   const companyId = actor.companyId || "company-default";
   const userId = actor.id || "admin-local";
-  const config = getAIConfig(companyId);
-  const apiKey = getAIKey(companyId);
+  const config = aiOverride ? { ...getAIConfig(companyId), endpoint: String(aiOverride.endpoint || "").trim(), model: String(aiOverride.model || "gpt-4o-mini").trim() || "gpt-4o-mini", timeoutMs: Math.max(5000, Math.min(120000, Number(aiOverride.timeoutMs || 30000))), hasKey: Boolean(aiOverride.apiKey) } : getAIConfig(companyId);
+  const apiKey = aiOverride ? String(aiOverride.apiKey || "").trim() : getAIKey(companyId);
   if (!config.endpoint || !apiKey) return analyzeIntake(payload);
 
   const startedAt = Date.now();
@@ -191,15 +191,15 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
   }
 }
 
-export async function debugAI(actor = {}, db = null) {
+export async function debugAI(actor = {}, db = null, aiOverride = null) {
   const companyId = actor.companyId || "company-default";
-  const config = getAIConfig(companyId);
+  const config = aiOverride ? { ...getAIConfig(companyId), endpoint: String(aiOverride.endpoint || "").trim(), model: String(aiOverride.model || "gpt-4o-mini").trim() || "gpt-4o-mini", timeoutMs: Number(aiOverride.timeoutMs || 30000), hasKey: Boolean(aiOverride.apiKey) } : getAIConfig(companyId);
   const startedAt = Date.now();
   if (!config.endpoint || !config.hasKey) {
     return { ok: false, stage: "config", model: config.model, endpoint: config.endpoint, configured: false, message: "AI 地址或 API Key 未配置" };
   }
   try {
-    const result = await analyzeIntakeWithAI({ inputType: "text", text: "请生成一个标题为调试测试的任务，截止日期为明天。", projects: [], personnel: [] }, actor, db);
+    const result = await analyzeIntakeWithAI({ inputType: "text", text: "请生成一个标题为调试测试的任务，截止日期为明天。", projects: [], personnel: [] }, actor, db, aiOverride);
     return { ok: true, stage: "chat_completions", model: config.model, endpoint: config.endpoint, configured: true, durationMs: Date.now() - startedAt, result: { title: result.title, deadline: result.deadline } };
   } catch (error) {
     return { ok: false, stage: "chat_completions", model: config.model, endpoint: config.endpoint, configured: true, durationMs: Date.now() - startedAt, message: error?.message || "AI 请求失败" };

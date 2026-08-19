@@ -231,8 +231,8 @@ export const apiClient = {
   transcribeAudio(attachmentUrl: string) {
     return request<{ transcript: string; model: string }>("/api/intake/transcribe", { method: "POST", body: { attachmentUrl } });
   },
-  debugAI() {
-    return request<{ ok: boolean; stage: string; model: string; endpoint: string; configured: boolean; durationMs?: number; message?: string; result?: { title: string; deadline: string } }>("/api/ai-debug", { method: "POST", body: {} });
+  debugAI(payload?: { endpoint?: string; model?: string; apiKey?: string; timeoutMs?: number }) {
+    return request<{ ok: boolean; stage: string; model: string; endpoint: string; configured: boolean; durationMs?: number; message?: string; result?: { title: string; deadline: string } }>("/api/ai-debug", { method: "POST", body: payload || {} });
   },
   getAIConfig() {
     return request<{ endpoint: string; model: string; hasKey: boolean; configured: boolean; timeoutMs: number; updatedAt?: string | null }>("/api/ai-config");
