@@ -58,6 +58,8 @@ export const emptyForm: SurveyForm = {
   accessCondition: "车辆可达",
   networkSignal: "良好",
   notes: "",
+  materialsToCollect: "12个月电费单\n产权证\n村委同意书\n村物业租赁合同",
+  nextSteps: "了解业主屋面建设需求\n评估折扣电价",
 };
 
 export function getRoomTypeLabel(roomType?: string) {

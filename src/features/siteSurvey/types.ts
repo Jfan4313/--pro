@@ -25,6 +25,8 @@ export interface SurveyRecord {
   accessCondition: string;
   networkSignal: string;
   notes: string;
+  materialsToCollect: string;
+  nextSteps: string;
   photos: SurveyPhoto[];
   status: "completed" | "pending";
   createdAt: string;
@@ -55,6 +57,8 @@ export interface SurveyForm {
   accessCondition: string;
   networkSignal: string;
   notes: string;
+  materialsToCollect: string;
+  nextSteps: string;
 }
 
 export interface PendingSurveyPhoto {
