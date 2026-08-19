@@ -90,6 +90,12 @@ sudo cp deploy/zhijian-pro.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now zhijian-pro
 sudo systemctl status zhijian-pro
+
+# 如果服务已经安装过，重新安装 unit 后执行：
+sudo chown -R www-data:www-data /var/lib/zhijian-pro
+sudo chmod 750 /var/lib/zhijian-pro
+sudo systemctl daemon-reload
+sudo systemctl restart zhijian-pro
 ```
 
 检查本机后台：

@@ -8,10 +8,14 @@ function markdownEscape(value) {
 
 export function createWecomNotifier({ nowIso }) {
   const webhookUrl = cleanWebhook(process.env.WECOM_WEBHOOK_URL);
-  const dailyHour = Number.isFinite(Number(process.env.WECOM_DAILY_REMINDER_HOUR))
+  const morningHour = Number.isFinite(Number(process.env.WECOM_DAILY_REMINDER_HOUR))
     ? Math.min(23, Math.max(0, Number(process.env.WECOM_DAILY_REMINDER_HOUR)))
     : 9;
-  let lastDailyReminderDate = "";
+  const eveningHour = Number.isFinite(Number(process.env.WECOM_DAILY_SUMMARY_HOUR))
+    ? Math.min(23, Math.max(0, Number(process.env.WECOM_DAILY_SUMMARY_HOUR)))
+    : 18;
+  let lastMorningDate = "";
+  let lastEveningDate = "";
 
   async function sendMarkdown(content) {
     if (!webhookUrl) return { enabled: false };
@@ -39,35 +43,44 @@ export function createWecomNotifier({ nowIso }) {
   }
 
   function notifyMemoChange(previous = [], next = []) {
-    if (!webhookUrl) return;
-    const before = new Map((Array.isArray(previous) ? previous : []).map(item => [item.id, item]));
-    const current = Array.isArray(next) ? next : [];
-    const messages = [];
-    current.forEach(item => {
-      const old = before.get(item.id);
-      if (!old) messages.push(`### 新工作安排\n${formatMemo(item)}\n>安排人：${markdownEscape(item.creator)}`);
-      else if (old.status !== item.status && item.status === "feedback") messages.push(`### 收到执行反馈\n${formatMemo(item)}\n>反馈：${markdownEscape(item.feedback)}`);
-      else if (old.status !== item.status && item.status === "confirmed") messages.push(`### 工作安排已完成\n${formatMemo(item)}`);
-    });
-    if (messages.length) void sendMarkdown(messages.slice(0, 5).join("\n\n"));
+    // Task changes are intentionally batched into the fixed 18:00/09:00 digests.
+    // Keep this hook for compatibility with the app-data route.
   }
 
-  function startDailyReminder(getMemos) {
-    if (!webhookUrl) return;
+  function buildDigest(memos, mode, now) {
+    const today = now.toISOString().slice(0, 10);
+    const current = Array.isArray(memos) ? memos : [];
+    const unresolved = current.filter(item => item.status !== "confirmed");
+    const todayItems = current.filter(item => item.createdAt?.slice?.(0, 10) === today || item.updatedAt?.slice?.(0, 10) === today);
+    const dueToday = unresolved.filter(item => item.dueDate === today);
+    const overdue = unresolved.filter(item => item.dueDate && item.dueDate < today);
+    const completedToday = current.filter(item => item.status === "confirmed" && item.confirmedAt?.slice?.(0, 10) === today);
+    const items = mode === "evening" ? todayItems : [...dueToday, ...overdue, ...unresolved.filter(item => !dueToday.includes(item) && !overdue.includes(item))];
+    const unique = Array.from(new Map(items.map(item => [item.id, item])).values());
+    const sections = [];
+    if (mode === "evening" && todayItems.length) sections.push(`**今日新增/调整（${todayItems.length}）**\n${todayItems.slice(0, 12).map(formatMemo).join("\n")}`);
+    if (completedToday.length) sections.push(`**今日已完成（${completedToday.length}）**\n${completedToday.slice(0, 12).map(formatMemo).join("\n")}`);
+    if (dueToday.length) sections.push(`**今日待处理（${dueToday.length}）**\n${dueToday.slice(0, 12).map(formatMemo).join("\n")}`);
+    if (overdue.length) sections.push(`**已逾期（${overdue.length}）**\n${overdue.slice(0, 12).map(formatMemo).join("\n")}`);
+    if (mode === "morning" && unique.length && !sections.some(section => section.includes("今日待处理"))) sections.push(`**未完成任务（${unique.length}）**\n${unique.slice(0, 12).map(formatMemo).join("\n")}`);
+    return { today, title: mode === "evening" ? "今日任务总结" : "今日任务提醒", sections, count: unique.length + completedToday.length, items: unique };
+  }
+
+  function startScheduledDigest(getMemos, onDigest) {
     const check = () => {
       const now = new Date();
       const today = now.toISOString().slice(0, 10);
-      if (now.getHours() !== dailyHour || lastDailyReminderDate === today) return;
       const memos = getMemos();
-      const unresolved = (Array.isArray(memos) ? memos : []).filter(item => item.status !== "confirmed");
-      const overdue = unresolved.filter(item => item.dueDate < today);
-      const waiting = unresolved.filter(item => item.status === "feedback");
-      if (!overdue.length && !waiting.length) return;
-      lastDailyReminderDate = today;
-      const sections = [];
-      if (overdue.length) sections.push(`**已逾期（${overdue.length}）**\n${overdue.slice(0, 10).map(formatMemo).join("\n")}`);
-      if (waiting.length) sections.push(`**待确认反馈（${waiting.length}）**\n${waiting.slice(0, 10).map(formatMemo).join("\n")}`);
-      void sendMarkdown(`## 工作备忘每日提醒\n>时间：${nowIso()}\n\n${sections.join("\n\n")}`);
+      if (now.getHours() === eveningHour && lastEveningDate !== today) {
+        lastEveningDate = today;
+        const digest = buildDigest(memos, "evening", now);
+        if (digest.sections.length) { void sendMarkdown(`## 今日任务总结\n>时间：${nowIso()}\n\n${digest.sections.join("\n\n")}`); onDigest?.({ ...digest, mode: "evening" }); }
+      }
+      if (now.getHours() === morningHour && lastMorningDate !== today) {
+        lastMorningDate = today;
+        const digest = buildDigest(memos, "morning", now);
+        if (digest.sections.length) { void sendMarkdown(`## 今日任务提醒\n>时间：${nowIso()}\n\n${digest.sections.join("\n\n")}`); onDigest?.({ ...digest, mode: "morning" }); }
+      }
     };
     check();
     return setInterval(check, 60 * 1000);
@@ -75,9 +88,11 @@ export function createWecomNotifier({ nowIso }) {
 
   return {
     enabled: Boolean(webhookUrl),
-    dailyHour,
+    dailyHour: morningHour,
+    morningHour,
+    eveningHour,
     sendMarkdown,
     notifyMemoChange,
-    startDailyReminder,
+    startScheduledDigest,
   };
 }

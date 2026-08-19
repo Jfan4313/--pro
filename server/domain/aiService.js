@@ -13,12 +13,17 @@ try { runtimeConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch {
 function env(name, fallback = "") { return String(process.env[name] || fallback).trim(); }
 
 function persistConfig() {
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  const temporaryPath = `${configPath}.${process.pid}.tmp`;
-  fs.writeFileSync(temporaryPath, JSON.stringify(runtimeConfig, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(temporaryPath, 0o600); } catch { /* Best effort on platforms without POSIX modes. */ }
-  fs.renameSync(temporaryPath, configPath);
-  try { fs.chmodSync(configPath, 0o600); } catch { /* Best effort on platforms without POSIX modes. */ }
+  try {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const temporaryPath = `${configPath}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify(runtimeConfig, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(temporaryPath, 0o600); } catch { /* Best effort on platforms without POSIX modes. */ }
+    fs.renameSync(temporaryPath, configPath);
+    try { fs.chmodSync(configPath, 0o600); } catch { /* Best effort on platforms without POSIX modes. */ }
+  } catch (error) {
+    error.message = `无法写入 AI 配置文件 ${configPath}: ${error.message}`;
+    throw error;
+  }
 }
 
 function migrateLegacyConfig() {
@@ -77,6 +82,31 @@ function finiteToken(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
 }
 
+function resolveTranscriptionEndpoint(endpoint) {
+  const normalized = String(endpoint || "").trim().replace(/\/+$/, "");
+  if (!normalized) return "";
+  if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, "/audio/transcriptions");
+  if (/\/v1$/i.test(normalized)) return `${normalized}/audio/transcriptions`;
+  return `${normalized}/audio/transcriptions`;
+}
+
+async function transcribeAudio(filePath, config, apiKey) {
+  if (!filePath || !fs.existsSync(filePath)) return "";
+  const form = new FormData();
+  form.append("file", new Blob([fs.readFileSync(filePath)]), path.basename(filePath));
+  form.append("model", env("AI_TRANSCRIBE_MODEL", "whisper-1"));
+  form.append("language", "zh");
+  const response = await fetch(resolveTranscriptionEndpoint(config.endpoint), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(config.timeoutMs),
+  });
+  if (!response.ok) throw new Error(`Audio transcription failed: ${response.status}`);
+  const result = await response.json();
+  return String(result.text || result.transcript || "").trim();
+}
+
 export function normalizeAIUsage(result) {
   const usage = result?.usage || result?.response?.usage || {};
   const inputTokens = finiteToken(usage.prompt_tokens ?? usage.input_tokens ?? usage.inputTokens);
@@ -99,7 +129,11 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
   if (!config.endpoint || !apiKey) return analyzeIntake(payload);
 
   const startedAt = Date.now();
-  const prompt = `请从以下工作信息中提取任务，必须只返回 JSON：{"title":"","projectName":"","assignee":"","deadline":"YYYY-MM-DD","summary":"","confidence":0.0}。项目候选：${JSON.stringify(payload.projects || [])}。人员候选：${JSON.stringify(payload.personnel || [])}。输入类型：${payload.inputType}；文字：${payload.text || ""}；附件地址：${payload.attachmentUrl || ""}`;
+  let sourceText = String(payload.text || "");
+  if (payload.inputType === "audio" && payload.attachmentPath) {
+    try { sourceText = await transcribeAudio(payload.attachmentPath, config, apiKey); } catch (error) { console.warn("Audio transcription unavailable:", error.message); }
+  }
+  const prompt = `请从以下工作信息中提取一个或多个任务，必须只返回 JSON，不要 Markdown。格式：{"transcript":"","items":[{"title":"","summary":"","projectId":"","projectName":"","projectMatchType":"existing|new|unknown","assigneeIds":[],"assignees":[],"deadline":"YYYY-MM-DD","dueTime":"HH:mm","confidence":0.0}]}. 如果项目候选中能匹配全称、简称、编号、别名，projectMatchType 必须为 existing 并返回 projectId；否则如果说出了一个项目名称，标记 new；完全没有项目线索则标记 unknown。人员只能从候选人员中选择。项目候选：${JSON.stringify(payload.projects || [])}。人员候选：${JSON.stringify(payload.personnel || [])}。输入类型：${payload.inputType}；文字：${sourceText}；附件地址：${payload.attachmentUrl || ""}`;
   try {
     const response = await fetch(resolveChatCompletionsEndpoint(config.endpoint), { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: config.model, temperature: 0.1, messages: [{ role: "system", content: "你是项目管理任务识别助手。" }, { role: "user", content: prompt }] }), signal: AbortSignal.timeout(config.timeoutMs) });
     if (!response.ok) throw new Error(`AI request failed: ${response.status}`);
@@ -108,8 +142,32 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null) {
     const content = result.choices?.[0]?.message?.content || result.output_text || "";
     const parsed = extractJson(content);
     recordUsage(db, { companyId, userId, feature: "intake_analysis", model: config.model, ...usage, status: "success", durationMs: Date.now() - startedAt });
-    const project = (payload.projects || []).find((item) => item.id === parsed.projectId || item.name === parsed.projectName);
-    return { title: String(parsed.title || "待办任务"), projectId: project?.id || parsed.projectId || "", projectName: project?.name || parsed.projectName || "", assignee: String(parsed.assignee || ""), deadline: String(parsed.deadline || ""), summary: String(parsed.summary || payload.text || ""), confidence: Number(parsed.confidence || 0.5), needsManualReview: Number(parsed.confidence || 0.5) < 0.75 };
+    const projects = Array.isArray(payload.projects) ? payload.projects : [];
+    const personnel = Array.isArray(payload.personnel) ? payload.personnel : [];
+    const normalizeItem = (item = {}, index = 0) => {
+      const project = projects.find((candidate) => candidate.id === item.projectId || candidate.name === item.projectName || candidate.projectNumber === item.projectName || candidate.code === item.projectName);
+      const people = (Array.isArray(item.assigneeIds) ? item.assigneeIds : []).map((id) => personnel.find((person) => String(person.id) === String(id))).filter(Boolean);
+      const names = Array.from(new Set([...(Array.isArray(item.assignees) ? item.assignees : []), ...people.map((person) => person.name)].filter(Boolean)));
+      return {
+        id: `draft-${index + 1}`,
+        title: String(item.title || "待办任务"),
+        summary: String(item.summary || item.title || payload.text || ""),
+        projectId: project?.id || String(item.projectId || ""),
+        projectName: project?.name || String(item.projectName || ""),
+        projectMatchType: ["existing", "new", "unknown"].includes(item.projectMatchType) ? item.projectMatchType : (project ? "existing" : item.projectName ? "new" : "unknown"),
+        projectMatchConfidence: Number(item.projectMatchConfidence || (project ? 0.9 : item.projectName ? 0.45 : 0)),
+        assignees: names,
+        assignee: names[0] || "",
+        assigneeIds: people.map((person) => person.id),
+        deadline: String(item.deadline || ""),
+        dueTime: String(item.dueTime || ""),
+        confidence: Number(item.confidence || 0.5),
+        needsManualReview: Number(item.confidence || 0.5) < 0.75 || !item.deadline || names.length === 0,
+      };
+    };
+    const items = (Array.isArray(parsed.items) && parsed.items.length ? parsed.items : [parsed]).map(normalizeItem);
+    const first = items[0] || normalizeItem({}, 0);
+    return { ...first, summary: String(parsed.transcript || parsed.summary || first.summary || sourceText || ""), transcript: String(parsed.transcript || sourceText || ""), items, needsManualReview: items.some((item) => item.needsManualReview) };
   } catch (error) {
     const status = error?.name === "TimeoutError" || error?.name === "AbortError" ? "timeout" : "error";
     recordUsage(db, { companyId, userId, feature: "intake_analysis", model: config.model, inputTokens: null, outputTokens: null, totalTokens: null, status, durationMs: Date.now() - startedAt });

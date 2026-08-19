@@ -82,10 +82,29 @@ app.use("/api", auth.requireApiAuth);
 registerUtilityRoutes(app, routeContext);
 registerDataRoutes(app, routeContext);
 
-wecomNotifier.startDailyReminder(() => {
+function writeDigestNotification(digest) {
+  const row = db.prepare("SELECT value, version FROM app_data WHERE key = ?").get("appNotifications");
+  const notifications = parseJson(row?.value, []);
+  const notification = {
+    id: `digest-${digest.mode}-${digest.today}`,
+    type: "task-digest",
+    title: digest.title,
+    detail: `${digest.count} 项任务已汇总，请查看工作备忘。`,
+    mode: digest.mode,
+    createdAt: nowIso(),
+    read: false,
+  };
+  const next = [notification, ...(Array.isArray(notifications) ? notifications : []).filter((item) => item.id !== notification.id)].slice(0, 200);
+  const timestamp = nowIso();
+  const version = (row?.version || 0) + 1;
+  db.prepare(`INSERT INTO app_data (key, value, createdAt, updatedAt, version, clientId, updatedBy) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, version = excluded.version, clientId = excluded.clientId, updatedBy = excluded.updatedBy`).run("appNotifications", JSON.stringify(next), timestamp, timestamp, version, "scheduler", "system");
+  emitEvent({ type: "app_data_changed", key: "appNotifications", value: next, version });
+}
+
+wecomNotifier.startScheduledDigest(() => {
   const row = db.prepare("SELECT value FROM app_data WHERE key = ?").get("workMemos");
   return parseJson(row?.value, []);
-});
+}, writeDigestNotification);
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "api_not_found" });
@@ -102,5 +121,5 @@ app.listen(port, host, () => {
   console.log(`Local backend listening on http://${host}:${port}`);
   console.log(`SQLite database: ${dbPath}`);
   if (fs.existsSync(path.join(distDir, "index.html"))) console.log(`Web app served from ${distDir}`);
-  console.log(`Enterprise WeChat notifications: ${wecomNotifier.enabled ? `enabled (daily ${wecomNotifier.dailyHour}:00)` : "disabled; set WECOM_WEBHOOK_URL to enable"}`);
+  console.log(`Enterprise WeChat notifications: ${wecomNotifier.enabled ? `enabled (summary ${wecomNotifier.eveningHour}:00, reminder ${wecomNotifier.morningHour}:00)` : "disabled; set WECOM_WEBHOOK_URL to enable"}`);
 });

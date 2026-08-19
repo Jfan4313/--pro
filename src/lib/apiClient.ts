@@ -201,11 +201,31 @@ export const apiClient = {
       title: string;
       projectId: string;
       projectName: string;
+      projectMatchType?: "existing" | "new" | "unknown";
+      projectMatchConfidence?: number;
+      projectCandidates?: Array<{ id: string; name: string; projectNumber?: string }>;
       assignee: string;
+      assignees?: string[];
       deadline: string;
       summary: string;
+      transcript?: string;
       confidence: number;
       needsManualReview: boolean;
+      items?: Array<{
+        id: string;
+        title: string;
+        summary: string;
+        projectId: string;
+        projectName: string;
+        projectMatchType?: "existing" | "new" | "unknown";
+        projectMatchConfidence?: number;
+        assignee: string;
+        assignees?: string[];
+        deadline: string;
+        dueTime?: string;
+        confidence: number;
+        needsManualReview: boolean;
+      }>;
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
   getAIConfig() {

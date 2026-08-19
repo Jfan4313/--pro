@@ -109,7 +109,14 @@ export function registerUtilityRoutes(app, context) {
     if (!["text", "image", "audio"].includes(inputType)) {
       return res.status(400).json({ error: "invalid_input_type" });
     }
-    try { res.json(await analyzeIntakeWithAI(req.body || {}, currentUser(req), db)); } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
+    try {
+      const body = { ...(req.body || {}) };
+      if (inputType === "audio" && body.attachmentUrl) {
+        const filename = path.basename(String(body.attachmentUrl).split("?")[0]);
+        body.attachmentPath = path.join(uploadsDir, filename);
+      }
+      res.json(await analyzeIntakeWithAI(body, currentUser(req), db));
+    } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
   });
 
   app.get("/api/file-settings", (_req, res) => {
