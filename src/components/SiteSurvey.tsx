@@ -29,7 +29,7 @@ import { fileToDataUrl, isStorageQuotaError, pendingToRecord, uploadedUrl } from
 import { compressPhoto } from "@/src/features/siteSurvey/photoProcessing";
 import type { DraftPhoto, PendingSurvey, SurveyForm, SurveyPhoto, SurveyRecord, SurveyRoom } from "@/src/features/siteSurvey/types";
 
-export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => void; initialProjectId?: string | null }) {
+export function SiteSurvey({ onBack, initialProjectId = null, initialRecordId = null }: { onBack: () => void; initialProjectId?: string | null; initialRecordId?: string | null }) {
   const [boardData, setBoardData, , boardSeed] = useProjectBoardData();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const projects = useMemo(() => sortProjectsNaturally(flattenProjects(boardData)), [boardData]);
@@ -81,6 +81,12 @@ export function SiteSurvey({ onBack, initialProjectId = null }: { onBack: () => 
       return true;
     });
   }, [pendingSurveys, recentlySavedRecords, records, removedRecordIds]);
+
+  useEffect(() => {
+    if (!initialRecordId || selectedRecord || !allRecords.length) return;
+    const record = allRecords.find((item) => String(item.id) === String(initialRecordId));
+    if (record) setSelectedRecord(record);
+  }, [allRecords, initialRecordId, selectedRecord]);
   const selectedProject = useMemo(
     () => projects.find((project: any) => project.id === form.projectId),
     [form.projectId, projects],

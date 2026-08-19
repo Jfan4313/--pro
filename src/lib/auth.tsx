@@ -16,6 +16,7 @@ export interface AuthUser {
   role: string;
   status: string;
   permissions: string[];
+  companyId: string;
   mustChangePassword: boolean;
   lastLoginAt?: string | null;
   isDemo?: boolean;
@@ -30,6 +31,7 @@ const GUEST_USER: AuthUser = {
   role: "admin",
   status: "active",
   permissions: ["*"],
+  companyId: "company-demo",
   mustChangePassword: false,
   isDemo: true,
 };

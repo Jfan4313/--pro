@@ -8,6 +8,8 @@ import { getProjectNumber } from "@/src/lib/management";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
 import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { ArchiveFolderState, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
+import { useAuth } from "@/src/lib/auth";
+import { apiClient } from "@/src/lib/apiClient";
 
 const statusConfig = {
   normal: { icon: Clock, color: "text-slate-400", tooltip: "进度正常" },
@@ -34,6 +36,7 @@ const projectTypes = ["光伏项目", "储能项目", "充电桩项目", "零碳
 const businessModels = ["EPC", "EMC"];
 
 export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenProject?: (projectId: string) => void; onOpenProjectDetail?: (projectId: string) => void }) {
+  const { user } = useAuth();
   const [data, setData, , boardSeed] = useProjectBoardData();
   const [supplyOrders] = useSyncedAppData("supplyOrders", []);
   const [personnelData] = useSyncedAppData("personnelData", []);
@@ -77,6 +80,19 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
   const [dragOverItem, setDragOverItem] = useState<{ columnId: string, projectId: string | null } | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [projectScope, setProjectScope] = useState<"all" | "mine">("all");
+  const [projectManagers, setProjectManagers] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    apiClient.listAccounts().then((accounts) => {
+      if (!cancelled) setProjectManagers(accounts.filter((account: any) => account.role === "project_manager" || account.role === "admin"));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  const isMyProject = (project: any) => project.managerId === user?.id || (!project.managerId && project.manager === user?.name);
+  const visibleProjects = (projects: any[]) => projectScope === "all" ? projects : projects.filter(isMyProject);
 
   const archiveProject = (project: any) => {
     if (!window.confirm(`确定归档项目“${project.name}”吗？归档不会删除项目资料、合同、日程或成本记录。`)) return;
@@ -177,6 +193,8 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
     const projectNumber = await reserveProjectNumber();
+    const managerId = formData.get('managerId') as string;
+    const selectedManager = projectManagers.find((manager) => manager.id === managerId);
 
     const newProject = {
       id: `p${Date.now()}`,
@@ -184,7 +202,8 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
       name: formData.get('name') as string,
       type: formData.get('type') as string,
       businessModel: formData.get('businessModel') as string,
-      manager: formData.get('manager') as string,
+      manager: selectedManager?.name || "",
+      managerId,
       dueDate: formData.get('dueDate') as string,
       constructProgress: 0,
       supplyProgress: 0,
@@ -333,6 +352,10 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
           <p className="text-slate-500 text-xs md:text-sm mt-1">全局监控各项目的所处阶段、施工与采购进度</p>
         </div>
         <div className="flex gap-2 md:gap-3 items-center">
+          <select value={projectScope} onChange={(event) => setProjectScope(event.target.value as "all" | "mine")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+            <option value="all">公司全部项目</option>
+            <option value="mine">我负责的项目</option>
+          </select>
           <button type="button" onClick={() => setShowArchive((value) => !value)} className={cn("px-3 py-2 rounded-lg text-xs font-semibold border", showArchive ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600")}>项目归档 ({archivedProjects.length})</button>
           {selectedProjectIds.length > 0 && <button type="button" onClick={archiveSelectedProjects} className="px-3 py-2 rounded-lg bg-amber-500 text-white text-xs font-bold">归档选中 ({selectedProjectIds.length})</button>}
           <button 
@@ -385,7 +408,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                     {column.title}
                   </h3>
                   <span className="ml-1 bg-slate-200/50 text-slate-500 text-[10px] font-mono px-2 py-0.5 rounded border border-slate-200/50">
-                    {(column.projects?.length || 0).toString().padStart(2, '0')}
+                    {visibleProjects(column.projects || []).length.toString().padStart(2, '0')}
                   </span>
                 </div>
                 <button className="text-slate-300 hover:text-slate-500 p-1 hover:bg-slate-100 rounded-md transition-colors">
@@ -394,7 +417,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-3 md:space-y-4 pr-1 pb-10 custom-scrollbar scroll-smooth">
-                {Array.isArray(column.projects) && sortProjectsNaturally(column.projects).map((project) => {
+                {Array.isArray(column.projects) && visibleProjects(sortProjectsNaturally(column.projects)).map((project) => {
                   const config = statusConfig[project.status as keyof typeof statusConfig] || statusConfig.normal;
                   const StatusIcon = config.icon;
                   const statusColor = config.color;
@@ -539,7 +562,11 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">项目经理</label>
-                    <input name="manager" type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="可暂不指定" />
+                    <select name="managerId" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" defaultValue="">
+                      <option value="">暂不指定</option>
+                      {projectManagers.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}（{manager.username}）</option>)}
+                    </select>
+                    <input type="hidden" name="manager" value="" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">预计竣工日期</label>
@@ -602,13 +629,10 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">项目经理</label>
-                    <input 
-                      type="text" 
-                      required 
-                      value={editingProject.manager}
-                      onChange={(e) => setEditingProject({...editingProject, manager: e.target.value})}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" 
-                    />
+                    <select value={editingProject.managerId || ""} onChange={(e) => { const manager = projectManagers.find((item) => item.id === e.target.value); setEditingProject({...editingProject, managerId: manager?.id || "", manager: manager?.name || ""}); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                      <option value="">暂不指定</option>
+                      {projectManagers.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}（{manager.username}）</option>)}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">预计竣工日期</label>

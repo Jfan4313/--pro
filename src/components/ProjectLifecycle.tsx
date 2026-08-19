@@ -262,7 +262,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   onBack?: () => void;
   onOpenProjectDetail?: (projectId: string) => void;
   onSelectionChange?: (project: any, stageId: string) => void;
-  onOpenSiteSurvey?: (projectId: string) => void;
+  onOpenSiteSurvey?: (projectId: string, recordId?: string) => void;
 }) {
   const [boardData] = useProjectBoardData();
   const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
@@ -312,6 +312,11 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
 
   const activeProj = allProjects.find((p: any) => p.id === selectedProject);
   const activeProjectSurveys = activeProj ? surveyRecords.filter((record: any) => record.projectId === activeProj.id) : [];
+  const latestProjectSurvey = [...activeProjectSurveys].sort((a: any, b: any) => {
+    const aTime = new Date(a.createdAt || a.surveyDate || 0).getTime();
+    const bTime = new Date(b.createdAt || b.surveyDate || 0).getTime();
+    return bTime - aTime;
+  })[0];
   
   // Safe accessor for current project state
   const projState = activeProj ? (lifecycleStates[activeProj.id] || {}) : {};
@@ -582,7 +587,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                         </div>
                         <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
                         <div className="flex flex-wrap gap-2">
-                          {stage.id === "1_initiation" && <button onClick={() => onOpenSiteSurvey?.(activeProj.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm"><Camera className="h-4 w-4" />现场勘察{activeProjectSurveys.length > 0 ? `（${activeProjectSurveys.length}）` : ""}</button>}
+                          {stage.id === "1_initiation" && <button onClick={() => onOpenSiteSurvey?.(activeProj.id, latestProjectSurvey?.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm"><Camera className="h-4 w-4" />{latestProjectSurvey ? "查看现场勘察报告" : "现场勘察"}{activeProjectSurveys.length > 0 ? `（${activeProjectSurveys.length}）` : ""}</button>}
                           <button 
                             onClick={handleUploadClick}
                             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 shadow-sm transition-colors"

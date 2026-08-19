@@ -91,6 +91,7 @@ ensureColumn("users", "status", "TEXT NOT NULL DEFAULT 'active'");
 ensureColumn("users", "permissions", "TEXT");
 ensureColumn("users", "mustChangePassword", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("users", "lastLoginAt", "TEXT");
+ensureColumn("users", "companyId", "TEXT");
 
 db.exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
@@ -131,6 +132,8 @@ if (!admin?.username || !admin?.passwordHash) {
     WHERE id = 'admin-local'
   `).run(hashPassword(process.env.INITIAL_ADMIN_PASSWORD || "ZJxt@2026"), now);
 }
+
+db.prepare("UPDATE users SET companyId = COALESCE(NULLIF(companyId, ''), 'company-default') WHERE companyId IS NULL OR companyId = ''").run();
 
 db.prepare(`
   UPDATE users SET name = '展示帐号', mustChangePassword = 0, updatedAt = ?

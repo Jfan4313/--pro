@@ -3,11 +3,13 @@ import { Users, UserCheck, ShieldAlert, Search, Filter, MoreHorizontal, CheckCir
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { createEmptyOrganization } from "@/src/lib/workspaceDefaults";
 
 const personnelDataInitial: any[] = [];
 
 export function Personnel() {
   const [data, setData] = useSyncedAppData("personnelData", personnelDataInitial);
+  const [orgData] = useSyncedAppData<any>("organizationData", createEmptyOrganization());
   const [boardData] = useProjectBoardData();
 
   const dynamicProjects = React.useMemo(() => {
@@ -90,10 +92,20 @@ export function Personnel() {
     return data.map((p: any) => ({
       ...p,
       projects: p.projects || [{ name: p.project, status: 'active' }],
-      specialCertsImage: p.specialCertsImage || null
+      specialCertsImage: p.specialCertsImage || null,
+      loginEnabled: Boolean(p.accountId || p.loginEnabled),
     }));
   }, [data]);
-  const teamOptions = useMemo(() => ["全部班组", ...Array.from(new Set(normalizedData.map((person: any) => person.team).filter(Boolean)))], [normalizedData]);
+  const organizationTeams = useMemo(() => {
+    const teams: Array<{ id: string; name: string }> = [];
+    const walk = (node: any) => {
+      if (node?.type === "team") teams.push({ id: node.id, name: node.name });
+      (node?.children || []).forEach(walk);
+    };
+    walk(orgData);
+    return teams;
+  }, [orgData]);
+  const teamOptions = useMemo(() => ["全部班组", ...Array.from(new Set([...organizationTeams.map((team) => team.name), ...normalizedData.map((person: any) => person.team)].filter(Boolean)))], [normalizedData, organizationTeams]);
   const deleteTarget = useMemo(() => normalizedData.find((person: any) => person.id === deleteConfirmId), [normalizedData, deleteConfirmId]);
 
   const filteredData = useMemo(() => {
@@ -202,6 +214,8 @@ export function Personnel() {
     } else {
       const newPerson = {
         ...formData,
+        loginEnabled: false,
+        accountId: null,
         entryDate: new Date().toISOString().split('T')[0],
         status: "on-site",
         safetyTrained: false,
@@ -240,7 +254,7 @@ export function Personnel() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">施工人员管理</h2>
-          <p className="text-slate-500 text-sm mt-1">现场劳动力调配与安全培训追踪</p>
+          <p className="text-slate-500 text-sm mt-1">施工人员档案、班组归属与安全培训追踪（普通施工人员无需登录系统）</p>
         </div>
         <div className="flex gap-3">
           <select 
@@ -347,7 +361,7 @@ export function Personnel() {
                         </button>
                       )}
                     </div>
-                    <div className="mt-0.5 truncate text-xs font-normal text-slate-400">{person.sourceType || "内部"}{person.companyName ? ` · ${person.companyName}` : ""}</div>
+                    <div className="mt-0.5 truncate text-xs font-normal text-slate-400">施工人员档案 · 无系统登录{person.sourceType ? ` · ${person.sourceType}` : ""}{person.companyName ? ` · ${person.companyName}` : ""}</div>
                   </div>
                 </td>
                 <td className="px-4 py-4 text-slate-600">
@@ -556,7 +570,11 @@ export function Personnel() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">所属班组 <span className="text-rose-500">*</span></label>
-                    <input type="text" required value={formData.team} onChange={e => setFormData({...formData, team: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="例如：安装二班" />
+                    <select required value={formData.team} onChange={e => setFormData({...formData, team: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                      <option value="">请选择班组</option>
+                      {organizationTeams.map((team) => <option key={team.id} value={team.name}>{team.name}</option>)}
+                      {formData.team && !organizationTeams.some((team) => team.name === formData.team) && <option value={formData.team}>{formData.team}（历史数据）</option>}
+                    </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">

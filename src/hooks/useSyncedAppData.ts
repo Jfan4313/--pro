@@ -4,7 +4,7 @@ import { offlineDb } from "@/src/lib/offlineDb";
 import { onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
 import { emptyWorkspaceValue } from "@/src/lib/workspaceDefaults";
 
-export function useSyncedAppData<T>(key: string, initialValue: T) {
+export function useSyncedAppData<T>(key: string, initialValue: T, legacyKeys: string[] = []) {
   const [data, setData] = useState<T>(initialValue);
   const [loading, setLoading] = useState(true);
   const dataRef = useRef(data);
@@ -22,9 +22,26 @@ export function useSyncedAppData<T>(key: string, initialValue: T) {
 
       try {
         const remote = await apiClient.getAppData<T>(key);
-        const value = remote.exists === false ? emptyWorkspaceValue(key, initialValue) : remote.value;
+        let migratedValue: T | undefined;
+        if (remote.exists === false && legacyKeys.length > 0) {
+          for (const legacyKey of legacyKeys) {
+            if (!legacyKey || legacyKey === key) continue;
+            const legacy = await apiClient.getAppData<T>(legacyKey);
+            if (legacy.exists !== false) {
+              migratedValue = legacy.value;
+              break;
+            }
+          }
+        }
+        const value = remote.exists === false
+          ? (migratedValue === undefined ? emptyWorkspaceValue(key, initialValue) : migratedValue)
+          : remote.value;
         if (remote.exists !== false) {
           await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
+        } else if (migratedValue !== undefined) {
+          // Move old per-account board data into the shared company key once.
+          await offlineDb.putAppData(key, value, { pending: true });
+          await queueAppDataUpdate(key, value);
         } else {
           // A key removed from the server must not keep reappearing from an old
           // IndexedDB cache on the next page load. Offline requests still keep

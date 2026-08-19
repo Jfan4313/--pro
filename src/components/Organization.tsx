@@ -13,6 +13,7 @@ type OrgNode = {
   name: string;
   type: OrgNodeType;
   children: OrgNode[];
+  leaderAccountId?: string;
 };
 
 type OrgDialogState =
@@ -71,6 +72,9 @@ export function Organization() {
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountSaving, setAccountSaving] = useState(false);
   const [newAccountForm, setNewAccountForm] = useState({ username: "", name: "", email: "", phone: "", position: "", role: "surveyor", password: "" });
+  const [isLeaderModalOpen, setIsLeaderModalOpen] = useState(false);
+  const [leaderAccounts, setLeaderAccounts] = useState<any[]>([]);
+  const [leaderLoading, setLeaderLoading] = useState(false);
   const [orgDialog, setOrgDialog] = useState<OrgDialogState | null>(null);
   const [selectedMember, setSelectedMember] = useState<any | null>(null);
 
@@ -138,6 +142,7 @@ export function Organization() {
   });
 
   const selectedNode = useMemo(() => findNode(orgData, selectedNodeId), [orgData, selectedNodeId]);
+  const selectedLeader = useMemo(() => leaderAccounts.find((account) => account.id === selectedNode?.leaderAccountId), [leaderAccounts, selectedNode]);
 
   const displayMembers = useMemo(() => {
     if (!selectedNode) return [];
@@ -228,6 +233,31 @@ export function Organization() {
   };
 
   const handleLinkExistingAccount = (account: any) => linkAccountToOrganization(account);
+
+  const setNodeLeader = (node: OrgNode, nodeId: string, leaderAccountId: string): OrgNode => {
+    if (node.id === nodeId) return { ...node, leaderAccountId: leaderAccountId || undefined };
+    return { ...node, children: (node.children || []).map((item) => setNodeLeader(item, nodeId, leaderAccountId)) };
+  };
+
+  const openLeaderModal = async () => {
+    if (!selectedNode || selectedNode.type !== "team") return;
+    setIsLeaderModalOpen(true);
+    setLeaderLoading(true);
+    try {
+      setLeaderAccounts(systemAccounts.length ? systemAccounts : await apiClient.listAccounts());
+    } catch {
+      showToast("系统账号加载失败，请确认当前账号有组织管理权限");
+    } finally {
+      setLeaderLoading(false);
+    }
+  };
+
+  const handleSetLeader = (accountId: string) => {
+    if (!selectedNode) return;
+    void setOrgData((current) => setNodeLeader(current, selectedNode.id, accountId));
+    setIsLeaderModalOpen(false);
+    showToast(accountId ? "班组长已设置" : "班组长已取消");
+  };
 
   const handleCreateAndLinkAccount = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -418,8 +448,9 @@ export function Organization() {
                selectedNode?.type === 'department' ? '部门及下属班组人员' : '班组人员'} 
               · 共 {displayMembers.length} 人
             </p>
+            {selectedNode?.type === "team" && <p className="mt-1 text-xs text-slate-400">班组长：{selectedLeader?.name || "未设置"} · 普通施工人员请在“施工人员管理”录入</p>}
           </div>
-          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input 
@@ -430,6 +461,7 @@ export function Organization() {
                 className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 w-64"
               />
             </div>
+            {selectedNode?.type === "team" && <button onClick={() => void openLeaderModal()} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"><UserRound className="h-4 w-4" />设置班组长</button>}
             <button 
               onClick={() => void openAddMemberModal()}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
@@ -458,7 +490,7 @@ export function Organization() {
                       <h4 className="font-bold text-slate-900 truncate">{person.name}</h4>
                       <span className="text-xs font-medium text-slate-500">{person.id}</span>
                     </div>
-                    <div className="text-sm text-slate-600 mb-2">{person.role}</div>
+                    <div className="mb-2 flex items-center gap-2 text-sm text-slate-600"><span>{person.role}</span>{person.accountId ? <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">系统账号</span> : <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">施工档案</span>}</div>
                     <div className="flex items-center gap-2">
                       <span className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-md truncate">
                         {person.team}
@@ -485,7 +517,7 @@ export function Organization() {
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[88vh]">
             <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
-              <div><h3 className="text-lg font-bold text-slate-900">添加成员至 {selectedNode?.name}</h3><p className="mt-1 text-xs text-slate-500">可以关联已有系统账号，也可以创建新账号</p></div>
+              <div><h3 className="text-lg font-bold text-slate-900">添加系统成员至 {selectedNode?.name}</h3><p className="mt-1 text-xs text-slate-500">这里只关联需要登录系统的人员；普通施工人员请在“施工人员管理”录入</p></div>
               <button onClick={() => setIsAddMemberModalOpen(false)} className="text-slate-400 hover:text-slate-600" type="button">
                 <X className="w-5 h-5" />
               </button>
@@ -498,6 +530,24 @@ export function Organization() {
               <div className="p-4 border-b border-slate-100 shrink-0"><div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all"><Search className="w-4 h-4 text-slate-400 mr-2" /><input type="text" value={memberSearchQuery} onChange={(e) => setMemberSearchQuery(e.target.value)} placeholder="搜索姓名、登录账号、手机号或邮箱..." className="bg-transparent border-none outline-none text-sm w-full text-slate-700" /></div></div>
               <div className="p-4 overflow-y-auto flex-1"><div className="space-y-2">{accountsLoading ? <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" /></div> : filteredSystemAccounts.length === 0 ? <div className="text-center py-8 text-slate-400 text-sm">未找到可添加的系统账号</div> : filteredSystemAccounts.map((account) => <div key={account.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-colors"><div className="flex items-center gap-3 min-w-0"><div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm shrink-0">{account.name.substring(0, 1)}</div><div className="min-w-0"><div className="font-medium text-slate-900 text-sm truncate">{account.name}</div><div className="text-xs text-slate-500 truncate">@{account.username}{account.phone ? ` · ${account.phone}` : ""}</div></div></div><button type="button" onClick={() => handleLinkExistingAccount(account)} className="text-xs font-medium text-indigo-600 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-colors shrink-0">加入</button></div>)}</div></div>
             </> : <form onSubmit={handleCreateAndLinkAccount} className="p-5 overflow-y-auto flex-1"><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{[["姓名", "name", "例如：张伟"], ["登录账号", "username", "英文、数字或手机号"], ["手机号", "phone", "用于验证码登录，可选"], ["邮箱", "email", "可选"], ["职位", "position", "例如：技术总监"]].map(([label, key, placeholder]) => <label key={key} className={`block ${key === "position" ? "sm:col-span-2" : ""}`}><span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}{["name", "username"].includes(key) ? " *" : ""}</span><input value={(newAccountForm as any)[key]} onChange={(event) => setNewAccountForm({ ...newAccountForm, [key]: event.target.value })} placeholder={placeholder} className="survey-input" /></label>)}<label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-semibold text-slate-700">系统角色</span><select value={newAccountForm.role} onChange={(event) => setNewAccountForm({ ...newAccountForm, role: event.target.value })} className="survey-input"><option value="admin">系统管理员</option><option value="project_manager">项目经理</option><option value="surveyor">现场勘察员</option><option value="designer">设计人员</option><option value="finance">财务人员</option><option value="viewer">只读成员</option></select></label><label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-semibold text-slate-700">临时密码</span><div className="relative"><KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="password" value={newAccountForm.password} onChange={(event) => setNewAccountForm({ ...newAccountForm, password: event.target.value })} placeholder="可选；留空则使用手机号验证码登录" className="survey-input pl-9" /></div></label></div><p className="mt-3 text-xs text-slate-400">手机号和临时密码至少填写一项。创建后账号会自动加入当前组织。</p><button disabled={accountSaving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white disabled:opacity-50">{accountSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}{accountSaving ? "正在创建" : "创建账号并加入组织"}</button></form>}
+          </div>
+        </div>
+      )}
+
+      {isLeaderModalOpen && selectedNode?.type === "team" && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100">
+              <div><h3 className="text-lg font-bold text-slate-900">设置班组长</h3><p className="mt-1 text-xs text-slate-500">{selectedNode.name} · 仅关联可登录系统的账号</p></div>
+              <button type="button" onClick={() => setIsLeaderModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-2">
+              {leaderLoading ? <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" /></div> : <>
+                <button type="button" onClick={() => handleSetLeader("")} className="w-full rounded-xl border border-dashed border-slate-300 px-4 py-3 text-left text-sm text-slate-500 hover:bg-slate-50">暂不设置班组长</button>
+                {leaderAccounts.filter((account) => account.status === "active").map((account) => <button type="button" key={account.id} onClick={() => handleSetLeader(account.id)} className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors", selectedNode.leaderAccountId === account.id ? "border-indigo-300 bg-indigo-50" : "border-slate-200 hover:bg-slate-50")}><span className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">{account.name.substring(0, 1)}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-800">{account.name}</span><span className="block truncate text-xs text-slate-500">@{account.username} · {account.role === "construction_leader" ? "施工班长" : "可登录账号"}</span></span>{selectedNode.leaderAccountId === account.id && <span className="text-xs font-bold text-indigo-600">当前</span>}</button>)}
+                {!leaderAccounts.length && <p className="py-8 text-center text-sm text-slate-400">暂无可关联的系统账号，请先创建班长账号</p>}
+              </>}
+            </div>
           </div>
         </div>
       )}

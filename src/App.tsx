@@ -59,7 +59,7 @@ export default function App() {
   const [selectedProjectReference, setSelectedProjectReference] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("stage") || null);
   const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices" | "procurement">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
-  const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; returnTab: string }>({ projectId: null, returnTab: "dashboard" });
+  const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; recordId: string | null; returnTab: string }>({ projectId: null, recordId: null, returnTab: "dashboard" });
 
   const navigateToTab = (tab: string) => {
     const permission = tabPermissions[tab];
@@ -67,7 +67,7 @@ export default function App() {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前帐号没有该模块权限" }));
       return;
     }
-    if (tab === "site-survey") setSurveyContext({ projectId: null, returnTab: "dashboard" });
+    if (tab === "site-survey") setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" });
     setActiveTab(tab);
     const params = new URLSearchParams(window.location.search);
     params.set("tab", tab);
@@ -78,14 +78,16 @@ export default function App() {
     window.history.pushState({ tab }, "", `${window.location.pathname}?${params.toString()}`);
   };
 
-  const openProjectSurvey = (projectId: string, returnTab = "project-detail") => {
+  const openProjectSurvey = (projectId: string, returnTab = "project-detail", recordId: string | null = null) => {
     setSelectedProjectReference(projectId);
-    setSurveyContext({ projectId, returnTab });
+    setSurveyContext({ projectId, recordId, returnTab });
     setActiveTab("site-survey");
     const params = new URLSearchParams(window.location.search);
     params.set("tab", "site-survey");
     params.set("project", projectId);
-    window.history.pushState({ tab: "site-survey", projectId }, "", `${window.location.pathname}?${params.toString()}`);
+    if (recordId) params.set("surveyRecord", recordId);
+    else params.delete("surveyRecord");
+    window.history.pushState({ tab: "site-survey", projectId, surveyRecord: recordId }, "", `${window.location.pathname}?${params.toString()}`);
   };
 
   const handleMaterialsNavigate = (tab: string, subTab?: string) => {
@@ -181,8 +183,8 @@ export default function App() {
           {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
           {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div></>}
           {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
-          {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId) => openProjectSurvey(projectId, "lifecycle")} />}
-          {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, returnTab: "dashboard" }); }} />}
+          {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
+          {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
           {activeTab === "work-memo" && <WorkMemo />}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}

@@ -9,6 +9,7 @@ export const ROLE_PERMISSIONS = {
   designer: ["dashboard", "projects", "lifecycle", "survey", "files", "collaboration"],
   finance: ["dashboard", "projects", "contracts", "cost", "supply", "files"],
   viewer: ["dashboard", "projects", "files"],
+  construction_leader: ["dashboard", "projects", "survey", "files", "schedule", "collaboration", "organization"],
 };
 
 export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -53,6 +54,7 @@ export function publicUser(user) {
     role: user.role,
     status: user.status,
     permissions: permissionsForUser(user),
+    companyId: user.companyId || "company-default",
     mustChangePassword: Boolean(user.mustChangePassword),
     lastLoginAt: user.lastLoginAt || null,
     createdAt: user.createdAt,

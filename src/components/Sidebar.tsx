@@ -72,7 +72,8 @@ export function Sidebar({ activeTab, setActiveTab, onOpenProcurement }: SidebarP
   const { user, logout, can } = useAuth();
   const [isWorkbenchOpen, setIsWorkbenchOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<string[]>(["workspace", "execution", "supply"]);
-  const visibleNavGroups = navGroups.map((group) => ({ ...group, items: group.items.filter((item) => can(item.permission)) })).filter((group) => group.items.length > 0);
+  const canViewAccounts = can("accounts") || can("organization");
+  const visibleNavGroups = navGroups.map((group) => ({ ...group, items: group.items.filter((item) => item.id === "accounts" ? canViewAccounts : can(item.permission)) })).filter((group) => group.items.length > 0);
   const visibleNavItems = visibleNavGroups.flatMap((group) => group.items);
   const visibleMobileNavItems = mobileNavItems.filter((item) => can(item.id === "board" ? "projects" : item.id === "chat" ? "collaboration" : item.id));
 

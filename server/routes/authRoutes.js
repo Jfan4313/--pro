@@ -76,9 +76,9 @@ export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin,
     db.prepare(`
       INSERT INTO users (
         id, username, name, email, phone, role, passwordHash, status,
-        permissions, mustChangePassword, createdAt, updatedAt
+        permissions, mustChangePassword, companyId, createdAt, updatedAt
       )
-      VALUES (?, ?, ?, ?, ?, 'project_manager', ?, 'active', NULL, 0, ?, ?)
+      VALUES (?, ?, ?, ?, ?, 'project_manager', ?, 'active', NULL, 0, 'company-default', ?, ?)
     `).run(id, username, name, email, phone, hashPassword(password), timestamp, timestamp);
 
     const token = createSessionToken();
@@ -133,9 +133,9 @@ export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin,
     if (phone && db.prepare("SELECT id FROM users WHERE phone = ?").get(phone)) return res.status(409).json({ error: "phone_exists" });
     const id = crypto.randomUUID();
     const timestamp = nowIso();
-    db.prepare(`INSERT INTO users (id, username, name, email, phone, role, passwordHash, status, permissions, mustChangePassword, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?)`)
-      .run(id, username, name, String(req.body?.email || ""), phone, String(req.body?.role || "viewer"), password ? hashPassword(password) : null, Array.isArray(req.body?.permissions) ? JSON.stringify(req.body.permissions) : null, timestamp, timestamp);
+    db.prepare(`INSERT INTO users (id, username, name, email, phone, role, passwordHash, status, permissions, mustChangePassword, companyId, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?)`)
+      .run(id, username, name, String(req.body?.email || ""), phone, String(req.body?.role || "viewer"), password ? hashPassword(password) : null, Array.isArray(req.body?.permissions) ? JSON.stringify(req.body.permissions) : null, req.authUser.companyId || "company-default", timestamp, timestamp);
     void wecomNotifier?.sendMarkdown(`### 新用户帐号已创建\n>姓名：${name}\n>手机号：${phone || "未填写"}\n>登录方式：${password ? "临时密码" : "开发模式一次性验证码"}`);
     res.status(201).json(publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id)));
   });
