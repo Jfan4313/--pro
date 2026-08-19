@@ -20,13 +20,15 @@ export const STAGES = [
       { id: "c3", label: "项目所在地航拍图及周边环境录像" },
       { id: "c4", label: "项目建筑图、平面图、结构图" },
       { id: "c5", label: "项目电费详情单（过去完整12个月）" },
-      { id: "c6", label: "变压器规格、数量、电房位置、结算户信息" },
-      { id: "c7", label: "项目产权资料与土地租赁/房产证证明" }
+      { id: "c6", label: "变压器规格、数量、电房位置" },
+      { id: "c7", label: "结算户信息" },
+      { id: "c8", label: "项目产权资料与房产证/土地租赁证明" }
     ],
     fields: [
       { id: "f1", label: "建筑屋顶可利用面积估算(㎡)", type: "text", placeholder: "㎡" },
       { id: "f2", label: "电价水平及用电性质", type: "text", placeholder: "例如: 大工业/一般工商业" },
-      { id: "f3", label: "项目概况分析", type: "textarea", placeholder: "填写初步收集的项目概况..." }
+      { id: "f3", label: "项目概况分析", type: "textarea", placeholder: "填写初步收集的项目概况..." },
+      { id: "f4", label: "物业类型", type: "select", options: ["自主物业", "村物业", "租赁"], placeholder: "请选择物业类型" }
     ],
     files: ["无人机航拍.mp4", "项目概况表.pdf"] 
   },
@@ -177,6 +179,14 @@ export const STAGES = [
     files: ["竣工验收报告.pdf", "并网通知书.pdf", "移交证书.pdf"] 
   },
 ];
+
+export function getLifecycleChecklist(stage: any, stageState: any = {}) {
+  const checklist = [...(stage.checklist || [])];
+  if (stage.id === "1_initiation" && ["村物业", "租赁"].includes(stageState.fields?.f4)) {
+    checklist.push({ id: "c9", label: "光伏安装同意书（村物业/租赁必需）" });
+  }
+  return checklist;
+}
 
 export const getProjectCurrentStageInfo = (projectId: string, lifecycleStates: Record<string, any>) => {
   const projState = lifecycleStates[projectId] || {};
@@ -553,7 +563,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                     <FileCheck className="w-4 h-4 text-slate-400" />前置工作清单
                                   </h4>
                                   <div className="space-y-2">
-                                    {stage.checklist.map((item: any) => (
+                                    {getLifecycleChecklist(stage, stageState).map((item: any) => (
                                       <label key={item.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 cursor-pointer hover:bg-slate-50 transition-colors">
                                         <input 
                                           type="checkbox" 
@@ -578,7 +588,17 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                     {stage.fields.map((field: any) => (
                                       <div key={field.id}>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">{field.label}</label>
-                                        {field.type === 'textarea' ? (
+                                        {field.type === 'select' ? (
+                                          <select
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-indigo-500/20 focus:border-indigo-500 text-sm bg-white"
+                                            value={stageState.fields?.[field.id] || ''}
+                                            onChange={(e) => updateField(field.id, e.target.value)}
+                                            onBlur={handleSaveData}
+                                          >
+                                            <option value="">{field.placeholder || "请选择"}</option>
+                                            {(field.options || []).map((option: string) => <option key={option} value={option}>{option}</option>)}
+                                          </select>
+                                        ) : field.type === 'textarea' ? (
                                           <textarea 
                                             rows={3} 
                                             className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none text-sm"

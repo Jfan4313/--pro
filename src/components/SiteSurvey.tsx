@@ -10,7 +10,7 @@ import { flattenProjects } from "@/src/lib/management";
 import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { queueEntityOperation } from "@/src/lib/syncEngine";
-import { STAGES } from "./ProjectLifecycle";
+import { getLifecycleChecklist, STAGES } from "./ProjectLifecycle";
 import {
   CURRENT_DRAFT_KEY,
   MAX_SURVEY_PHOTOS,
@@ -1066,7 +1066,7 @@ function lifecycleChecklistHtml(projectId: string, records: SurveyRecord[], life
   const hasSurveyArchive = records.some((record) => record.projectId === projectId && record.archiveType !== "project");
   return STAGES.map((stage) => {
     const stageState = lifecycleState?.[stage.id] || {};
-    const items = (stage.checklist || []).map((item: any) => {
+    const items = getLifecycleChecklist(stage, stageState).map((item: any) => {
       const completed = item.id === "site-survey" ? hasSurveyArchive : stageState.checklist?.[item.id] === true;
       return `<div class="lifecycle-item ${completed ? "done" : "pending"}"><span class="lifecycle-mark">${completed ? "✓" : "○"}</span><span>${escapeReportHtml(item.label)}</span><strong>${completed ? "已完成" : "待跟进"}</strong></div>`;
     }).join("");
