@@ -17,6 +17,7 @@ if [[ ! "$release_sha" =~ ^[0-9a-f]{40}$ || ! "$expected_checksum" =~ ^[0-9a-f]{
   exit 64
 fi
 
+find /opt -maxdepth 1 -type d -name 'zhijian-pro-stage.*' -prune -exec rm -rf {} +
 stage_dir="$(mktemp -d /opt/zhijian-pro-stage.XXXXXX)"
 archive_path="$stage_dir/release.tgz"
 release_dir="$stage_dir/release"
@@ -49,8 +50,10 @@ done
   chown -R www-data:www-data "$stage_dir/npm-home"
   chown -R www-data:www-data "$release_dir"
   if [[ ! -d node_modules && -d "$APP_DIR/node_modules" ]] && cmp -s "$release_dir/package-lock.json" "$APP_DIR/package-lock.json"; then
-    cp -a "$APP_DIR/node_modules" "$release_dir/node_modules"
-    chown -R www-data:www-data "$release_dir/node_modules"
+    # Keep the deployment small: dependencies are already present on the
+    # server and are read-only at runtime, so hard-link them instead of
+    # duplicating hundreds of megabytes into the staging directory.
+    cp -al "$APP_DIR/node_modules" "$release_dir/node_modules"
   fi
   if [[ ! -d node_modules ]]; then
     runuser -u www-data -- env HOME="$stage_dir/npm-home" npm ci --omit=dev --no-audit --no-fund
