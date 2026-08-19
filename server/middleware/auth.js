@@ -33,5 +33,18 @@ export function createAuthMiddleware({ db, apiAuthRequired, nowIso }) {
     });
   }
 
-  return { requireAuth, requireApiAuth, requireAdmin };
+  function requireAccountManager(req, res, next) {
+    return requireAuth(req, res, () => {
+      let customPermissions = [];
+      try { customPermissions = JSON.parse(req.authUser.permissions || "[]"); } catch { /* use role permissions below */ }
+      const canManageAccounts = req.authUser.role === "admin"
+        || req.authUser.role === "project_manager"
+        || customPermissions.includes("organization")
+        || customPermissions.includes("accounts");
+      if (!canManageAccounts) return res.status(403).json({ error: "organization_account_manager_required" });
+      next();
+    });
+  }
+
+  return { requireAuth, requireApiAuth, requireAdmin, requireAccountManager };
 }

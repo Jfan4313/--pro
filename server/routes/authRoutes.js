@@ -13,7 +13,7 @@ function createLoginSession({ db, user, req, nowIso }) {
   return { token, expiresAt, user: publicUser({ ...user, lastLoginAt: timestamp, updatedAt: timestamp }) };
 }
 
-export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin, wecomNotifier }) {
+export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin, requireAccountManager, wecomNotifier }) {
   app.post("/api/auth/login", (req, res) => {
     const username = String(req.body?.username || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
@@ -118,12 +118,12 @@ export function registerAuthRoutes(app, { db, nowIso, requireAuth, requireAdmin,
     res.json({ ok: true });
   });
 
-  app.get("/api/accounts", requireAdmin, (_req, res) => {
+  app.get("/api/accounts", requireAccountManager, (_req, res) => {
     const users = db.prepare("SELECT * FROM users ORDER BY createdAt ASC").all().map(publicUser);
     res.json(users);
   });
 
-  app.post("/api/accounts", requireAdmin, (req, res) => {
+  app.post("/api/accounts", requireAccountManager, (req, res) => {
     const username = String(req.body?.username || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
     const name = String(req.body?.name || "").trim();
