@@ -23,7 +23,16 @@ export const STAGES = [
       { id: "c5", label: "项目电费详情单（过去完整12个月）" },
       { id: "c6", label: "变压器规格、数量、电房位置" },
       { id: "c7", label: "结算户信息" },
-      { id: "c8", label: "项目产权资料与房产证/土地租赁证明" }
+      { id: "c8", label: "项目产权资料与房产证/土地租赁证明" },
+      { id: "c10", label: "产权方营业执照" },
+      { id: "c11", label: "产权方法人身份证" },
+      { id: "c12", label: "产权方联系人信息（姓名、电话、职务）" },
+      { id: "c13", label: "投资方营业执照" },
+      { id: "c14", label: "投资方法人身份证" },
+      { id: "c15", label: "投资方开户许可证" },
+      { id: "c16", label: "投资方开票信息及银行联行号" },
+      { id: "c17", label: "项目总投资金额" },
+      { id: "c18", label: "合同能源管理合同/能源服务管理合同（如适用）" }
     ],
     fields: [
       { id: "f1", label: "建筑屋顶可利用面积估算(㎡)", type: "text", placeholder: "㎡" },
@@ -186,6 +195,12 @@ export function getLifecycleChecklist(stage: any, stageState: any = {}) {
   const checklist = [...(stage.checklist || [])];
   if (stage.id === "1_initiation" && ["村物业", "租赁"].includes(stageState.fields?.f4)) {
     checklist.push({ id: "c9", label: "光伏安装同意书（村物业/租赁必需）" });
+  }
+  if (stage.id === "1_initiation" && stageState.fields?.f4 === "村物业") {
+    checklist.push({ id: "c19", label: "村物业租赁/屋顶使用协议" });
+  }
+  if (stage.id === "1_initiation" && stageState.fields?.f4 === "租赁") {
+    checklist.push({ id: "c20", label: "租赁合同/屋顶使用协议" });
   }
   return checklist;
 }
