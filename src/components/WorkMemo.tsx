@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { AlertTriangle, Bell, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, MessageSquareText, Plus, UserRound, X } from "lucide-react";
+import { AlertTriangle, Bell, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, MessageSquareText, Mic, Plus, UserRound, X } from "lucide-react";
 import { useAuth } from "@/src/lib/auth";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { cn } from "@/src/lib/utils";
@@ -121,7 +121,7 @@ export function WorkMemo() {
   return <div className="w-full max-w-none space-y-6 p-4 md:p-8 xl:px-10">
     <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
       <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Company workflow</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">工作备忘</h2><p className="mt-1 text-sm text-slate-500">每日安排、执行反馈和完成确认，所有成员都能看到进度。</p></div>
-      <div className="flex flex-wrap gap-2"><button onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">快速创建</button><button onClick={() => setIsOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"><Plus className="h-4 w-4" />新建工作安排</button></div>
+      <div className="flex flex-wrap gap-2"><button onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 hover:bg-indigo-700"><Mic className="h-4 w-4" />语音快速创建</button><button onClick={() => setIsOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"><Plus className="h-4 w-4" />新建工作安排</button></div>
     </div>
 
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">

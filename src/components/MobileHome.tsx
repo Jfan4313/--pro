@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, CalendarCheck, Camera, CheckCircle2, ClipboardList, FolderOpen, MessageSquare, Search, Upload } from "lucide-react";
+import { AlertTriangle, ArrowRight, CalendarCheck, Camera, CheckCircle2, ClipboardList, FolderOpen, MessageSquare, Search, Upload, Mic } from "lucide-react";
 import { dispatchRiskFocus, type RiskAction } from "@/src/lib/riskActions";
 import { PRODUCT_RELEASE_SUMMARY, PRODUCT_VERSION, PRODUCT_VERSION_DATE } from "@/src/lib/productVersion";
 
@@ -72,6 +72,10 @@ export function MobileHome({
             </span>
           </span>
           <ArrowRight className="h-5 w-5 text-slate-400" />
+        </button>
+        <button onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="mt-3 flex w-full items-center justify-between rounded-2xl bg-indigo-600 px-4 py-3.5 text-left text-white shadow-lg shadow-indigo-600/25">
+          <span className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15"><Mic className="h-5 w-5" /></span><span><span className="block text-sm font-bold">语音快速创建工作备忘</span><span className="mt-0.5 block text-xs text-indigo-100">直接说项目、任务、负责人和时间</span></span></span>
+          <ArrowRight className="h-5 w-5 text-indigo-100" />
         </button>
       </section>
 
