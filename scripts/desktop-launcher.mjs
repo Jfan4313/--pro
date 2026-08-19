@@ -20,6 +20,13 @@ function logFile(name) {
   return path.join(runtimeDir, `${name}-${timestamp()}.log`);
 }
 
+function getLanAddresses() {
+  return Object.values(os.networkInterfaces())
+    .flatMap((items) => items || [])
+    .filter((item) => item.family === "IPv4" && !item.internal)
+    .map((item) => item.address);
+}
+
 function isPortFree(port) {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -113,7 +120,8 @@ async function main() {
     const backend = spawnManaged("node", ["server/index.js"], {
       env: {
         ...process.env,
-        LOCAL_API_HOST: "127.0.0.1",
+        // Allow other devices on the same LAN to reach the local backend.
+        LOCAL_API_HOST: "0.0.0.0",
         LOCAL_API_PORT: String(backendPort),
       },
     }, "backend");
@@ -126,13 +134,18 @@ async function main() {
   const frontend = spawnManaged("npx", ["vite", "--force", "--host", "0.0.0.0", "--port", String(frontendPort)], {
     env: {
       ...process.env,
-      VITE_LOCAL_API_URL: `http://127.0.0.1:${backendPort}`,
+      // Keep API requests relative so the Vite proxy forwards them to the
+      // backend without making LAN clients call their own localhost.
+      VITE_LOCAL_API_URL: "",
     },
   }, "frontend");
 
   const url = `http://localhost:${frontendPort}/?launch=${Date.now()}`;
   fs.writeFileSync(path.join(runtimeDir, "latest-url.txt"), `${url}\n`);
   console.log(`正在启动前端页面：${url}`);
+  for (const address of getLanAddresses()) {
+    console.log(`局域网访问地址：http://${address}:${frontendPort}/`);
+  }
   console.log(`前端日志：${frontend.filePath}`);
   console.log(`最新入口记录：${path.join(runtimeDir, "latest-url.txt")}`);
   console.log("--------------------------------");

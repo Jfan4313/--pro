@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from "react";
-import { Building2, Users, FolderTree, Plus, MoreVertical, Search, ChevronRight, Edit2, Trash2, UserPlus, X } from "lucide-react";
+import { Building2, Users, FolderTree, Plus, MoreVertical, Search, ChevronRight, Edit2, Trash2, UserPlus, X, Loader2, UserRound, KeyRound } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { createEmptyOrganization } from "@/src/lib/workspaceDefaults";
+import { apiClient } from "@/src/lib/apiClient";
 import { motion, AnimatePresence } from "motion/react";
 
 type OrgNodeType = "company" | "department" | "team";
@@ -65,6 +66,11 @@ export function Organization() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
+  const [addMemberMode, setAddMemberMode] = useState<"existing" | "new">("existing");
+  const [systemAccounts, setSystemAccounts] = useState<any[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [newAccountForm, setNewAccountForm] = useState({ username: "", name: "", email: "", phone: "", position: "", role: "surveyor", password: "" });
   const [orgDialog, setOrgDialog] = useState<OrgDialogState | null>(null);
   const [selectedMember, setSelectedMember] = useState<any | null>(null);
 
@@ -181,6 +187,81 @@ export function Organization() {
     );
     showToast('成员已添加到该组织');
   };
+
+  const openAddMemberModal = async () => {
+    setIsAddMemberModalOpen(true);
+    setAddMemberMode("existing");
+    setMemberSearchQuery("");
+    setAccountsLoading(true);
+    try {
+      setSystemAccounts(await apiClient.listAccounts());
+    } catch {
+      showToast("系统账号加载失败，请确认当前账号有组织管理权限");
+    } finally {
+      setAccountsLoading(false);
+    }
+  };
+
+  const resetNewAccountForm = () => setNewAccountForm({ username: "", name: "", email: "", phone: "", position: "", role: "surveyor", password: "" });
+
+  const linkAccountToOrganization = (account: any, position = "") => {
+    if (!selectedNode) return;
+    void setPersonnelData((current: any[]) => {
+      const existingIndex = current.findIndex((person) => person.accountId === account.id || person.username === account.username);
+      const person = {
+        id: existingIndex >= 0 ? current[existingIndex].id : account.username || account.id,
+        accountId: account.id,
+        username: account.username,
+        name: account.name,
+        role: position || current[existingIndex]?.role || account.role,
+        systemRole: account.role,
+        team: selectedNode.name,
+        status: current[existingIndex]?.status || "active",
+        phone: account.phone || "",
+        email: account.email || "",
+      };
+      if (existingIndex >= 0) return current.map((item, index) => index === existingIndex ? { ...item, ...person } : item);
+      return [...current, person];
+    });
+    setIsAddMemberModalOpen(false);
+    showToast(`${account.name}已加入${selectedNode.name}`);
+  };
+
+  const handleLinkExistingAccount = (account: any) => linkAccountToOrganization(account);
+
+  const handleCreateAndLinkAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!newAccountForm.name.trim() || !newAccountForm.username.trim()) return showToast("请填写姓名和登录账号");
+    if (!newAccountForm.phone.trim() && !newAccountForm.password.trim()) return showToast("请填写手机号或临时密码");
+    setAccountSaving(true);
+    try {
+      const account = await apiClient.createAccount({
+        username: newAccountForm.username.trim(),
+        name: newAccountForm.name.trim(),
+        email: newAccountForm.email.trim(),
+        phone: newAccountForm.phone.trim(),
+        role: newAccountForm.role,
+        password: newAccountForm.password.trim(),
+      });
+      setSystemAccounts((current) => [...current, account]);
+      linkAccountToOrganization(account, newAccountForm.position.trim());
+      resetNewAccountForm();
+    } catch (error: any) {
+      showToast(error?.status === 409 ? "登录账号或手机号已存在，请改为选择已有账号" : "系统账号创建失败，请检查填写内容");
+    } finally {
+      setAccountSaving(false);
+    }
+  };
+
+  const linkedAccountIds = useMemo(() => new Set(displayMembers.map((person: any) => person.accountId).filter(Boolean)), [displayMembers]);
+  const filteredSystemAccounts = useMemo(() => {
+    const query = memberSearchQuery.trim().toLowerCase();
+    return systemAccounts.filter((account) => {
+      if (linkedAccountIds.has(account.id)) return false;
+      if (!query) return true;
+      return `${account.name} ${account.username} ${account.phone || ""} ${account.email || ""}`.toLowerCase().includes(query);
+    });
+  }, [linkedAccountIds, memberSearchQuery, systemAccounts]);
 
   const openAddDialog = (parent: OrgNode) => {
     const nodeType = getChildType(parent);
@@ -336,7 +417,7 @@ export function Organization() {
               />
             </div>
             <button 
-              onClick={() => setIsAddMemberModalOpen(true)}
+              onClick={() => void openAddMemberModal()}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
             >
               <UserPlus className="w-4 h-4" />
@@ -388,54 +469,21 @@ export function Organization() {
       {/* Add Member Modal */}
       {isAddMemberModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[88vh]">
             <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
-              <h3 className="text-lg font-bold text-slate-900">
-                添加成员至 {selectedNode?.name}
-              </h3>
-              <button onClick={() => setIsAddMemberModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <div><h3 className="text-lg font-bold text-slate-900">添加成员至 {selectedNode?.name}</h3><p className="mt-1 text-xs text-slate-500">可以关联已有系统账号，也可以创建新账号</p></div>
+              <button onClick={() => setIsAddMemberModalOpen(false)} className="text-slate-400 hover:text-slate-600" type="button">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 border-b border-slate-100 shrink-0">
-              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
-                <Search className="w-4 h-4 text-slate-400 mr-2" />
-                <input 
-                  type="text" 
-                  value={memberSearchQuery}
-                  onChange={(e) => setMemberSearchQuery(e.target.value)}
-                  placeholder="搜索姓名、工号或部门..." 
-                  className="bg-transparent border-none outline-none text-sm w-full text-slate-700"
-                />
-              </div>
+            <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2">
+              <button type="button" onClick={() => setAddMemberMode("existing")} className={`rounded-xl px-3 py-2.5 text-sm font-semibold ${addMemberMode === "existing" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}><Users className="mr-1.5 inline h-4 w-4" />选择已有账号</button>
+              <button type="button" onClick={() => setAddMemberMode("new")} className={`rounded-xl px-3 py-2.5 text-sm font-semibold ${addMemberMode === "new" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`}><UserRound className="mr-1.5 inline h-4 w-4" />新建系统账号</button>
             </div>
-            <div className="p-4 overflow-y-auto flex-1">
-              <div className="space-y-2">
-                {availablePersonnel.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400 text-sm">未找到可添加的成员</div>
-                ) : (
-                  availablePersonnel.map((person: any) => (
-                    <div key={person.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm shrink-0">
-                          {person.name.substring(0, 1)}
-                        </div>
-                        <div>
-                          <div className="font-medium text-slate-900 text-sm">{person.name}</div>
-                          <div className="text-xs text-slate-500">工号: {person.id} | {person.role} | {person.team}</div>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => handleAddMember(person.id)}
-                        className="text-xs font-medium text-indigo-600 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-colors"
-                      >
-                        添加
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            {addMemberMode === "existing" ? <>
+              <div className="p-4 border-b border-slate-100 shrink-0"><div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all"><Search className="w-4 h-4 text-slate-400 mr-2" /><input type="text" value={memberSearchQuery} onChange={(e) => setMemberSearchQuery(e.target.value)} placeholder="搜索姓名、登录账号、手机号或邮箱..." className="bg-transparent border-none outline-none text-sm w-full text-slate-700" /></div></div>
+              <div className="p-4 overflow-y-auto flex-1"><div className="space-y-2">{accountsLoading ? <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" /></div> : filteredSystemAccounts.length === 0 ? <div className="text-center py-8 text-slate-400 text-sm">未找到可添加的系统账号</div> : filteredSystemAccounts.map((account) => <div key={account.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-colors"><div className="flex items-center gap-3 min-w-0"><div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm shrink-0">{account.name.substring(0, 1)}</div><div className="min-w-0"><div className="font-medium text-slate-900 text-sm truncate">{account.name}</div><div className="text-xs text-slate-500 truncate">@{account.username}{account.phone ? ` · ${account.phone}` : ""}</div></div></div><button type="button" onClick={() => handleLinkExistingAccount(account)} className="text-xs font-medium text-indigo-600 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-colors shrink-0">加入</button></div>)}</div></div>
+            </> : <form onSubmit={handleCreateAndLinkAccount} className="p-5 overflow-y-auto flex-1"><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{[["姓名", "name", "例如：张伟"], ["登录账号", "username", "英文、数字或手机号"], ["手机号", "phone", "用于验证码登录，可选"], ["邮箱", "email", "可选"], ["职位", "position", "例如：技术总监"]].map(([label, key, placeholder]) => <label key={key} className={`block ${key === "position" ? "sm:col-span-2" : ""}`}><span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}{["name", "username"].includes(key) ? " *" : ""}</span><input value={(newAccountForm as any)[key]} onChange={(event) => setNewAccountForm({ ...newAccountForm, [key]: event.target.value })} placeholder={placeholder} className="survey-input" /></label>)}<label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-semibold text-slate-700">系统角色</span><select value={newAccountForm.role} onChange={(event) => setNewAccountForm({ ...newAccountForm, role: event.target.value })} className="survey-input"><option value="admin">系统管理员</option><option value="project_manager">项目经理</option><option value="surveyor">现场勘察员</option><option value="designer">设计人员</option><option value="finance">财务人员</option><option value="viewer">只读成员</option></select></label><label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-semibold text-slate-700">临时密码</span><div className="relative"><KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="password" value={newAccountForm.password} onChange={(event) => setNewAccountForm({ ...newAccountForm, password: event.target.value })} placeholder="可选；留空则使用手机号验证码登录" className="survey-input pl-9" /></div></label></div><p className="mt-3 text-xs text-slate-400">手机号和临时密码至少填写一项。创建后账号会自动加入当前组织。</p><button disabled={accountSaving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white disabled:opacity-50">{accountSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}{accountSaving ? "正在创建" : "创建账号并加入组织"}</button></form>}
           </div>
         </div>
       )}

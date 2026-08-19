@@ -1066,12 +1066,12 @@ function lifecycleChecklistHtml(projectId: string, records: SurveyRecord[], life
   const stage = STAGES[0];
   const stageState = lifecycleState?.[stage.id] || {};
   const hasSurveyArchive = records.some((record) => record.projectId === projectId && record.archiveType !== "project");
-  const items = getLifecycleChecklist(stage, stageState).map((item: any) => {
+  const items = getLifecycleChecklist(stage, stageState, false).map((item: any) => {
     const completed = item.id === "site-survey" ? hasSurveyArchive : stageState.checklist?.[item.id] === true;
     return `<div class="lifecycle-item ${completed ? "done" : "pending"}"><span class="lifecycle-mark">${completed ? "✓" : "○"}</span><span>${escapeReportHtml(item.label)}</span><strong>${completed ? "已完成" : "待跟进"}</strong></div>`;
   }).join("");
   const ownerNeeds = String(stageState.fields?.f5 || "").trim();
-  return `<div class="lifecycle-stage"><h3>${escapeReportHtml(stage.name)}</h3>${items || '<div class="empty">本阶段暂无清单</div>'}<div class="owner-needs"><strong>业主需求</strong><div>${escapeReportHtml(ownerNeeds || "暂无业主需求记录")}</div></div></div>`;
+  return `<div class="lifecycle-stage"><h3>${escapeReportHtml(stage.name)} · 业主资料准备清单</h3>${items || '<div class="empty">本阶段暂无清单</div>'}<div class="owner-needs"><strong>业主需求</strong><div>${escapeReportHtml(ownerNeeds || "暂无业主需求记录")}</div></div></div>`;
 }
 
 function openSurveyPdfReport(record: SurveyRecord, lifecycleState: any = {}) {

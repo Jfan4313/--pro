@@ -24,17 +24,11 @@ export const STAGES = [
       { id: "c6", label: "变压器规格、数量、电房位置" },
       { id: "c7", label: "结算户信息" },
       { id: "c8", label: "项目产权资料与房产证/土地租赁证明" },
-      { id: "c10", label: "产权方营业执照" },
-      { id: "c11", label: "产权方法人身份证" },
-      { id: "c12", label: "产权方联系人信息（姓名、电话、职务）" },
-      { id: "c13", label: "投资方营业执照" },
-      { id: "c14", label: "投资方法人身份证" },
-      { id: "c15", label: "投资方开户许可证" },
-      { id: "c16", label: "投资方开票信息及银行联行号" },
-      { id: "c17", label: "项目总投资金额" },
-      { id: "c18", label: "合同能源管理合同/能源服务管理合同（如适用）" }
+      { id: "c9", label: "电房电气图" },
+      { id: "c10", label: "产权信息清晰度确认" }
     ],
     fields: [
+      { id: "f6", label: "项目合作类型", type: "select", options: ["EPC", "EMC", "未知"], placeholder: "请选择 EPC、EMC 或未知" },
       { id: "f1", label: "建筑屋顶可利用面积估算(㎡)", type: "text", placeholder: "㎡" },
       { id: "f2", label: "电价水平及用电性质", type: "text", placeholder: "例如: 大工业/一般工商业" },
       { id: "f3", label: "项目概况分析", type: "textarea", placeholder: "填写初步收集的项目概况..." },
@@ -48,11 +42,13 @@ export const STAGES = [
     name: "② 初步设计", 
     desc: "初步的光伏铺设方案设计和材料清单编制", 
     checklist: [
-      { id: "c1", label: "光照条件及地形初步分析" },
-      { id: "c2", label: "周边阴影遮挡分析及排布优化" },
-      { id: "c3", label: "电气接入点(并网点)初步确认" },
-      { id: "c4", label: "初步设备的选型(组件、逆变器等)" },
-      { id: "c5", label: "完成初步设计并提交技术总监审核" }
+      { id: "c1", label: "光伏铺设设计（光照、地势、阴影遮挡及排布优化）" },
+      { id: "c2", label: "模型建模完成" },
+      { id: "c3", label: "结构复核及荷载适配确认" },
+      { id: "c4", label: "电气接入点(并网点)初步确认" },
+      { id: "c5", label: "初步设备的选型(组件、逆变器等)" },
+      { id: "c6", label: "设计图纸/设计稿上传并完成确认" },
+      { id: "c7", label: "完成初步设计并提交技术总监审核" }
     ],
     fields: [
       { id: "f1", label: "初步预计装机容量(kW)", type: "text", placeholder: "kW" },
@@ -88,7 +84,18 @@ export const STAGES = [
       { id: "c1", label: "法务及财务人员核对商务合同" },
       { id: "c2", label: "签订总承包合同并盖章" },
       { id: "c3", label: "甲方付款账户及收票信息确认" },
-      { id: "c4", label: "项目预付款(首笔款)到账核实或履约保证开具" }
+      { id: "c4", label: "项目预付款(首笔款)到账核实或履约保证开具" },
+      { id: "c5", label: "业主单位营业执照" },
+      { id: "c6", label: "业主单位法人身份证" },
+      { id: "c7", label: "产权证/土地证/不动产权证等正式产权资料" },
+      { id: "c8", label: "光伏安装同意书及村物业/租赁使用协议（按物业类型）" },
+      { id: "c9", label: "结算户及开票信息" },
+      { id: "c10", label: "投资方营业执照" },
+      { id: "c11", label: "投资方法人身份证" },
+      { id: "c12", label: "投资方开户许可证" },
+      { id: "c13", label: "投资方开票信息及银行联行号" },
+      { id: "c14", label: "项目总投资金额" },
+      { id: "c15", label: "合同能源管理合同/能源服务管理合同（EMC适用）" }
     ], 
     fields: [
       { id: "f1", label: "合同总金额(万元)", type: "text", placeholder: "万元" },
@@ -191,16 +198,28 @@ export const STAGES = [
   },
 ];
 
-export function getLifecycleChecklist(stage: any, stageState: any = {}) {
-  const checklist = [...(stage.checklist || [])];
-  if (stage.id === "1_initiation" && ["村物业", "租赁"].includes(stageState.fields?.f4)) {
-    checklist.push({ id: "c9", label: "光伏安装同意书（村物业/租赁必需）" });
+export function getLifecycleChecklist(stage: any, stageState: any = {}, includeInvestmentMaterials = true, projectState: any = {}) {
+  let checklist = [...(stage.checklist || [])];
+  const initiationState = projectState?.["1_initiation"] || (stage.id === "1_initiation" ? stageState : {});
+  const projectMode = initiationState.fields?.f6 || "未知";
+  const propertyType = initiationState.fields?.f4;
+  const investmentItemIds = stage.id === "1_initiation"
+    ? ["c13", "c14", "c15", "c16", "c17", "c18"]
+    : ["c10", "c11", "c12", "c13", "c14", "c15"];
+  if (stage.id === "1_initiation" && !includeInvestmentMaterials) {
+    checklist = checklist.filter((item: any) => !investmentItemIds.includes(item.id));
   }
-  if (stage.id === "1_initiation" && stageState.fields?.f4 === "村物业") {
-    checklist.push({ id: "c19", label: "村物业租赁/屋顶使用协议" });
+  if (stage.id === "4_contract" && projectMode !== "EMC") {
+    return checklist.filter((item: any) => !investmentItemIds.includes(item.id));
   }
-  if (stage.id === "1_initiation" && stageState.fields?.f4 === "租赁") {
-    checklist.push({ id: "c20", label: "租赁合同/屋顶使用协议" });
+  if (stage.id === "1_initiation" && ["村物业", "租赁"].includes(propertyType)) {
+    checklist.push({ id: "c11", label: "光伏安装同意书（村物业/租赁必需）" });
+  }
+  if (stage.id === "1_initiation" && propertyType === "村物业") {
+    checklist.push({ id: "c12", label: "村物业租赁/屋顶使用协议" });
+  }
+  if (stage.id === "1_initiation" && propertyType === "租赁") {
+    checklist.push({ id: "c13", label: "租赁合同/屋顶使用协议" });
   }
   return checklist;
 }
@@ -586,13 +605,13 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                             <div className="text-slate-400 text-sm py-4 text-center">本阶段无需填写表单或待办</div>
                           ) : (
                             <div className="space-y-6">
-                              {stage.checklist && stage.checklist.length > 0 && (
+                          {stage.checklist && stage.checklist.length > 0 && (
                                 <div>
                                   <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
                                     <FileCheck className="w-4 h-4 text-slate-400" />前置工作清单
                                   </h4>
                                   <div className="space-y-2">
-                                    {getLifecycleChecklist(stage, stageState).map((item: any) => (
+                                    {getLifecycleChecklist(stage, stageState, true, projState).map((item: any) => (
                                       <label key={item.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 cursor-pointer hover:bg-slate-50 transition-colors">
                                         <input 
                                           type="checkbox" 
