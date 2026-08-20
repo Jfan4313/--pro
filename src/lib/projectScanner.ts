@@ -191,6 +191,7 @@ function stageTerms(stage: typeof STAGES[number]) {
 }
 
 const stageTermCache = new Map<string, string[]>();
+const scanHandleRegistry = new Map<string, Map<string, any>>();
 
 function classifyFile(name: string, relativePath: string, content = "") {
   const haystack = normalizeText(`${name} ${relativePath} ${content}`);
@@ -344,7 +345,14 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
   const primaryProject = projects[0];
   const overallStageSummaries = buildStageSummaries(files);
   const readableCount = files.filter((file) => file.status !== "unreadable").length;
-  return { id: `scan-${Date.now()}`, rootNames: Array.from(new Set(allEntries.map((entry) => entry.rootName))), scannedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - started), fileCount: files.length, readableCount, reviewCount: files.filter((file) => file.status === "needs-review" || file.status === "unreadable").length, inferredProjectNames: projectNames, projectName: projects.length > 1 ? `多项目资料库（${projects.length} 个项目）` : primaryProject?.projectName, projectNameConfidence: projects.length === 1 ? primaryProject?.confidence : undefined, projects, stageSummaries: overallStageSummaries, inferredStage, files, issues };
+  const scanId = `scan-${Date.now()}`;
+  const handlesByPath = new Map(allEntries.map((entry) => [entry.relativePath, entry.handle]));
+  scanHandleRegistry.set(scanId, new Map(files.map((file) => [file.id, handlesByPath.get(file.relativePath)]).filter((entry): entry is [string, any] => Boolean(entry[1]))));
+  return { id: scanId, rootNames: Array.from(new Set(allEntries.map((entry) => entry.rootName))), scannedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - started), fileCount: files.length, readableCount, reviewCount: files.filter((file) => file.status === "needs-review" || file.status === "unreadable").length, inferredProjectNames: projectNames, projectName: projects.length > 1 ? `多项目资料库（${projects.length} 个项目）` : primaryProject?.projectName, projectNameConfidence: projects.length === 1 ? primaryProject?.confidence : undefined, projects, stageSummaries: overallStageSummaries, inferredStage, files, issues };
+}
+
+export function getScannedFileHandle(scanId: string, fileId: string) {
+  return scanHandleRegistry.get(scanId)?.get(fileId);
 }
 
 export function downloadScanReport(report: ProjectScanReport, format: "json" | "xlsx") {

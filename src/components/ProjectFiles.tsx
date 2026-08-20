@@ -9,7 +9,7 @@ import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
 import { ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
-import { downloadScanReport, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
+import { downloadScanReport, getScannedFileHandle, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData, setBoardData] = useProjectBoardData();
@@ -250,7 +250,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         const localStageId = stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id;
         const aiDecision = aiDecisions.get(project.projectKey);
         const currentStageId = aiDecision?.currentStageId || localStageId;
-        imported.push({ id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: await reserveProjectNumber(), name: project.projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } });
+        imported.push({ id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: await reserveProjectNumber(), name: project.projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedProjectKey: project.projectKey, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } });
         existingNames.add(project.projectName.toLocaleLowerCase());
       }
       if (!imported.length) {
@@ -270,10 +270,30 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       const provider = await getLocalArchiveProvider();
       const availability = await provider?.checkAvailability();
       if (provider && availability?.available) {
-        for (const project of imported) await provider.ensureProjectStructure(project, STAGES);
+        let archivedCount = 0;
+        let archiveReviewCount = 0;
+        for (const project of imported) {
+          const currentIndex = Math.max(0, STAGES.findIndex((stage) => stage.id === project.importedStageId));
+          const generatedStages = getCurrentAndNextStages(STAGES, currentIndex);
+          const structure = await provider.ensureProjectStructure(project, generatedStages);
+          await setArchiveFolderStates((current) => ({ ...current, [project.id]: { status: "ready", storageProvider: "local-folder", projectFolder: structure.projectFolder, generatedThroughStageId: structure.generatedThroughStageId, updatedAt: new Date().toISOString() } }));
+          for (const file of scanReport.files.filter((item) => item.projectKey === project.importedProjectKey)) {
+            const handle = getScannedFileHandle(scanReport.id, file.id);
+            if (!handle || file.status === "unreadable") { archiveReviewCount += 1; continue; }
+            try {
+              const sourceFile = await handle.getFile();
+              const targetStage = STAGES.find((stage) => stage.id === (file.pathStageKey || file.stageId)) || STAGES[currentIndex];
+              await provider.writeFile({ project, stage: targetStage, file: sourceFile, fileType: file.category, autoRename: true, projectFolder: structure.projectFolder });
+              archivedCount += 1;
+            } catch { archiveReviewCount += 1; }
+          }
+        }
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: `已建立当前及下一阶段目录，并归档 ${archivedCount} 个文件${archiveReviewCount ? `，${archiveReviewCount} 个文件待人工复核` : ""}` }));
+      } else {
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目已录入，但本机归档目录未授权；原文件未改变" }));
       }
       setSelectedImportProjects([]);
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已录入 ${imported.length} 个项目，并按九个生命周期阶段建立项目结构` }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已录入 ${imported.length} 个项目，并按当前及下一阶段建立资料结构` }));
     } catch (error: any) {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "项目录入失败，请重试" }));
     } finally {
@@ -511,7 +531,7 @@ function Metric({ icon: Icon, label, value, compact }: any) {
 function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing, existingProjects, onToggle, onImport }: { report: ProjectScanReport | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; onToggle: (projectKey: string) => void; onImport: () => void }) {
   if (!report) return null;
   const existingNames = new Set(existingProjects.map((project: any) => String(project.name || "").trim().toLocaleLowerCase()));
-  return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">勾选后才会录入项目管理；未勾选项目只保留在本次扫描报告中，不会创建项目。</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span><button onClick={onImport} disabled={importing || !selectedKeys.length} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{aiReviewing ? "DeepSeek 审核归档阶段…" : importing ? "正在录入…" : `DeepSeek 辅助录入（${selectedKeys.length}）`}</button></div></div><div className="mt-3 rounded-xl border border-emerald-100 bg-white p-3 text-xs text-slate-600">录入前会优先调用已配置的 DeepSeek，根据项目名、文件名和目录判断归档阶段；不会上传文件正文。AI 不可用时自动回退本地规则。录入后会生成项目编号、建立九阶段资料目录，不会移动、重命名或上传原始文件。</div><div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.map((project) => { const exists = existingNames.has(project.projectName.toLocaleLowerCase()); const selected = selectedKeys.includes(project.projectKey); return <label key={project.projectKey} className={cn("block cursor-pointer rounded-xl border bg-white p-4 transition", selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-emerald-100", exists && "opacity-60")}><div className="flex items-start gap-3"><input type="checkbox" checked={selected} disabled={exists || importing} onChange={() => onToggle(project.projectKey)} className="mt-1 h-4 w-4 accent-emerald-600" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.projectName}</span><span className="shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-1 text-[11px] text-slate-500">{exists ? "项目管理中已存在，不重复录入" : `名称置信度 ${Math.round(project.confidence * 100)}%`}</div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.filter((stage) => stage.stageKey !== "needs-review").slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}{project.stageSummaries.some((stage) => stage.stageKey === "needs-review") && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] text-amber-800">部分资料待复核</span>}</div></div></div></label>; })}</div></section>;
+  return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">勾选后才会录入项目管理；未勾选项目只保留在本次扫描报告中，不会创建项目。</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span><button onClick={onImport} disabled={importing || !selectedKeys.length} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{aiReviewing ? "DeepSeek 审核归档阶段…" : importing ? "正在录入…" : `DeepSeek 辅助录入（${selectedKeys.length}）`}</button></div></div><div className="mt-3 rounded-xl border border-emerald-100 bg-white p-3 text-xs text-slate-600">录入前会优先调用已配置的 DeepSeek，根据项目名、文件名和目录判断归档阶段；不会上传文件正文。AI 不可用时自动回退本地规则。录入后只建立当前及下一阶段目录，并将已读取的源文件复制到对应阶段的“已归档”目录；原文件不会移动、重命名或删除。</div><div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.map((project) => { const exists = existingNames.has(project.projectName.toLocaleLowerCase()); const selected = selectedKeys.includes(project.projectKey); return <label key={project.projectKey} className={cn("block cursor-pointer rounded-xl border bg-white p-4 transition", selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-emerald-100", exists && "opacity-60")}><div className="flex items-start gap-3"><input type="checkbox" checked={selected} disabled={exists || importing} onChange={() => onToggle(project.projectKey)} className="mt-1 h-4 w-4 accent-emerald-600" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.projectName}</span><span className="shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-1 text-[11px] text-slate-500">{exists ? "项目管理中已存在，不重复录入" : `名称置信度 ${Math.round(project.confidence * 100)}%`}</div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.filter((stage) => stage.stageKey !== "needs-review").slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}{project.stageSummaries.some((stage) => stage.stageKey === "needs-review") && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] text-amber-800">部分资料待复核</span>}</div></div></div></label>; })}</div></section>;
 }
 
 function ManifestPanel({ manifests, loading, uploadingId, uploadProgress, onUpload }: { manifests: ProjectFileManifest[]; loading: boolean; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
