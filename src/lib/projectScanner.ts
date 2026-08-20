@@ -20,7 +20,30 @@ export type ScannedFile = {
   contentSummary?: string;
   sheetNames?: string[];
   suggestedPath?: string;
+  projectKey?: string;
+  projectName?: string;
+  pathStageKey?: string;
+  pathStageName?: string;
   error?: string;
+};
+
+export type ProjectStageSummary = {
+  stageKey: string;
+  stageName: string;
+  fileCount: number;
+  classifiedCount: number;
+  reviewCount: number;
+  categories: Array<{ category: string; count: number }>;
+  sampleFiles: string[];
+};
+
+export type ScannedProject = {
+  projectKey: string;
+  projectName: string;
+  confidence: number;
+  evidence: string[];
+  fileCount: number;
+  stageSummaries: ProjectStageSummary[];
 };
 
 export type ScannerIssue = {
@@ -41,6 +64,10 @@ export type ProjectScanReport = {
   readableCount: number;
   reviewCount: number;
   inferredProjectNames: string[];
+  projectName?: string;
+  projectNameConfidence?: number;
+  projects: ScannedProject[];
+  stageSummaries: ProjectStageSummary[];
   inferredStage?: { stageId: string; stageName: string; confidence: number; evidence: string[]; needsReview: boolean };
   files: ScannedFile[];
   issues: ScannerIssue[];
@@ -66,6 +93,52 @@ function extensionOf(name: string) {
 
 function normalizeText(value: string) {
   return value.toLocaleLowerCase().replace(/[\s_\-—–()[\]{}【】（）]+/g, " ").trim();
+}
+
+const GENERIC_PROJECT_NAMES = new Set(["项目", "资料", "文件", "文档", "项目资料", "工作区", "根目录", "outputs", "output", "temp", "tmp", "开工资料"]);
+
+function cleanProjectName(value: string) {
+  return value.replace(/\.(pdf|docx?|xlsx?|pptx?|txt|zip|rar|7z)$/i, "").replace(/^[【\[(（].*?[】\])）]\s*/u, "").replace(/[-_](资料|文件|归档|整理)(?:[-_（(].*)?$/u, "").trim();
+}
+
+function getPathSegments(relativePath: string) {
+  return relativePath.split("/").filter(Boolean);
+}
+
+function detectPathStage(relativePath: string) {
+  const segments = getPathSegments(relativePath).slice(1, -1);
+  const numbered = segments.find((segment) => /^(?:\d{1,2})[-_、.\s]/.test(segment));
+  if (numbered) return { stageKey: `folder_${numbered}`, stageName: cleanProjectName(numbered) };
+  const semantic = segments.find((segment) => /立项|勘察|前期|初步设计|深化设计|设计资料|投标|商务|合同|备案|报建|接入系统|施工|开工|交底|安全|验收|并网|竣工|运维|移交/i.test(segment));
+  if (semantic) return { stageKey: `folder_${semantic}`, stageName: cleanProjectName(semantic) };
+  return undefined;
+}
+
+function getProjectKey(relativePath: string) {
+  const first = getPathSegments(relativePath)[0];
+  if (!first || extensionOf(first) || GENERIC_PROJECT_NAMES.has(normalizeText(first))) return "未分组";
+  return first;
+}
+
+function categoryCounts(files: ScannedFile[]) {
+  return [...files.reduce((map, file) => map.set(file.category, (map.get(file.category) || 0) + 1), new Map<string, number>())]
+    .map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
+}
+
+function buildStageSummaries(files: ScannedFile[]): ProjectStageSummary[] {
+  const groups = new Map<string, ScannedFile[]>();
+  for (const file of files) {
+    const stageKey = file.pathStageKey || file.stageId || "needs-review";
+    const stageName = file.pathStageName || file.stageName || "待复核阶段";
+    const key = `${stageKey}\u0000${stageName}`;
+    const group = groups.get(key) || [];
+    group.push(file);
+    groups.set(key, group);
+  }
+  return [...groups.entries()].map(([key, group]) => {
+    const [stageKey, stageName] = key.split("\u0000");
+    return { stageKey, stageName, fileCount: group.length, classifiedCount: group.filter((file) => file.status === "classified").length, reviewCount: group.filter((file) => file.status === "needs-review" || file.status === "unreadable").length, categories: categoryCounts(group), sampleFiles: group.slice(0, 8).map((file) => file.name) };
+  }).sort((a, b) => b.fileCount - a.fileCount);
 }
 
 function truncate(value: string, max: number) {
@@ -216,6 +289,20 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
     const hash = await sha256(file).catch(() => undefined);
     files.push({ ...base, hash, status: SUPPORTED_EXTENSIONS.has(extension) ? (stage.needsReview ? "needs-review" : "classified") : "needs-review", category: classifyCategory(file.name, content), stageId: stage.stageId, stageName: stage.stageName, confidence: stage.confidence, evidence: stage.evidence, contentSummary: content ? truncate(content.replace(/\s+/g, " "), 240) : undefined, sheetNames, suggestedPath: stage.stageId ? `${stage.stageId}/待提交/${file.name}` : undefined });
   }
+  const projectFileGroups = new Map<string, ScannedFile[]>();
+  for (const file of files) {
+    const projectKey = getProjectKey(file.relativePath);
+    const pathStage = detectPathStage(file.relativePath);
+    file.projectKey = projectKey;
+    file.projectName = cleanProjectName(projectKey);
+    if (pathStage) {
+      file.pathStageKey = pathStage.stageKey;
+      file.pathStageName = pathStage.stageName;
+    }
+    const group = projectFileGroups.get(projectKey) || [];
+    group.push(file);
+    projectFileGroups.set(projectKey, group);
+  }
   const issues: ScannerIssue[] = [];
   const byHash = new Map<string, ScannedFile[]>();
   files.filter((file) => file.hash).forEach((file) => { const list = byHash.get(file.hash!) || []; list.push(file); byHash.set(file.hash!, list); });
@@ -234,9 +321,16 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
     for (const expected of inferredStageDef.files) if (!fileNames.includes(normalizeText(expected).replace(/\.[a-z0-9]+$/, ""))) issues.push({ type: "missing", title: "阶段清单可能缺失资料", detail: `未发现与“${expected}”相近的文件名`, stageId: inferredStageDef.id, confidence: 0.62 });
   }
   files.filter((file) => !file.extension || /\s{2,}|[\\/:*?"<>|]/.test(file.name)).forEach((file) => issues.push({ type: "naming", title: "文件名需要人工确认", detail: file.relativePath, fileIds: [file.id], confidence: 0.7 }));
-  const projectNames = Array.from(new Set(files.flatMap((file) => (file.name.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,}(?:项目|工程)/g) || []).slice(0, 3)))).slice(0, 8);
+  const projects = [...projectFileGroups.entries()].map(([projectKey, projectFiles]) => {
+    const projectName = cleanProjectName(projectKey);
+    const contentNames = Array.from(new Set(projectFiles.flatMap((file) => (file.name.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,}(?:项目|工程)/g) || []).slice(0, 3)))).slice(0, 5);
+    return { projectKey, projectName: projectName === "未分组" ? (contentNames[0] || "未分组资料") : projectName, confidence: projectName === "未分组" ? 0.35 : 0.93, evidence: [projectKey, ...contentNames].filter(Boolean).slice(0, 6), fileCount: projectFiles.length, stageSummaries: buildStageSummaries(projectFiles) };
+  }).sort((a, b) => b.fileCount - a.fileCount);
+  const projectNames = projects.filter((project) => project.projectName !== "未分组资料").map((project) => project.projectName).slice(0, 20);
+  const primaryProject = projects[0];
+  const overallStageSummaries = buildStageSummaries(files);
   const readableCount = files.filter((file) => file.status !== "unreadable").length;
-  return { id: `scan-${Date.now()}`, rootNames: Array.from(new Set(allEntries.map((entry) => entry.rootName))), scannedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - started), fileCount: files.length, readableCount, reviewCount: files.filter((file) => file.status === "needs-review" || file.status === "unreadable").length, inferredProjectNames: projectNames, inferredStage, files, issues };
+  return { id: `scan-${Date.now()}`, rootNames: Array.from(new Set(allEntries.map((entry) => entry.rootName))), scannedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - started), fileCount: files.length, readableCount, reviewCount: files.filter((file) => file.status === "needs-review" || file.status === "unreadable").length, inferredProjectNames: projectNames, projectName: projects.length > 1 ? `多项目资料库（${projects.length} 个项目）` : primaryProject?.projectName, projectNameConfidence: projects.length === 1 ? primaryProject?.confidence : undefined, projects, stageSummaries: overallStageSummaries, inferredStage, files, issues };
 }
 
 export function downloadScanReport(report: ProjectScanReport, format: "json" | "xlsx") {
@@ -245,7 +339,8 @@ export function downloadScanReport(report: ProjectScanReport, format: "json" | "
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `${report.rootNames[0] || "项目"}-文件扫描报告.json`; link.click(); URL.revokeObjectURL(url); return;
   }
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.files.map((file) => ({ 文件名: file.name, 相对路径: file.relativePath, 类型: file.extension, 大小: file.size, 修改时间: file.modifiedAt, 阶段: file.stageName || "待复核", 置信度: `${Math.round(file.confidence * 100)}%`, 分类: file.category, 状态: file.status, 证据: file.evidence.join("、"), 摘要: file.contentSummary || "" }))), "文件清单");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.files.map((file) => ({ 项目: file.projectName || "未分组", 文件名: file.name, 相对路径: file.relativePath, 类型: file.extension, 大小: file.size, 修改时间: file.modifiedAt, 阶段: file.pathStageName || file.stageName || "待复核", 置信度: `${Math.round(file.confidence * 100)}%`, 分类: file.category, 状态: file.status, 证据: file.evidence.join("、"), 摘要: file.contentSummary || "" }))), "文件清单");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.projects.flatMap((project) => project.stageSummaries.map((stage) => ({ 项目: project.projectName, 项目置信度: `${Math.round(project.confidence * 100)}%`, 项目文件数: project.fileCount, 阶段: stage.stageName, 文件数: stage.fileCount, 已分类: stage.classifiedCount, 待复核: stage.reviewCount, 资料类别: stage.categories.map((item) => `${item.category}（${item.count}）`).join("、"), 示例文件: stage.sampleFiles.join("、") })))), "项目阶段汇总");
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.issues.map((issue) => ({ 类型: issue.type, 标题: issue.title, 说明: issue.detail, 置信度: `${Math.round(issue.confidence * 100)}%` }))), "问题与建议");
   XLSX.writeFile(workbook, `${report.rootNames[0] || "项目"}-文件扫描报告.xlsx`);
 }

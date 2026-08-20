@@ -362,6 +362,8 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         onFilter={setScanFilter}
       />
 
+      <ProjectStructureSummary report={scanReport} />
+
       <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -438,6 +440,11 @@ function Metric({ icon: Icon, label, value, compact }: any) {
       </div>
     </div>
   );
+}
+
+function ProjectStructureSummary({ report }: { report: ProjectScanReport | null }) {
+  if (!report) return null;
+  return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">优先依据第一层项目目录和阶段目录分类，正文关键词用于补充判断。</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.slice(0, 12).map((project) => <div key={project.projectKey} className="rounded-xl border border-emerald-100 bg-white p-4"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.projectName}</span><span className="shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}</div></div>)}</div>{report.projects.length > 12 && <div className="mt-3 text-center text-[11px] text-slate-400">还有 {report.projects.length - 12} 个项目，完整分类请导出 JSON/Excel。</div>}</section>;
 }
 
 function ManifestPanel({ manifests, loading, uploadingId, uploadProgress, onUpload }: { manifests: ProjectFileManifest[]; loading: boolean; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
