@@ -24,7 +24,7 @@ archive_path="$stage_dir/release.tgz"
 release_dir="$stage_dir/release"
 backup_dir="$BACKUP_ROOT/$release_sha"
 failed_dir="$BACKUP_ROOT/$release_sha.failed"
-targets=(dist server shared src public deploy package.json package-lock.json node_modules)
+targets=(dist server shared src public deploy services package.json package-lock.json node_modules)
 service_stopped=0
 
 available_kb="$(df -Pk /opt | awk 'NR == 2 { print $4 }')"
@@ -155,6 +155,10 @@ for target in "${targets[@]}"; do
   fi
 done
 systemctl start "$SERVICE_NAME"
+
+if systemctl cat zhijian-asr.service >/dev/null 2>&1; then
+  systemctl restart zhijian-asr.service || echo "Warning: FunASR restart failed; Node service will use the explicit browser fallback."
+fi
 
 ready=0
 for attempt in {1..30}; do

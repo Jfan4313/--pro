@@ -12,12 +12,12 @@ function formatDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function parseLocalDeadline(text = "") {
+export function parseLocalDeadline(text = "") {
   const source = String(text);
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  if (source.includes("今天")) return formatDate(today);
+  if (source.includes("今天") || source.includes("今日") || /(?:做完|办完)/u.test(source)) return formatDate(today);
   if (source.includes("明天")) return formatDate(addDays(today, 1));
   if (source.includes("后天")) return formatDate(addDays(today, 2));
 
@@ -59,33 +59,68 @@ function parseDueTime(text = "") {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-function titleFor(part = "") {
-  const withoutContext = String(part).replace(/^.*?(?:项目|工程)[，,：:\s]*/u, "").replace(/(?:今天|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]).*?(?=(让|由|安排|落实|确认|检查|提交|完成|处理|跟进|编制))/u, "");
-  const action = withoutContext.match(/(确认|落实|检查|提交|完成|处理|跟进|编制|整理|修改|通知|协调|核对|制定|更新|补充)[^，,。；;]{1,24}/u)?.[0];
-  return (action || withoutContext).replace(/^(让|由|安排)[^，,。；;]{1,12}(负责|去)?/u, "").trim().slice(0, 30);
+function titleFor(part = "", projectName = "") {
+  const projectTokens = projectName ? [projectName, projectName.slice(-4)].filter((token) => token.length >= 3) : [];
+  const projectPattern = projectTokens.length ? new RegExp(projectTokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "giu") : /$^/u;
+  let withoutContext = String(part)
+    .replace(projectPattern, "")
+    .replace(/^.*?(?:项目|工程)[，,：:\s]*/u, "")
+    .replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:需要|要)?/u, "")
+    .replace(/^(?:今天|今日|明天|后天)?(?:需要|要|需要把|要把|把|将)\s*/u, "")
+    .replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/u, "")
+    .replace(/^(让|由|安排)[^，,。；;]{1,12}(负责|去)?/u, "")
+    .replace(/(?:今天|今日|明天|后天)(?:之前|前|做完|完成)?$/u, "")
+    .replace(/[，,。；;]+$/u, "")
+    .replace(/^的/u, "")
+    .trim();
+  const completedObject = withoutContext.match(/^(.+?)(?:完成|做完|办完)$/u)?.[1]?.trim();
+  const afterBa = withoutContext.match(/^(?:把|将)\s*(.+?)(?:完成|做完|办完)$/u)?.[1]?.trim();
+  const action = withoutContext.match(/(确认|落实|检查|提交|处理|跟进|编制|整理|修改|通知|协调|核对|制定|更新|补充|处罚)[^，,。；;]{1,40}/u)?.[0];
+  const result = (afterBa || completedObject ? `完成${afterBa || completedObject}` : action || (/(处罚清单|事故分析报告|整改通知书|处罚单)/u.test(withoutContext) ? `完成${withoutContext}` : withoutContext)).trim();
+  return result.slice(0, 48);
+}
+
+function projectCandidateScore(project, normalizedInput) {
+  const candidates = [project?.name, project?.projectName, project?.projectNumber, project?.code, project?.alias, ...(Array.isArray(project?.aliases) ? project.aliases : [])]
+    .map(normalizeText).filter((candidate) => candidate.length >= 2);
+  let score = 0;
+  for (const candidate of candidates) {
+    if (normalizedInput.includes(candidate)) score = Math.max(score, 100 + candidate.length);
+    else if (candidate.includes(normalizedInput) && normalizedInput.length >= 2) score = Math.max(score, 80 + normalizedInput.length);
+    else if (candidate.length >= 4) {
+      for (let length = Math.min(candidate.length - 1, 12); length >= 3; length -= 1) {
+        if (Array.from({ length: candidate.length - length + 1 }, (_, index) => candidate.slice(index, index + length)).some((fragment) => normalizedInput.includes(fragment))) {
+          score = Math.max(score, 60 + length);
+          break;
+        }
+      }
+    }
+  }
+  return score;
 }
 
 export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projects = [], personnel = [], entities = [] }) {
   const trimmed = String(text || "").trim();
   const cleanedTranscript = cleanSpokenText(trimmed);
   const normalized = normalizeText(cleanedTranscript);
-  const projectMatches = projects.filter((item) => {
-    const candidates = [item?.name, item?.projectName, item?.projectNumber, item?.code, item?.alias, ...(Array.isArray(item?.aliases) ? item.aliases : [])].map(normalizeText).filter(Boolean);
-    return candidates.some((candidate) => candidate.length >= 2 && normalized.includes(candidate));
-  });
+  const scoredProjects = projects.map((item) => ({ item, score: projectCandidateScore(item, normalized) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
+  const bestScore = scoredProjects[0]?.score || 0;
+  const projectMatches = scoredProjects.filter((entry) => entry.score === bestScore && bestScore > 0).map((entry) => entry.item);
   const project = projectMatches.length === 1 ? projectMatches[0] : null;
   const projectConflict = projectMatches.length > 1;
   const projectMentionRaw = String(text || "").match(/(?:新项目|项目|工程|标段)[：:\s]?([\u4e00-\u9fa5A-Za-z0-9_-]{2,30})/i)?.[1] || "";
   const projectMention = projectMentionRaw.replace(/(今天|明天|后天|让|安排|负责|去|到).*/u, "").trim();
-  const projectName = project?.name || projectMention;
+  const projectName = project?.name || projectMention || (projectMatches.length === 1 ? projectMatches[0].name : "");
   const projectMatchType = project ? "existing" : (projectMention ? "new" : "unknown");
   const entityDirectory = entities.length ? entities : personnel.map((person) => ({ entityId: String(person.id || ""), entityType: "internal_person", name: person.name, notificationEligible: Boolean(person.accountId || person.loginEnabled), matchType: "existing", confidence: 1 }));
   const people = entityDirectory.filter((item) => {
     const name = normalizeText(item?.name || "");
     return name && normalized.includes(name);
   });
+  const spokenResponsibleCandidate = String(text || "").match(/(?:负责人|责任人)(?:是|为|：|:|\s)?([\u4e00-\u9fa5]{2,4})(?=$|[，,。；;\s])/u)?.[1] || "";
+  const inferredSpokenResponsible = /(?:后面|待|选择|确认|未定|未知)/u.test(spokenResponsibleCandidate) ? "" : spokenResponsibleCandidate;
   const inferredAssignee = people.length === 0
-    ? (String(text || "").match(/(?:安排|通知|协调|交给|让)([\u4e00-\u9fa5]{2,4})(?:和|、|及|去|到|负责|处理|跟进|检查|对接)/)?.[1] || "")
+    ? (inferredSpokenResponsible || String(text || "").match(/(?:安排|通知|协调|交给|让)([\u4e00-\u9fa5]{2,4})(?:和|、|及|去|到|负责|处理|跟进|检查|对接)/)?.[1] || "")
     : "";
   const deadline = parseLocalDeadline(trimmed);
   const titleSource = cleanedTranscript || (attachmentUrl ? "根据附件补充待办事项" : "");
@@ -97,12 +132,15 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
     const partPeople = people.filter((person) => normalizeText(part).includes(normalizeText(person?.name || "")));
     const matchedEntities = partPeople.length ? partPeople : people;
     const responsibleEntities = matchedEntities.map((entity) => ({ entityId: entity.entityId || entity.id || "", entityType: entity.entityType || "internal_person", name: entity.name, ...(entity.organizationId ? { organizationId: entity.organizationId } : {}), ...(entity.organizationName ? { organizationName: entity.organizationName } : {}), ...(entity.contactEntityId ? { contactEntityId: entity.contactEntityId } : {}), ...(entity.contactName ? { contactName: entity.contactName } : {}), matchType: entity.matchType || "existing", confidence: Number(entity.confidence ?? 0.8), notificationEligible: Boolean(entity.notificationEligible) }));
+    if (!responsibleEntities.length && inferredAssignee) {
+      responsibleEntities.push({ entityId: `pending-person:${normalizeText(inferredAssignee)}`, entityType: "external_person", name: inferredAssignee, matchType: "pending", confidence: 0.45, notificationEligible: false });
+    }
     const names = responsibleEntities.map((entity) => entity.name);
     const itemDeadline = parseLocalDeadline(part) || deadline;
-    const reviewReasons = [...(!responsibleEntities.length ? ["缺少负责人"] : []), ...(!itemDeadline ? ["缺少截止日期"] : []), "AI不可用，已使用本地保守规则拆分"];
+    const reviewReasons = [...(!responsibleEntities.length ? ["缺少负责人"] : []), ...(!itemDeadline ? ["缺少截止日期"] : []), ...(projectConflict ? ["项目存在多个候选，请人工选择"] : []), "AI不可用，已使用本地保守规则拆分"];
     return {
       id: `draft-${index + 1}`,
-      title: titleFor(part),
+      title: titleFor(part, projectName),
       projectId: project?.id || "",
       projectName,
       projectMatchType,
@@ -112,7 +150,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
       assignee: names[0] || inferredAssignee,
       deadline: itemDeadline,
       dueTime: parseDueTime(part),
-      summary: part,
+      summary: `执行事项：${titleFor(part, projectName)}。${projectName ? `项目：${projectName}。` : "项目：待确认。"}${names.length ? `负责人：${names.join("、")}。` : "负责人：待选择。"}${itemDeadline ? `截止日期：${itemDeadline}。` : "截止日期：待选择。"}完成标准：按任务标题完成对应事项，并在工作备忘中留下完成记录。`,
       confidence: inputType === "text" ? (project || responsibleEntities.length || itemDeadline ? 0.55 : 0.25) : 0.1,
       needsManualReview: true,
       reviewReasons,

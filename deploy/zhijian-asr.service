@@ -1,0 +1,28 @@
+[Unit]
+Description=Zhijian FunASR speech recognition service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/zhijian-pro/services/funasr-service
+EnvironmentFile=-/etc/zhijian-asr.env
+Environment=FUNASR_MODEL_DIR=/var/lib/zhijian-asr/models
+Environment=FUNASR_DEVICE=cpu
+Environment=FUNASR_MAX_CONCURRENCY=1
+ExecStart=/opt/zhijian-asr-venv/bin/uvicorn app:app --host 127.0.0.1 --port 8790 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+StateDirectory=zhijian-asr
+StateDirectoryMode=0750
+ReadWritePaths=/var/lib/zhijian-asr
+
+[Install]
+WantedBy=multi-user.target
+

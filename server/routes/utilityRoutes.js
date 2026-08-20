@@ -3,8 +3,16 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
-import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIEntityGlossary, getAIKey, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig, updateAIEntityGlossary } from "../domain/aiService.js";
+import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIEntityGlossary, getAIKey, getSpeechProviderConfig, getSpeechProviderSecrets, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig, updateAIEntityGlossary, updateSpeechProviderConfig } from "../domain/aiService.js";
 import { getCompanyKnowledge } from "../domain/companyEntities.js";
+import {
+  buildSpeechHotwords,
+  deletePrivateAudio,
+  getSpeechConfig,
+  getSpeechHealth,
+  savePrivateAudio,
+  transcribePrivateAudio,
+} from "../domain/speechService.js";
 import { isCompanyManager } from "../auth.js";
 import {
   buildProjectStoredFile,
@@ -15,10 +23,13 @@ import { createUtilityServices } from "../services/utilityServices.js";
 
 export function registerUtilityRoutes(app, context) {
   const services = createUtilityServices(context);
-  const { db, uploadsDir, nowIso, parseJson } = context;
+  const { db, uploadsDir, intakeAudioDir, nowIso, parseJson } = context;
 
   const currentUser = (req) => req.authUser || db.prepare("SELECT * FROM users WHERE id = 'admin-local'").get();
   const authenticatedUser = (req, res) => {
+    // Local development intentionally supports the seeded admin account when
+    // API auth is disabled. Production keeps the session requirement.
+    if (!req.authUser && process.env.LOCAL_API_AUTH_REQUIRED !== "true") return db.prepare("SELECT * FROM users WHERE id = 'admin-local'").get();
     if (!req.authUser) { res.status(401).json({ error: "authentication_required" }); return null; }
     return req.authUser;
   };
@@ -43,6 +54,21 @@ export function registerUtilityRoutes(app, context) {
       console.error("Failed to persist company AI config:", error);
       res.status(500).json({ error: "ai_config_save_failed", message: "服务端无法写入 AI 配置文件，请检查 data 目录权限" });
     }
+  });
+
+  app.get("/api/speech-config", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const config = getSpeechProviderConfig(user.companyId || "company-default");
+    res.json(isCompanyManager(user) ? config : { provider: config.provider, hasKey: config.hasKey, hotwordTableId: "", updatedAt: config.updatedAt });
+  });
+
+  app.put("/api/speech-config", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
+    try { res.json(updateSpeechProviderConfig(user.companyId || "company-default", req.body || {})); }
+    catch (error) { res.status(400).json({ error: "invalid_speech_config", message: error.message }); }
   });
 
   app.get("/api/company-entities", (req, res) => {
@@ -131,6 +157,66 @@ export function registerUtilityRoutes(app, context) {
     res.status(201).json({ id: crypto.randomUUID(), filename: safeName, url: `/uploads/${storedName}`, createdAt: nowIso() });
   });
 
+  app.post("/api/intake/audio", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    try {
+      const saved = savePrivateAudio(intakeAudioDir, {
+        filename: req.body?.filename,
+        contentBase64: req.body?.contentBase64,
+        mimeType: req.body?.mimeType,
+        durationMs: req.body?.durationMs,
+        companyId: user.companyId || "company-default",
+        userId: user.id,
+      });
+      res.status(201).json(saved);
+    } catch (error) {
+      const code = error.message === "audio_too_large" ? 413 : 400;
+      res.status(code).json({ error: error.message, message: error.message === "audio_too_large" ? "录音文件超过大小限制" : "录音内容为空或格式无效" });
+    }
+  });
+
+  app.delete("/api/intake/audio/:audioId", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const deleted = deletePrivateAudio(intakeAudioDir, req.params.audioId, user.companyId || "company-default");
+    if (!deleted) return res.status(404).json({ error: "audio_not_found" });
+    res.json({ ok: true });
+  });
+
+  const performFormalTranscription = async (user, payload = {}) => {
+    const companyId = user.companyId || "company-default";
+    const glossary = getAIEntityGlossary(companyId);
+    return transcribePrivateAudio({
+      audioDir: intakeAudioDir,
+      audioId: payload.audioId,
+      companyId,
+      browserTranscript: payload.browserTranscript,
+      db,
+      glossary,
+      speechConfig: (() => { const secrets = getSpeechProviderSecrets(companyId); return { provider: secrets.provider, doubaoKey: secrets.doubaoApiKey, doubaoAppKey: secrets.doubaoAppKey, doubaoAccessKey: secrets.doubaoAccessKey, doubaoHotwordTableId: secrets.doubaoHotwordTableId }; })(),
+    });
+  };
+
+  const browserFallback = (audioId, browserTranscript, reason) => ({
+    audioId,
+    provider: "browser",
+    model: "browser-fallback",
+    browserTranscript: String(browserTranscript || "").trim(),
+    rawTranscript: String(browserTranscript || "").trim(),
+    transcript: String(browserTranscript || "").trim(),
+    correctedTranscript: String(browserTranscript || "").trim(),
+    corrections: [],
+    ambiguousCorrections: [],
+    durationMs: 0,
+    processingMs: 0,
+    hotwordCount: 0,
+    hotwordsApplied: false,
+    fallbackApplied: true,
+    needsManualReview: true,
+    warning: `正式语音识别失败，当前为低精度浏览器结果：${reason}`,
+  });
+
   app.post("/api/intake/analyze", async (req, res) => {
     const inputType = req.body?.inputType;
     if (!["text", "image", "audio"].includes(inputType)) {
@@ -138,16 +224,37 @@ export function registerUtilityRoutes(app, context) {
     }
     try {
       const body = { ...(req.body || {}) };
-      if (inputType === "audio" && body.attachmentUrl) {
+      let formalTranscription = null;
+      if (inputType === "audio" && body.audioId) {
+        try {
+          formalTranscription = await performFormalTranscription(currentUser(req), body);
+          body.text = formalTranscription.correctedTranscript;
+          body.inputType = "text";
+        } catch (error) {
+          if (!String(body.browserTranscript || "").trim()) throw error;
+          formalTranscription = browserFallback(body.audioId, body.browserTranscript, error.message);
+          body.text = formalTranscription.correctedTranscript;
+          body.inputType = "text";
+        }
+      } else if (inputType === "audio" && body.attachmentUrl) {
         const filename = path.basename(String(body.attachmentUrl).split("?")[0]);
         body.attachmentPath = path.join(uploadsDir, filename);
       }
-      res.json(await analyzeIntakeWithAI(body, currentUser(req), db));
+      const result = await analyzeIntakeWithAI(body, currentUser(req), db);
+      res.json(formalTranscription ? { ...result, formalTranscription } : result);
     } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
   });
 
   app.post("/api/intake/transcribe", async (req, res) => {
     const user = currentUser(req);
+    if (req.body?.audioId) {
+      try {
+        return res.json(await performFormalTranscription(user, req.body));
+      } catch (error) {
+        if (String(req.body?.browserTranscript || "").trim()) return res.json(browserFallback(req.body.audioId, req.body.browserTranscript, error.message));
+        return res.status(502).json({ error: "transcription_failed", message: error.message, ...getSpeechConfig() });
+      }
+    }
     const attachmentUrl = String(req.body?.attachmentUrl || "");
     if (!attachmentUrl) return res.status(400).json({ error: "audio_required", message: "缺少音频文件" });
     const config = getAIConfig(user.companyId || "company-default");
@@ -159,6 +266,37 @@ export function registerUtilityRoutes(app, context) {
       if (!transcript) return res.status(502).json({ error: "empty_transcript", message: "语音服务没有返回文字", model: config.model });
       res.json({ transcript, model: config.model });
     } catch (error) { res.status(502).json({ error: "transcription_failed", message: error.message, model: config.model, endpoint: resolveTranscriptionEndpoint(config.endpoint) }); }
+  });
+
+  app.get("/api/speech-status", async (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const secrets = getSpeechProviderSecrets(user.companyId || "company-default");
+    const speechConfig = { provider: secrets.provider, doubaoKey: secrets.doubaoApiKey, doubaoAppKey: secrets.doubaoAppKey, doubaoAccessKey: secrets.doubaoAccessKey, doubaoHotwordTableId: secrets.doubaoHotwordTableId };
+    const config = getSpeechConfig(speechConfig);
+    res.json({ ...getSpeechProviderConfig(user.companyId || "company-default"), ...config, health: await getSpeechHealth(speechConfig) });
+  });
+
+  app.post("/api/speech-debug", async (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
+    if (!req.body?.audioId) return res.status(400).json({ error: "audio_required" });
+    try {
+      const result = await performFormalTranscription(user, req.body);
+      res.json({ ok: true, stage: "transcription", ...result });
+    } catch (error) {
+      res.status(502).json({ ok: false, stage: "transcription", message: error.message, ...getSpeechConfig() });
+    }
+  });
+
+  app.post("/api/speech/hotwords/sync", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
+    const glossary = getAIEntityGlossary(user.companyId || "company-default");
+    const { hotwords } = buildSpeechHotwords(db, glossary);
+    res.json({ ok: true, syncMode: "per_request", count: hotwords.length, preview: hotwords.slice(0, 20) });
   });
 
   app.post("/api/ai-debug", async (req, res) => {

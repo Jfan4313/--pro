@@ -104,6 +104,48 @@ sudo systemctl restart zhijian-pro
 curl http://127.0.0.1:8787/api/health
 ```
 
+### 独立 FunASR 语音服务
+
+FunASR 不嵌入 Node 进程，也不把模型放入应用发布包。首次安装时创建独立虚拟环境和持久模型目录：
+
+```bash
+sudo install -d -m 750 -o www-data -g www-data /var/lib/zhijian-asr/models
+sudo python3 -m venv /opt/zhijian-asr-venv
+sudo /opt/zhijian-asr-venv/bin/pip install -r /opt/zhijian-pro/services/funasr-service/requirements.txt
+sudo cp /opt/zhijian-pro/deploy/zhijian-asr.service /etc/systemd/system/
+sudo cp /opt/zhijian-pro/deploy/zhijian-asr.env.example /etc/zhijian-asr.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now zhijian-asr
+curl --fail http://127.0.0.1:8790/health
+```
+
+### 使用豆包云端语音识别（可选）
+
+豆包作为主识别引擎时不需要在本机加载 FunASR 模型。编辑
+`/etc/zhijian-pro.env`，新版火山引擎控制台填写 `DOUBAO_API_KEY`；旧版填写
+`DOUBAO_APP_KEY` 和 `DOUBAO_ACCESS_KEY`，并设置：
+
+```bash
+ASR_PROVIDER=doubao
+DOUBAO_ASR_URL=https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash
+DOUBAO_HOTWORD_TABLE_ID=
+```
+
+然后执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart zhijian-pro
+curl --fail http://127.0.0.1:8787/api/speech-status
+```
+
+豆包识别失败时，Node 服务会尝试 FunASR 备用引擎；两者都失败才降级到浏览器临时字幕。
+豆包录音文件极速版支持 WAV、MP3、OGG OPUS，浏览器生成的 WebM 会由服务端用 ffmpeg 转为单声道 16kHz WAV。
+
+模型首次启动时下载到 `/var/lib/zhijian-asr/models`，不应加入
+`deploy-backups`。当前机器资源不足时，可把 `/etc/zhijian-pro.env` 中的
+`ASR_SERVICE_URL` 指向独立的至少 4GB 内存主机，业务接口无需改变。
+
 ## 5. 配置域名与 HTTPS
 
 ```bash
@@ -128,6 +170,7 @@ Certbot 完成后，访问 `https://project.zero-carbon.online`。手机摄像�
 - 现场照片：`uploads/`
 - 项目资料：`project-files/`
 - 本地备份：`backups/`
+- 待转写私有音频：`intake-audio/`（失败记录最多保留 24 小时）
 
 CI 部署回滚副本位于 `/var/lib/zhijian-pro/deploy-backups`。部署脚本默认只保留上一份成功发布版本，并在成功发布后清理更早版本和失败副本；可通过 `DEPLOY_BACKUP_RETENTION_COUNT` 调整保留数量。完整代码版本由 GitHub 保存；该目录只用于发布回滚，不是业务数据备份。
 - 公司 AI 配置：`ai-config.json`（服务端保存，权限应为 `0600`）

@@ -43,3 +43,36 @@ test("local fallback keeps completed statements as background and leaves missing
   assert.equal(result.items[0].deadline, "");
   assert.ok(result.items[0].reviewReasons.includes("缺少负责人"));
 });
+
+test("local fallback matches a project name fragment and keeps coordinated objects in one detailed task", () => {
+  const result = analyzeIntake({
+    inputType: "text",
+    text: "万力轮胎的处罚清单和事故分析报告今天做完，负责人后面选择",
+    projects: [{ id: "project-penalty", name: "处罚万力轮胎" }],
+    personnel: [],
+  });
+
+  assert.equal(result.projectMatchType, "existing");
+  assert.equal(result.projectId, "project-penalty");
+  assert.equal(result.projectName, "处罚万力轮胎");
+  assert.equal(result.items.length, 1);
+  assert.match(result.items[0].title, /处罚清单/);
+  assert.match(result.items[0].title, /事故分析报告/);
+  assert.equal(result.items[0].deadline, new Date().toISOString().slice(0, 10));
+  assert.match(result.items[0].summary, /完成标准/);
+});
+
+test("local fallback extracts a spoken responsible person and creates a complete task title", () => {
+  const result = analyzeIntake({
+    inputType: "text",
+    text: "万力轮胎今天需要把事故分析报告和处罚单完成，负责人苏俊鹏。",
+    projects: [{ id: "project-penalty", name: "处罚万力轮胎" }],
+    personnel: [],
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].title, "完成事故分析报告和处罚单");
+  assert.deepEqual(result.items[0].assignees, ["苏俊鹏"]);
+  assert.equal(result.items[0].responsibleEntities[0].matchType, "pending");
+  assert.match(result.items[0].summary, /项目：处罚万力轮胎/);
+});

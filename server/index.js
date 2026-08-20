@@ -8,6 +8,7 @@ import { registerAuthRoutes } from "./routes/authRoutes.js";
 import { registerDataRoutes } from "./routes/dataRoutes.js";
 import { registerUtilityRoutes } from "./routes/utilityRoutes.js";
 import { createWecomNotifier } from "./services/wecomNotifier.js";
+import { cleanupExpiredAudio } from "./domain/speechService.js";
 
 const app = express();
 const port = Number(process.env.LOCAL_API_PORT || 8787);
@@ -19,6 +20,9 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const distDir = path.join(rootDir, "dist");
 const packageVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8")).version;
 const buildInfoPath = path.join(rootDir, "server", "build-info.json");
+const intakeAudioDir = path.join(path.dirname(dbPath), "intake-audio");
+cleanupExpiredAudio(intakeAudioDir);
+setInterval(() => cleanupExpiredAudio(intakeAudioDir), 60 * 60 * 1000).unref();
 let buildInfo = {};
 try { buildInfo = JSON.parse(fs.readFileSync(buildInfoPath, "utf8")); } catch { buildInfo = {}; }
 const wecomNotifier = createWecomNotifier({ nowIso: () => new Date().toISOString() });
@@ -40,7 +44,8 @@ function emitEvent(event) {
   clients.forEach((client) => client.write(message));
 }
 
-app.use(express.json({ limit: "25mb" }));
+// 20 MB audio becomes roughly 26.7 MB after base64 encoding.
+app.use(express.json({ limit: "30mb" }));
 app.use("/uploads", express.static(uploadsDir));
 
 app.use((req, res, next) => {
@@ -61,6 +66,7 @@ const routeContext = {
   uploadsDir,
   backupsDir,
   projectFilesDir,
+  intakeAudioDir,
   parseJson,
   toEntity,
   insertSyncEvent,

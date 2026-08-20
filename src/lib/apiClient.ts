@@ -8,6 +8,26 @@ export const API_BASE_URL =
 export type CompanyEntityType = "internal_person" | "partner_organization" | "supplier_organization" | "external_person" | "external_organization";
 export type ResponsibleEntity = { entityId: string; entityType: CompanyEntityType; name: string; organizationId?: string; organizationName?: string; contactEntityId?: string; contactName?: string; matchType: "existing" | "pending" | "ambiguous"; confidence: number; notificationEligible: boolean };
 export type IntakeGlossaryEntry = { id: string; standardName: string; aliases: string[]; category: "project" | "person" | "organization" | "industry_term"; enabled: boolean };
+export type SpeechCorrection = { original: string; replacement: string; entityId: string; confidence: number };
+export type AmbiguousSpeechCorrection = { original: string; candidates: Array<{ entityId: string; name: string }> };
+export type SpeechTranscriptionResult = {
+  audioId: string;
+  provider: "funasr" | "doubao" | "browser";
+  model: "paraformer-zh" | "sensevoice-small" | "doubao-bigmodel" | "browser-fallback" | string;
+  browserTranscript: string;
+  rawTranscript: string;
+  transcript: string;
+  correctedTranscript: string;
+  corrections: SpeechCorrection[];
+  ambiguousCorrections: AmbiguousSpeechCorrection[];
+  durationMs: number;
+  processingMs: number;
+  hotwordCount: number;
+  hotwordsApplied: boolean;
+  fallbackApplied: boolean;
+  needsManualReview: boolean;
+  warning?: string;
+};
 
 export function getProjectFileDownloadUrl(relativePath: string) {
   return `${API_BASE_URL}/api/project-files/download?relativePath=${encodeURIComponent(relativePath)}`;
@@ -112,6 +132,15 @@ export const apiClient = {
       body: { filename, contentBase64 },
     });
   },
+  uploadIntakeAudio(filename: string, contentBase64: string, mimeType: string, durationMs: number) {
+    return request<{ audioId: string; filename: string; createdAt: string }>("/api/intake/audio", {
+      method: "POST",
+      body: { filename, contentBase64, mimeType, durationMs },
+    });
+  },
+  deleteIntakeAudio(audioId: string) {
+    return request<{ ok: boolean }>(`/api/intake/audio/${encodeURIComponent(audioId)}`, { method: "DELETE" });
+  },
   getFileSettings() {
     return request<{
       rootPath: string;
@@ -198,6 +227,8 @@ export const apiClient = {
     inputType: "text" | "image" | "audio";
     text?: string;
     attachmentUrl?: string;
+    audioId?: string;
+    browserTranscript?: string;
     projects?: unknown[];
     personnel?: unknown[];
   }) {
@@ -238,8 +269,19 @@ export const apiClient = {
       }>;
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
-  transcribeAudio(attachmentUrl: string) {
-    return request<{ transcript: string; model: string }>("/api/intake/transcribe", { method: "POST", body: { attachmentUrl } });
+  transcribeAudio(audioId: string, browserTranscript = "") {
+    return request<SpeechTranscriptionResult>("/api/intake/transcribe", { method: "POST", body: { audioId, browserTranscript } });
+  },
+  getSpeechStatus() {
+    return request<{ configured: boolean; provider: string; endpoint: string; primaryModel: string; fallbackModel: string; timeoutMs: number; health: { ok: boolean; message?: string } }>("/api/speech-status");
+  },
+  getSpeechConfig() { return request<{ provider: "funasr" | "doubao"; hasKey: boolean; hotwordTableId: string; updatedAt: string | null }>("/api/speech-config"); },
+  updateSpeechConfig(payload: { provider: "funasr" | "doubao"; apiKey?: string; appKey?: string; accessKey?: string; hotwordTableId?: string; clearApiKey?: boolean }) { return request<{ provider: "funasr" | "doubao"; hasKey: boolean; hotwordTableId: string; updatedAt: string | null }>("/api/speech-config", { method: "PUT", body: payload }); },
+  debugSpeech(audioId: string, browserTranscript = "") {
+    return request<SpeechTranscriptionResult & { ok: boolean; stage: string }>("/api/speech-debug", { method: "POST", body: { audioId, browserTranscript } });
+  },
+  syncSpeechHotwords() {
+    return request<{ ok: boolean; syncMode: string; count: number; preview: Array<{ text: string; weight: number; category: string }> }>("/api/speech/hotwords/sync", { method: "POST" });
   },
   debugAI(payload?: { endpoint?: string; model?: string; apiKey?: string; timeoutMs?: number }) {
     return request<{ ok: boolean; stage: string; model: string; endpoint: string; configured: boolean; durationMs?: number; message?: string; result?: { title: string; deadline: string } }>("/api/ai-debug", { method: "POST", body: payload || {} });

@@ -39,7 +39,11 @@ export function Settings() {
   const [archivePermission, setArchivePermission] = React.useState<"granted" | "prompt" | "denied" | "unsupported">("unsupported");
   const [isInitializingFolders, setIsInitializingFolders] = React.useState(false);
   const [aiConfig, setAiConfig] = React.useState({ endpoint: "", model: "gpt-4o-mini", apiKey: "", timeoutMs: 30000, hasKey: false, configured: false, updatedAt: null as string | null });
+  const [speechConfig, setSpeechConfig] = React.useState({ provider: "funasr" as "funasr" | "doubao", apiKey: "", hotwordTableId: "", hasKey: false, updatedAt: null as string | null });
   const [aiSaving, setAiSaving] = React.useState(false);
+  const [speechSaving, setSpeechSaving] = React.useState(false);
+  const [speechDebug, setSpeechDebug] = React.useState<Awaited<ReturnType<typeof apiClient.getSpeechStatus>> | null>(null);
+  const [speechDebugging, setSpeechDebugging] = React.useState(false);
   const [usage, setUsage] = React.useState<Awaited<ReturnType<typeof apiClient.getAIUsage>> | null>(null);
   const [usageLoading, setUsageLoading] = React.useState(false);
   const [usageFilters, setUsageFilters] = React.useState({ from: "", to: "", userId: "", model: "", status: "" });
@@ -90,6 +94,7 @@ export function Settings() {
   React.useEffect(() => {
     if (!user) return;
     void apiClient.getAIConfig().then((config) => setAiConfig((current) => ({ ...current, ...config, apiKey: "" }))).catch(() => undefined);
+    void apiClient.getSpeechConfig().then((config) => setSpeechConfig((current) => ({ ...current, ...config, apiKey: "" }))).catch(() => undefined);
     void apiClient.getAIUsage({ pageSize: 50 }).then(setUsage).catch(() => undefined);
     if (isAIManager) {
       void apiClient.listAccounts().then(setCompanyAccounts).catch(() => undefined);
@@ -124,6 +129,26 @@ export function Settings() {
     try { const saved = await apiClient.updateAIConfig({ ...aiConfig, apiKey: "", clearApiKey: true }); setAiConfig((current) => ({ ...current, ...saved, apiKey: "" })); window.dispatchEvent(new CustomEvent("show-toast", { detail: "公司 AI Key 已清除" })); }
     catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "AI Key 清除失败" })); }
     finally { setAiSaving(false); }
+  };
+
+  const saveSpeechConfig = async () => {
+    setSpeechSaving(true);
+    try {
+      const saved = await apiClient.updateSpeechConfig({ provider: speechConfig.provider, apiKey: speechConfig.apiKey, hotwordTableId: speechConfig.hotwordTableId });
+      setSpeechConfig((current) => ({ ...current, ...saved, apiKey: "" }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "豆包语音配置已保存" }));
+    } catch (error: any) { window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.details?.message || "豆包语音配置保存失败" })); }
+    finally { setSpeechSaving(false); }
+  };
+
+  const debugSpeechConfig = async () => {
+    setSpeechDebugging(true);
+    try {
+      const result = await apiClient.getSpeechStatus();
+      setSpeechDebug(result);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: result.health?.ok ? "语音引擎配置已就绪" : (result.health?.message || "语音引擎配置未就绪") }));
+    } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "语音配置检查失败，请确认服务端已更新" })); }
+    finally { setSpeechDebugging(false); }
   };
 
   const runAIDebug = async () => {
@@ -328,6 +353,22 @@ export function Settings() {
 <p className="text-sm font-semibold text-slate-800">{aiConfig.configured ? "公司 AI 已配置" : "公司 AI 尚未配置"}</p>
 <p className="mt-1 text-xs text-slate-500">当前模型：{aiConfig.model || "未设置"}。地址和密钥仅公司管理员可查看。</p>
 </div>}</div>}
+
+        {user && <div className="bg-white rounded-xl border border-violet-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-violet-100 bg-violet-50/50 flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-violet-600" />
+            <div><h3 className="text-lg font-medium text-slate-800">公司语音识别配置</h3><p className="mt-1 text-xs text-slate-500">豆包负责语音转文字，DeepSeek仍负责任务整理；API Key 只保存在服务端。</p></div>
+          </div>
+          {isAIManager ? <div className="p-6 space-y-4">
+            <label className="block"><span className="form-label">语音识别引擎</span><select value={speechConfig.provider} onChange={(event) => setSpeechConfig({ ...speechConfig, provider: event.target.value as "funasr" | "doubao" })} className="survey-input"><option value="doubao">豆包大模型语音识别</option><option value="funasr">FunASR 本地识别</option></select></label>
+            {speechConfig.provider === "doubao" && <>
+              <label className="block"><span className="form-label">豆包 API Key {speechConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span><input type="password" value={speechConfig.apiKey} onChange={(event) => setSpeechConfig({ ...speechConfig, apiKey: event.target.value })} placeholder={speechConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴火山引擎豆包 API Key"} className="survey-input" /></label>
+              <label className="block"><span className="form-label">热词表 ID（可选）</span><input value={speechConfig.hotwordTableId} onChange={(event) => setSpeechConfig({ ...speechConfig, hotwordTableId: event.target.value })} placeholder="火山引擎控制台创建的热词表 ID" className="survey-input" /><span className="mt-1 block text-xs text-slate-500">建议把公司项目、人名和合作单位维护到豆包热词表。</span></label>
+            </>}
+            <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void debugSpeechConfig()} disabled={speechDebugging} className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-bold text-violet-700 disabled:opacity-60"><RefreshCw className={cn("h-4 w-4", speechDebugging && "animate-spin")} />{speechDebugging ? "检查中…" : "检查语音连接"}</button><button type="button" onClick={() => void saveSpeechConfig()} disabled={speechSaving} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{speechSaving ? "保存中…" : "保存语音配置"}</button>{speechConfig.hasKey && <button type="button" onClick={() => { void apiClient.updateSpeechConfig({ provider: speechConfig.provider, clearApiKey: true }).then((saved) => { setSpeechConfig((current) => ({ ...current, ...saved, apiKey: "" })); window.dispatchEvent(new CustomEvent("show-toast", { detail: "豆包 API Key 已清除" })); }).catch(() => window.dispatchEvent(new CustomEvent("show-toast", { detail: "豆包 API Key 清除失败" }))); }} disabled={speechSaving} className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 disabled:opacity-60">清除语音 Key</button>}</div>
+            {speechDebug && <p className={cn("rounded-lg px-3 py-2 text-sm", speechDebug.health?.ok ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>{speechDebug.health?.ok ? "语音引擎配置已就绪；请在快速创建工作备忘中上传一段录音进行真实授权测试。" : speechDebug.health?.message || "语音引擎未就绪"}</p>}
+          </div> : <div className="p-6"><p className="text-sm font-semibold text-slate-800">{speechConfig.provider === "doubao" ? "豆包语音" : "FunASR 本地语音"}：{speechConfig.hasKey ? "已配置" : "未配置"}</p><p className="mt-1 text-xs text-slate-500">语音地址和密钥仅公司管理员可查看。</p></div>}
+        </div>}
 
         {user && isAIManager && (aiDebugging || aiDebug) && (
           <div
