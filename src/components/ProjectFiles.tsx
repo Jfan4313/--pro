@@ -3,6 +3,8 @@ import { AlertTriangle, Download, FileDown, FileText, FolderOpen, FolderSearch, 
 import { apiClient, downloadProjectManifestContent, getProjectFileDownloadUrl, ProjectFileManifest } from "@/src/lib/apiClient";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
+import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
@@ -10,7 +12,8 @@ import { ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFil
 import { downloadScanReport, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
-  const [boardData] = useProjectBoardData();
+  const [boardData, setBoardData] = useProjectBoardData();
+  const { reserveProjectNumber } = useProjectNumbering();
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const projects = React.useMemo(() => flattenProjects(boardData), [boardData]);
@@ -26,6 +29,9 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [localPermission, setLocalPermission] = React.useState<"unknown" | "granted" | "prompt" | "denied" | "unsupported">("unknown");
   const [scanRoots, setScanRoots] = React.useState<any[]>([]);
   const [scanReport, setScanReport] = React.useState<ProjectScanReport | null>(null);
+  const [selectedImportProjects, setSelectedImportProjects] = React.useState<string[]>([]);
+  const [importingProjects, setImportingProjects] = React.useState(false);
+  const [aiArchiveReviewing, setAiArchiveReviewing] = React.useState(false);
   const [scanRunning, setScanRunning] = React.useState(false);
   const [scanProgress, setScanProgress] = React.useState({ current: 0, total: 0, name: "" });
   const [scanFilter, setScanFilter] = React.useState<"all" | "review" | "issues">("all");
@@ -207,12 +213,72 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     try {
       const report = await scanProjectDirectories(scanRoots, { signal: controller.signal, onProgress: setScanProgress });
       setScanReport(report);
+      setSelectedImportProjects([]);
       setScanFilter("all");
       window.dispatchEvent(new CustomEvent("show-toast", { detail: `扫描完成，共识别 ${report.fileCount} 个文件` }));
     } catch (error: any) {
       if (error?.name !== "AbortError") window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "扫描失败，请重试" }));
     } finally {
       setScanRunning(false);
+    }
+  };
+
+  const toggleImportProject = (projectKey: string) => {
+    setSelectedImportProjects((current) => current.includes(projectKey) ? current.filter((key) => key !== projectKey) : [...current, projectKey]);
+  };
+
+  const importScannedProjects = async () => {
+    if (!scanReport || !selectedImportProjects.length) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "请先勾选要录入项目管理的项目" }));
+      return;
+    }
+    setImportingProjects(true);
+    setAiArchiveReviewing(true);
+    try {
+      const existingNames = new Set(projects.map((project: any) => String(project.name || "").trim().toLocaleLowerCase()));
+      const selected = scanReport.projects.filter((project) => selectedImportProjects.includes(project.projectKey));
+      const aiReview: { aiApplied: boolean; projects: Array<{ projectKey: string; currentStageId: string; confidence: number; reason: string }> } = await apiClient.analyzeProjectArchive({ projects: selected.map((project) => {
+        const stageIds = project.stageSummaries.map((stage) => stage.stageKey).filter((stageId) => STAGES.some((stage) => stage.id === stageId));
+        return { projectKey: project.projectKey, projectName: project.projectName, localStageId: stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id, localConfidence: project.confidence, stageSummaries: project.stageSummaries, files: scanReport.files.filter((file) => file.projectKey === project.projectKey).slice(0, 400).map((file) => ({ name: file.name, relativePath: file.relativePath, extension: file.extension, pathStageName: file.pathStageName })) };
+      }) }).catch(() => ({ aiApplied: false, projects: [] }));
+      const aiDecisions = new Map(aiReview.projects.map((decision) => [decision.projectKey, decision]));
+      setAiArchiveReviewing(false);
+      const imported: any[] = [];
+      for (const project of selected) {
+        if (!project.projectName || project.projectName === "未分组资料" || existingNames.has(project.projectName.toLocaleLowerCase())) continue;
+        const stageIds = project.stageSummaries.map((stage) => stage.stageKey).filter((stageId) => STAGES.some((stage) => stage.id === stageId));
+        const localStageId = stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id;
+        const aiDecision = aiDecisions.get(project.projectKey);
+        const currentStageId = aiDecision?.currentStageId || localStageId;
+        imported.push({ id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: await reserveProjectNumber(), name: project.projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } });
+        existingNames.add(project.projectName.toLocaleLowerCase());
+      }
+      if (!imported.length) {
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "勾选项目都已存在或无法确认名称，未创建重复项目" }));
+        return;
+      }
+      setBoardData((current: any[]) => {
+        const source = Array.isArray(current) && current.length ? current : STAGES.map((stage) => ({ id: stage.id, title: stage.name, count: 0, projects: [] }));
+        const next = source.map((column: any) => ({ ...column, projects: [...(column.projects || [])] }));
+        for (const project of imported) {
+          const target = next.find((column: any) => column.id === project.importedStageId) || next[0];
+          target.projects = sortProjectsNaturally([project, ...target.projects]);
+          target.count = target.projects.length;
+        }
+        return next;
+      });
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (provider && availability?.available) {
+        for (const project of imported) await provider.ensureProjectStructure(project, STAGES);
+      }
+      setSelectedImportProjects([]);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已录入 ${imported.length} 个项目，并按九个生命周期阶段建立项目结构` }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "项目录入失败，请重试" }));
+    } finally {
+      setAiArchiveReviewing(false);
+      setImportingProjects(false);
     }
   };
 
@@ -362,7 +428,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         onFilter={setScanFilter}
       />
 
-      <ProjectStructureSummary report={scanReport} />
+      <ProjectStructureSummary report={scanReport} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={projects} onToggle={toggleImportProject} onImport={importScannedProjects} />
 
       <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />
 
@@ -442,9 +508,10 @@ function Metric({ icon: Icon, label, value, compact }: any) {
   );
 }
 
-function ProjectStructureSummary({ report }: { report: ProjectScanReport | null }) {
+function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing, existingProjects, onToggle, onImport }: { report: ProjectScanReport | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; onToggle: (projectKey: string) => void; onImport: () => void }) {
   if (!report) return null;
-  return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">优先依据第一层项目目录和阶段目录分类，正文关键词用于补充判断。</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.slice(0, 12).map((project) => <div key={project.projectKey} className="rounded-xl border border-emerald-100 bg-white p-4"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.projectName}</span><span className="shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}</div></div>)}</div>{report.projects.length > 12 && <div className="mt-3 text-center text-[11px] text-slate-400">还有 {report.projects.length - 12} 个项目，完整分类请导出 JSON/Excel。</div>}</section>;
+  const existingNames = new Set(existingProjects.map((project: any) => String(project.name || "").trim().toLocaleLowerCase()));
+  return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">勾选后才会录入项目管理；未勾选项目只保留在本次扫描报告中，不会创建项目。</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span><button onClick={onImport} disabled={importing || !selectedKeys.length} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{aiReviewing ? "DeepSeek 审核归档阶段…" : importing ? "正在录入…" : `DeepSeek 辅助录入（${selectedKeys.length}）`}</button></div></div><div className="mt-3 rounded-xl border border-emerald-100 bg-white p-3 text-xs text-slate-600">录入前会优先调用已配置的 DeepSeek，根据项目名、文件名和目录判断归档阶段；不会上传文件正文。AI 不可用时自动回退本地规则。录入后会生成项目编号、建立九阶段资料目录，不会移动、重命名或上传原始文件。</div><div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.map((project) => { const exists = existingNames.has(project.projectName.toLocaleLowerCase()); const selected = selectedKeys.includes(project.projectKey); return <label key={project.projectKey} className={cn("block cursor-pointer rounded-xl border bg-white p-4 transition", selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-emerald-100", exists && "opacity-60")}><div className="flex items-start gap-3"><input type="checkbox" checked={selected} disabled={exists || importing} onChange={() => onToggle(project.projectKey)} className="mt-1 h-4 w-4 accent-emerald-600" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.projectName}</span><span className="shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-1 text-[11px] text-slate-500">{exists ? "项目管理中已存在，不重复录入" : `名称置信度 ${Math.round(project.confidence * 100)}%`}</div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.filter((stage) => stage.stageKey !== "needs-review").slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}{project.stageSummaries.some((stage) => stage.stageKey === "needs-review") && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] text-amber-800">部分资料待复核</span>}</div></div></div></label>; })}</div></section>;
 }
 
 function ManifestPanel({ manifests, loading, uploadingId, uploadProgress, onUpload }: { manifests: ProjectFileManifest[]; loading: boolean; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {

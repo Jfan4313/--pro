@@ -321,6 +321,9 @@ export const apiClient = {
       }>;
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
+  analyzeProjectArchive(payload: { projects: Array<{ projectKey: string; projectName: string; localStageId: string; localConfidence: number; stageSummaries: unknown[]; files: Array<{ name: string; relativePath: string; extension: string; pathStageName?: string }> }> }) {
+    return request<{ aiApplied: boolean; warning?: string; projects: Array<{ projectKey: string; currentStageId: string; confidence: number; reason: string }> }>("/api/project-archive/analyze", { method: "POST", body: payload });
+  },
   transcribeAudio(audioId: string, browserTranscript = "") {
     return request<SpeechTranscriptionResult>("/api/intake/transcribe", { method: "POST", body: { audioId, browserTranscript } });
   },

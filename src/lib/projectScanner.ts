@@ -24,6 +24,7 @@ export type ScannedFile = {
   projectName?: string;
   pathStageKey?: string;
   pathStageName?: string;
+  pathStageEvidence?: string;
   error?: string;
 };
 
@@ -107,10 +108,22 @@ function getPathSegments(relativePath: string) {
 
 function detectPathStage(relativePath: string) {
   const segments = getPathSegments(relativePath).slice(1, -1);
-  const numbered = segments.find((segment) => /^(?:\d{1,2})[-_、.\s]/.test(segment));
-  if (numbered) return { stageKey: `folder_${numbered}`, stageName: cleanProjectName(numbered) };
-  const semantic = segments.find((segment) => /立项|勘察|前期|初步设计|深化设计|设计资料|投标|商务|合同|备案|报建|接入系统|施工|开工|交底|安全|验收|并网|竣工|运维|移交/i.test(segment));
-  if (semantic) return { stageKey: `folder_${semantic}`, stageName: cleanProjectName(semantic) };
+  const rules: Array<{ stage: typeof STAGES[number]; terms: RegExp }> = [
+    { stage: STAGES[8], terms: /验收|并网验收|并网供电|竣工|运维|移交|运行/i },
+    { stage: STAGES[6], terms: /项目交底|交底|安全教育|安全技术|人员资格|特种作业|危险源/i },
+    { stage: STAGES[7], terms: /施工进场|进场|开工|施工|材料.*设备|设备.*材料|现场照片|作业指导|专项施工方案|分包方|开工资料|施工方案|日程安排/i },
+    { stage: STAGES[5], terms: /深化设计|施工图|蓝图|设计变更|物料.?bom|图纸|设计资料|光伏图纸/i },
+    { stage: STAGES[4], terms: /项目备案|备案|报建|规划许可|接入系统|接入批复|并网申请|供电局/i },
+    { stage: STAGES[3], terms: /合同|协议|购售电|权属|营业执照|身份证|产权/i },
+    { stage: STAGES[2], terms: /商务|投标|招投标|报价|预算|成本|收益|加分项|方案汇报/i },
+    { stage: STAGES[1], terms: /初步设计|初设|pvsyst|发电分析|设备清单|组件|逆变器|可研/i },
+    { stage: STAGES[0], terms: /项目立项|现场勘察|前期收资|勘察|航拍|测量|屋顶结构|电费详情/i },
+  ];
+  for (const segment of segments) {
+    const normalized = normalizeText(segment);
+    const matched = rules.find((rule) => rule.terms.test(normalized));
+    if (matched) return { stageKey: matched.stage.id, stageName: matched.stage.name, evidence: segment };
+  }
   return undefined;
 }
 
@@ -298,6 +311,7 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
     if (pathStage) {
       file.pathStageKey = pathStage.stageKey;
       file.pathStageName = pathStage.stageName;
+      file.pathStageEvidence = pathStage.evidence;
     }
     const group = projectFileGroups.get(projectKey) || [];
     group.push(file);
@@ -339,7 +353,7 @@ export function downloadScanReport(report: ProjectScanReport, format: "json" | "
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `${report.rootNames[0] || "项目"}-文件扫描报告.json`; link.click(); URL.revokeObjectURL(url); return;
   }
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.files.map((file) => ({ 项目: file.projectName || "未分组", 文件名: file.name, 相对路径: file.relativePath, 类型: file.extension, 大小: file.size, 修改时间: file.modifiedAt, 阶段: file.pathStageName || file.stageName || "待复核", 置信度: `${Math.round(file.confidence * 100)}%`, 分类: file.category, 状态: file.status, 证据: file.evidence.join("、"), 摘要: file.contentSummary || "" }))), "文件清单");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.files.map((file) => ({ 项目: file.projectName || "未分组", 文件名: file.name, 相对路径: file.relativePath, 类型: file.extension, 大小: file.size, 修改时间: file.modifiedAt, 阶段: file.pathStageName || file.stageName || "待复核", 阶段目录证据: file.pathStageEvidence || "", 置信度: `${Math.round(file.confidence * 100)}%`, 分类: file.category, 状态: file.status, 证据: file.evidence.join("、"), 摘要: file.contentSummary || "" }))), "文件清单");
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.projects.flatMap((project) => project.stageSummaries.map((stage) => ({ 项目: project.projectName, 项目置信度: `${Math.round(project.confidence * 100)}%`, 项目文件数: project.fileCount, 阶段: stage.stageName, 文件数: stage.fileCount, 已分类: stage.classifiedCount, 待复核: stage.reviewCount, 资料类别: stage.categories.map((item) => `${item.category}（${item.count}）`).join("、"), 示例文件: stage.sampleFiles.join("、") })))), "项目阶段汇总");
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(report.issues.map((issue) => ({ 类型: issue.type, 标题: issue.title, 说明: issue.detail, 置信度: `${Math.round(issue.confidence * 100)}%` }))), "问题与建议");
   XLSX.writeFile(workbook, `${report.rootNames[0] || "项目"}-文件扫描报告.xlsx`);

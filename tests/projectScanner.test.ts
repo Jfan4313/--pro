@@ -41,6 +41,7 @@ test("从多项目第一层目录和阶段目录生成项目与阶段汇总", as
   const report = await scanProjectDirectories([root]);
   assert.equal(report.projects.length, 2);
   assert.equal(report.projects[0].projectName, "流花中心");
-  assert.ok(report.projects[0].stageSummaries.some((stage) => stage.stageName === "01_项目立项"));
-  assert.ok(report.projects[1].stageSummaries.some((stage) => stage.stageName === "02_初步设计"));
+  assert.ok(report.projects[0].stageSummaries.some((stage) => stage.stageName === "① 项目立项(现场勘察/前期收资)"));
+  assert.ok(report.projects[1].stageSummaries.some((stage) => stage.stageName === "② 初步设计"));
+  assert.equal(report.files.find((file) => file.name === "现场勘察记录.txt")?.pathStageEvidence, "01_项目立项");
 });

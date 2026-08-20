@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import express from "express";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
-import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIEntityGlossary, getAIKey, getSpeechProviderConfig, getSpeechProviderSecrets, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig, updateAIEntityGlossary, updateSpeechProviderConfig } from "../domain/aiService.js";
+import { analyzeIntakeWithAI, analyzeProjectArchiveWithAI, debugAI, getAIConfig, getAIEntityGlossary, getAIKey, getSpeechProviderConfig, getSpeechProviderSecrets, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig, updateAIEntityGlossary, updateSpeechProviderConfig } from "../domain/aiService.js";
 import { getCompanyKnowledge } from "../domain/companyEntities.js";
 import {
   buildSpeechHotwords,
@@ -245,6 +245,22 @@ export function registerUtilityRoutes(app, context) {
       const result = await analyzeIntakeWithAI(body, currentUser(req), db);
       res.json(formalTranscription ? { ...result, formalTranscription } : result);
     } catch (error) { res.status(502).json({ error: "ai_unavailable", message: error.message }); }
+  });
+
+  app.post("/api/project-archive/analyze", async (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    try {
+      const projects = Array.isArray(req.body?.projects) ? req.body.projects.map((item) => ({
+        projectKey: String(item.projectKey || "").slice(0, 200),
+        projectName: String(item.projectName || "").slice(0, 200),
+        localStageId: String(item.localStageId || "").slice(0, 80),
+        localConfidence: Number(item.localConfidence || 0),
+        stageSummaries: Array.isArray(item.stageSummaries) ? item.stageSummaries.slice(0, 20) : [],
+        files: Array.isArray(item.files) ? item.files.slice(0, 400).map((file) => ({ name: String(file.name || "").slice(0, 200), relativePath: String(file.relativePath || "").slice(0, 500), extension: String(file.extension || "").slice(0, 20), pathStageName: String(file.pathStageName || "").slice(0, 120) })) : [],
+      })) : [];
+      res.json(await analyzeProjectArchiveWithAI({ projects }, user, db));
+    } catch (error) { res.status(502).json({ error: "project_archive_ai_unavailable", message: error.message }); }
   });
 
   app.post("/api/intake/transcribe", async (req, res) => {
