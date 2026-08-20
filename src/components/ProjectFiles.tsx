@@ -30,6 +30,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [scanRoots, setScanRoots] = React.useState<any[]>([]);
   const [scanReport, setScanReport] = React.useState<ProjectScanReport | null>(null);
   const [selectedImportProjects, setSelectedImportProjects] = React.useState<string[]>([]);
+  const [projectNameOverrides, setProjectNameOverrides] = React.useState<Record<string, string>>({});
   const [importingProjects, setImportingProjects] = React.useState(false);
   const [aiArchiveReviewing, setAiArchiveReviewing] = React.useState(false);
   const [scanRunning, setScanRunning] = React.useState(false);
@@ -214,6 +215,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       const report = await scanProjectDirectories(scanRoots, { signal: controller.signal, onProgress: setScanProgress });
       setScanReport(report);
       setSelectedImportProjects([]);
+      setProjectNameOverrides({});
       setScanFilter("all");
       window.dispatchEvent(new CustomEvent("show-toast", { detail: `扫描完成，共识别 ${report.fileCount} 个文件` }));
     } catch (error: any) {
@@ -238,24 +240,28 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       const existingNames = new Set(projects.map((project: any) => String(project.name || "").trim().toLocaleLowerCase()));
       const selected = scanReport.projects.filter((project) => selectedImportProjects.includes(project.projectKey));
       const aiReview: { aiApplied: boolean; projects: Array<{ projectKey: string; currentStageId: string; confidence: number; reason: string }> } = await apiClient.analyzeProjectArchive({ projects: selected.map((project) => {
+        const projectName = projectNameOverrides[project.projectKey]?.trim() || project.projectName;
         const stageIds = project.stageSummaries.map((stage) => stage.stageKey).filter((stageId) => STAGES.some((stage) => stage.id === stageId));
-        return { projectKey: project.projectKey, projectName: project.projectName, localStageId: stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id, localConfidence: project.confidence, stageSummaries: project.stageSummaries, files: scanReport.files.filter((file) => file.projectKey === project.projectKey).slice(0, 400).map((file) => ({ name: file.name, relativePath: file.relativePath, extension: file.extension, pathStageName: file.pathStageName })) };
+        return { projectKey: project.projectKey, projectName, localStageId: stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id, localConfidence: project.confidence, stageSummaries: project.stageSummaries, files: scanReport.files.filter((file) => file.projectKey === project.projectKey).slice(0, 400).map((file) => ({ name: file.name, relativePath: file.relativePath, extension: file.extension, pathStageName: file.pathStageName })) };
       }) }).catch(() => ({ aiApplied: false, projects: [] }));
       const aiDecisions = new Map(aiReview.projects.map((decision) => [decision.projectKey, decision]));
       setAiArchiveReviewing(false);
       const imported: any[] = [];
+      const renamedExisting: any[] = [];
       const archiveTargets: Array<{ project: any; source: typeof selected[number]; currentStageId: string }> = [];
       for (const project of selected) {
-        if (!project.projectName || project.projectName === "未分组资料") continue;
+        const projectName = projectNameOverrides[project.projectKey]?.trim() || project.projectName;
+        if (!projectName || projectName === "未分组资料") continue;
         const stageIds = project.stageSummaries.map((stage) => stage.stageKey).filter((stageId) => STAGES.some((stage) => stage.id === stageId));
         const localStageId = stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id;
         const aiDecision = aiDecisions.get(project.projectKey);
-        const existing = projects.find((candidate: any) => String(candidate.name || "").trim().toLocaleLowerCase() === project.projectName.toLocaleLowerCase());
+        const existing = projects.find((candidate: any) => String(candidate.name || "").trim().toLocaleLowerCase() === projectName.toLocaleLowerCase()) || projects.find((candidate: any) => String(candidate.name || "").trim().toLocaleLowerCase() === project.projectName.toLocaleLowerCase());
         const currentStageId = existing ? getProjectCurrentStageInfo(existing.id, lifecycleStates).stage.id : (aiDecision?.currentStageId || localStageId);
-        const projectRecord = existing || { id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: await reserveProjectNumber(), name: project.projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedProjectKey: project.projectKey, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } };
+        const projectRecord = existing ? { ...existing, name: projectName, importedProjectKey: project.projectKey } : { id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: await reserveProjectNumber(), name: projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedProjectKey: project.projectKey, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } };
         if (!existing) imported.push(projectRecord);
+        else if (existing.name !== projectName) renamedExisting.push(projectRecord);
         archiveTargets.push({ project: { ...projectRecord, importedProjectKey: project.projectKey }, source: project, currentStageId });
-        existingNames.add(project.projectName.toLocaleLowerCase());
+        existingNames.add(projectName.toLocaleLowerCase());
       }
       if (!archiveTargets.length) {
         window.dispatchEvent(new CustomEvent("show-toast", { detail: "勾选项目没有可确认的项目名称，未执行录入或归档" }));
@@ -264,6 +270,9 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       setBoardData((current: any[]) => {
         const source = Array.isArray(current) && current.length ? current : STAGES.map((stage) => ({ id: stage.id, title: stage.name, count: 0, projects: [] }));
         const next = source.map((column: any) => ({ ...column, projects: [...(column.projects || [])] }));
+        for (const project of renamedExisting) {
+          for (const column of next) column.projects = column.projects.map((candidate: any) => candidate.id === project.id ? project : candidate);
+        }
         for (const project of imported) {
           const target = next.find((column: any) => column.id === project.importedStageId) || next[0];
           target.projects = sortProjectsNaturally([project, ...target.projects]);
@@ -275,25 +284,31 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       const availability = await provider?.checkAvailability();
       if (provider && availability?.available) {
         let archivedCount = 0;
+        let uncertainArchivedCount = 0;
         let archiveReviewCount = 0;
         for (const target of archiveTargets) {
           const project = target.project;
           const currentIndex = Math.max(0, STAGES.findIndex((stage) => stage.id === target.currentStageId));
           const generatedStages = getCurrentAndNextStages(STAGES, currentIndex);
-          const structure = await provider.ensureProjectStructure(project, generatedStages);
+          const existingFolder = archiveFolderStates[project.id]?.projectFolder;
+          const structure = await provider.ensureProjectStructure(project, generatedStages, existingFolder);
           await setArchiveFolderStates((current) => ({ ...current, [project.id]: { status: "ready", storageProvider: "local-folder", projectFolder: structure.projectFolder, generatedThroughStageId: structure.generatedThroughStageId, updatedAt: new Date().toISOString() } }));
           for (const file of scanReport.files.filter((item) => item.projectKey === project.importedProjectKey)) {
             const handle = getScannedFileHandle(scanReport.id, file.id);
             if (!handle || file.status === "unreadable") { archiveReviewCount += 1; continue; }
             try {
               const sourceFile = await handle.getFile();
-              const targetStage = STAGES.find((stage) => stage.id === (file.pathStageKey || file.stageId)) || STAGES[currentIndex];
-              await provider.writeFile({ project, stage: targetStage, file: sourceFile, fileType: file.category, autoRename: true, projectFolder: structure.projectFolder });
+              const uncertain = file.status !== "classified" || (!file.pathStageKey && (!file.stageId || file.confidence < 0.65));
+              if (uncertain) { await provider.writeUncertainFile({ project, file: sourceFile, fileType: file.category, projectFolder: structure.projectFolder }); uncertainArchivedCount += 1; }
+              else {
+                const targetStage = STAGES.find((stage) => stage.id === (file.pathStageKey || file.stageId)) || STAGES[currentIndex];
+                await provider.writeFile({ project, stage: targetStage, file: sourceFile, fileType: file.category, autoRename: true, projectFolder: structure.projectFolder });
+              }
               archivedCount += 1;
             } catch { archiveReviewCount += 1; }
           }
         }
-        window.dispatchEvent(new CustomEvent("show-toast", { detail: `已建立当前及下一阶段目录，并归档 ${archivedCount} 个文件${archiveReviewCount ? `，${archiveReviewCount} 个文件待人工复核` : ""}` }));
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: `已建立当前及下一阶段目录，并归档 ${archivedCount} 个文件${uncertainArchivedCount ? `，其中 ${uncertainArchivedCount} 个放入“未确定”` : ""}${archiveReviewCount ? `，${archiveReviewCount} 个文件待人工复核` : ""}` }));
       } else {
         window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目已录入，但本机归档目录未授权；原文件未改变" }));
       }
@@ -453,7 +468,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         onFilter={setScanFilter}
       />
 
-      <ProjectStructureSummary report={scanReport} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={projects} onToggle={toggleImportProject} onImport={importScannedProjects} />
+      <ProjectStructureSummary report={scanReport} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={projects} nameOverrides={projectNameOverrides} onNameChange={(projectKey, name) => setProjectNameOverrides((current) => ({ ...current, [projectKey]: name }))} onToggle={toggleImportProject} onImport={importScannedProjects} />
 
       <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />
 
@@ -533,13 +548,13 @@ function Metric({ icon: Icon, label, value, compact }: any) {
   );
 }
 
-function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing, existingProjects, onToggle, onImport }: { report: ProjectScanReport | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; onToggle: (projectKey: string) => void; onImport: () => void }) {
+function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing, existingProjects, nameOverrides, onNameChange, onToggle, onImport }: { report: ProjectScanReport | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; nameOverrides: Record<string, string>; onNameChange: (projectKey: string, name: string) => void; onToggle: (projectKey: string) => void; onImport: () => void }) {
   if (!report) return null;
   const existingNames = new Set(existingProjects.map((project: any) => String(project.name || "").trim().toLocaleLowerCase()));
   return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">勾选后录入新项目，或同步已有项目的文件归档；未勾选项目不会处理。</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span><button onClick={onImport} disabled={importing || !selectedKeys.length} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{aiReviewing ? "DeepSeek 审核归档阶段…" : importing ? "正在归档…" : `DeepSeek 辅助归档（${selectedKeys.length}）`}</button></div></div>
     <div className="mt-3 rounded-xl border border-emerald-100 bg-white p-3 text-xs text-slate-600">已有项目不会重复创建，重新扫描后可以再次勾选并同步原有文件。录入或同步只建立当前及下一阶段目录，并将文件复制到对应阶段的“已归档”目录；原文件不会移动、重命名或删除。</div>
-    <div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.map((project) => { const exists = existingNames.has(project.projectName.toLocaleLowerCase()); const selected = selectedKeys.includes(project.projectKey); return <label key={project.projectKey} className={cn("block cursor-pointer rounded-xl border bg-white p-4 transition", selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-emerald-100", exists && "opacity-75")}><div className="flex items-start gap-3"><input type="checkbox" checked={selected} disabled={importing} onChange={() => onToggle(project.projectKey)} className="mt-1 h-4 w-4 accent-emerald-600" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.projectName}</span><span className="shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-1 text-[11px] text-slate-500">{exists ? "已有项目：将同步文件归档，不重复创建" : `新项目，名称置信度 ${Math.round(project.confidence * 100)}%`}</div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.filter((stage) => stage.stageKey !== "needs-review").slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}{project.stageSummaries.some((stage) => stage.stageKey === "needs-review") && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] text-amber-800">部分资料待复核</span>}</div></div></div></label>; })}</div>
+    <div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.map((project) => { const displayName = nameOverrides[project.projectKey] ?? project.projectName; const exists = existingNames.has(displayName.trim().toLocaleLowerCase()) || existingNames.has(project.projectName.toLocaleLowerCase()); const selected = selectedKeys.includes(project.projectKey); return <label key={project.projectKey} className={cn("block rounded-xl border bg-white p-4 transition", selected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-emerald-100", exists && "opacity-90")}><div className="flex items-start gap-3"><input type="checkbox" checked={selected} disabled={importing} onChange={() => onToggle(project.projectKey)} className="mt-1 h-4 w-4 accent-emerald-600" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><input value={displayName} disabled={importing} onChange={(event) => onNameChange(project.projectKey, event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-sm font-bold text-slate-900 outline-none focus:border-emerald-500" /><span className="ml-2 shrink-0 text-xs text-slate-500">{project.fileCount} 个文件</span></div><div className="mt-1 text-[11px] text-slate-500">{exists ? "已有项目：将同步文件归档，不重复创建" : `新项目，名称置信度 ${Math.round(project.confidence * 100)}%`}</div><div className="mt-2 flex flex-wrap gap-1.5">{project.stageSummaries.filter((stage) => stage.stageKey !== "needs-review").slice(0, 10).map((stage) => <span key={stage.stageKey} title={`${stage.stageName}：${stage.fileCount} 个文件，${stage.reviewCount} 个待复核`} className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] text-emerald-800">{stage.stageName} · {stage.fileCount}</span>)}{project.stageSummaries.some((stage) => stage.stageKey === "needs-review") && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] text-amber-800">部分资料待复核</span>}</div></div></div></label>; })}</div>
   </section>;
 }
 

@@ -54,6 +54,7 @@ export interface ArchiveStorageProvider {
   checkAvailability(): Promise<ArchiveAvailability>;
   ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
   writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string }): Promise<ArchiveFileIndex>;
+  writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string }): Promise<ArchiveFileIndex>;
   listFiles(input: { project: ArchiveProject; stages: ArchiveStage[]; projectFolder?: string }): Promise<ArchiveFileIndex[]>;
   readFile(storageKey: string): Promise<File>;
   getDownloadTarget(storageKey: string): Promise<{ url: string; revoke: () => void }>;
@@ -66,6 +67,7 @@ export abstract class CloudObjectStorageProvider implements ArchiveStorageProvid
   abstract checkAvailability(): Promise<ArchiveAvailability>;
   abstract ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
   abstract writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string }): Promise<ArchiveFileIndex>;
+  abstract writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string }): Promise<ArchiveFileIndex>;
   abstract listFiles(input: { project: ArchiveProject; stages: ArchiveStage[]; projectFolder?: string }): Promise<ArchiveFileIndex[]>;
   abstract readFile(storageKey: string): Promise<File>;
   abstract getDownloadTarget(storageKey: string): Promise<{ url: string; revoke: () => void }>;
@@ -178,6 +180,7 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     const projectFolder = fixedProjectFolder || getArchiveProjectFolder(project);
     const projectDirectory = await this.rootHandle.getDirectoryHandle(projectFolder, { create: true });
     await projectDirectory.getDirectoryHandle("参建单位资料", { create: true });
+    await projectDirectory.getDirectoryHandle("未确定", { create: true });
 
     for (const stage of stages) {
       const stageDirectory = await projectDirectory.getDirectoryHandle(getArchiveStageFolder(stage), { create: true });
@@ -223,6 +226,19 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
       createdAt: new Date().toISOString(),
       bucket: "已归档" as const,
     };
+  }
+
+  async writeUncertainFile({ project, file, fileType, projectFolder: fixedProjectFolder }: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string }) {
+    const { projectFolder } = await this.ensureProjectStructure(project, [], fixedProjectFolder);
+    const directory = await getDirectoryByParts(this.rootHandle, [projectFolder, "未确定"]);
+    const { base, ext } = splitFilename(file.name || "资料");
+    const stem = [getArchiveProjectCode(project), "未确定", sanitizeArchiveSegment(fileType || base || "资料"), sanitizeArchiveSegment(base || "资料")].join("_");
+    const versionNumber = await nextVersion(directory, stem, ext);
+    const version = `V${versionNumber}`;
+    const storedName = `${stem}_${version}_${formatDateStamp()}${ext}`;
+    const checksum = await sha256(file);
+    await writeBlob(directory, storedName, file);
+    return { storageProvider: this.id, storageKey: [projectFolder, "未确定", storedName].join("/"), projectId: project.id, stageId: "unconfirmed", originalName: file.name, storedName, version, size: file.size, contentType: file.type || "application/octet-stream", checksum, createdAt: new Date().toISOString(), bucket: "待提交" as const };
   }
 
   async listFiles({ project, stages, projectFolder: fixedProjectFolder }: { project: ArchiveProject; stages: ArchiveStage[]; projectFolder?: string }) {
