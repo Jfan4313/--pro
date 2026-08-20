@@ -1,12 +1,13 @@
 import React from "react";
-import { Download, FileText, FolderOpen, FolderSearch, RefreshCw, UploadCloud } from "lucide-react";
-import { apiClient, getProjectFileDownloadUrl } from "@/src/lib/apiClient";
+import { AlertTriangle, Download, FileDown, FileText, FolderOpen, FolderSearch, RefreshCw, SearchCheck, UploadCloud, X } from "lucide-react";
+import { apiClient, downloadProjectManifestContent, getProjectFileDownloadUrl, ProjectFileManifest } from "@/src/lib/apiClient";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
 import { ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
+import { downloadScanReport, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData] = useProjectBoardData();
@@ -23,6 +24,17 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [isLocationPanelOpen, setIsLocationPanelOpen] = React.useState(false);
   const [localFolderName, setLocalFolderName] = React.useState("");
   const [localPermission, setLocalPermission] = React.useState<"unknown" | "granted" | "prompt" | "denied" | "unsupported">("unknown");
+  const [scanRoots, setScanRoots] = React.useState<any[]>([]);
+  const [scanReport, setScanReport] = React.useState<ProjectScanReport | null>(null);
+  const [scanRunning, setScanRunning] = React.useState(false);
+  const [scanProgress, setScanProgress] = React.useState({ current: 0, total: 0, name: "" });
+  const [scanFilter, setScanFilter] = React.useState<"all" | "review" | "issues">("all");
+  const [manifests, setManifests] = React.useState<ProjectFileManifest[]>([]);
+  const [manifestLoading, setManifestLoading] = React.useState(false);
+  const [manifestSyncing, setManifestSyncing] = React.useState(false);
+  const [uploadingManifestId, setUploadingManifestId] = React.useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = React.useState(0);
+  const scanAbortRef = React.useRef<AbortController | null>(null);
 
   const selectedProject = projects.find((project: any) => project.id === selectedProjectId) || projects[0];
   const visibleProjects = React.useMemo(() => {
@@ -109,11 +121,20 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     }
   }, [selectedProject, archiveFolderStates, lifecycleStates]);
 
+  const loadManifests = React.useCallback(async () => {
+    if (!selectedProject) return;
+    setManifestLoading(true);
+    try { setManifests((await apiClient.listProjectFileManifests(selectedProject.id)).manifests || []); }
+    catch { setManifests([]); }
+    finally { setManifestLoading(false); }
+  }, [selectedProject]);
+
   const openLocationPanel = async () => setIsLocationPanelOpen(true);
 
   React.useEffect(() => {
     loadFiles();
-  }, [loadFiles]);
+    loadManifests();
+  }, [loadFiles, loadManifests]);
 
   const initFolders = async () => {
     if (!selectedProject) return;
@@ -166,6 +187,92 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     }
   };
 
+  const addScanRoot = async () => {
+    try {
+      const handle = await pickScanDirectory();
+      setScanRoots((current) => [...current, handle]);
+      setScanReport(null);
+    } catch (error: any) {
+      if (error?.name !== "AbortError") window.dispatchEvent(new CustomEvent("show-toast", { detail: "无法读取所选文件夹，请确认浏览器支持本机文件访问" }));
+    }
+  };
+
+  const runScan = async () => {
+    if (!scanRoots.length) return void window.dispatchEvent(new CustomEvent("show-toast", { detail: "请先选择要扫描的项目文件夹" }));
+    scanAbortRef.current?.abort();
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+    setScanRunning(true);
+    setScanProgress({ current: 0, total: 0, name: "正在读取目录…" });
+    try {
+      const report = await scanProjectDirectories(scanRoots, { signal: controller.signal, onProgress: setScanProgress });
+      setScanReport(report);
+      setScanFilter("all");
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `扫描完成，共识别 ${report.fileCount} 个文件` }));
+    } catch (error: any) {
+      if (error?.name !== "AbortError") window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "扫描失败，请重试" }));
+    } finally {
+      setScanRunning(false);
+    }
+  };
+
+  const cancelScan = () => scanAbortRef.current?.abort();
+
+  const syncLocalManifest = async () => {
+    if (!selectedProject) return;
+    setManifestSyncing(true);
+    try {
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) throw new Error("archive_permission_required");
+      const localFiles = await provider.listFiles({ project: selectedProject, stages: STAGES, projectFolder: archiveFolderStates[selectedProject.id]?.projectFolder });
+      const items = localFiles.map((file: any) => ({
+        id: `local-${selectedProject.id}-${file.stageId}-${encodeURIComponent(file.storageKey)}`,
+        projectId: selectedProject.id,
+        stageId: file.stageId,
+        originalName: file.originalName || file.storedName,
+        relativePath: file.storageKey,
+        size: file.size,
+        contentType: file.contentType || "application/octet-stream",
+        checksum: file.checksum || undefined,
+        version: file.version || "V1",
+        bucket: file.bucket,
+        availability: "local-only" as const,
+        lastIndexedAt: file.createdAt,
+      }));
+      await apiClient.publishProjectFileManifests(items);
+      await loadManifests();
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已同步 ${items.length} 个文件清单；文件内容仍只在本机` }));
+    } catch (error: any) { window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message === "archive_permission_required" ? "请先授权本机归档文件夹" : "同步文件清单失败" })); }
+    finally { setManifestSyncing(false); }
+  };
+
+  const uploadManifest = async (manifest: ProjectFileManifest) => {
+    if (!selectedProject || manifest.availability === "uploaded") return;
+    setUploadingManifestId(manifest.id);
+    setUploadProgress(0);
+    try {
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) throw new Error("archive_permission_required");
+      const file = await provider.readFile(manifest.relativePath);
+      const stage = STAGES.find((item) => item.id === manifest.stageId) || STAGES[0];
+      const session = await apiClient.createProjectFileUpload({ fileId: manifest.id, project: selectedProject, stage, fileType: manifest.originalName });
+      const chunkSize = session.chunkSize;
+      for (let offset = 0, index = 0; offset < file.size || (file.size === 0 && index === 0); offset += chunkSize, index += 1) {
+        await apiClient.uploadProjectFileChunk(session.id, index, file.slice(offset, Math.min(file.size, offset + chunkSize)));
+        setUploadProgress(file.size ? Math.round(Math.min(file.size, offset + chunkSize) / file.size * 100) : 100);
+        if (file.size === 0) break;
+      }
+      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+      const checksum = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      await apiClient.completeProjectFileUpload(session.id, checksum);
+      await loadManifests();
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `${manifest.originalName} 已上传，其他电脑现在可以按权限查看` }));
+    } catch (error: any) { window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "文件上传失败，可稍后重试" })); }
+    finally { setUploadingManifestId(null); setUploadProgress(0); }
+  };
+
   const downloadFile = async (file: any) => {
     if (file.storageProvider === "local-folder" && file.storageKey) {
       try {
@@ -197,6 +304,14 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
           <button onClick={() => void openLocationPanel()} className="px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors shadow-sm flex items-center">
             <FolderSearch className="w-4 h-4 mr-2" />
             设置归档位置
+          </button>
+          <button onClick={() => void addScanRoot()} className="px-4 py-2 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors shadow-sm flex items-center">
+            <SearchCheck className="w-4 h-4 mr-2" />
+            添加扫描文件夹
+          </button>
+          <button onClick={() => void syncLocalManifest()} disabled={manifestSyncing || !selectedProject} className="px-4 py-2 bg-violet-50 border border-violet-100 text-violet-700 rounded-lg text-sm font-medium hover:bg-violet-100 transition-colors shadow-sm flex items-center disabled:opacity-50">
+            <FileDown className={cn("w-4 h-4 mr-2", manifestSyncing && "animate-pulse")} />
+            {manifestSyncing ? "同步中…" : "同步文件清单"}
           </button>
         </div>
       </div>
@@ -231,6 +346,23 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       )}
 
       {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">本机项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">文件内容只写入当前电脑；项目和文件索引可同步到其他设备。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{localFolderName || "尚未选择本机文件夹"}{localFolderName && <span className={cn("ml-2 text-xs", localPermission === "granted" ? "text-emerald-600" : "text-amber-600")}>{localPermission === "granted" ? "可读写" : "需要恢复权限"}</span>}</div><button onClick={() => void chooseLocalFolder()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white">{localFolderName ? "重新选择" : "选择本机文件夹"}</button>{localFolderName && localPermission !== "granted" && <button onClick={() => void restoreLocalPermission()} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700">恢复授权</button>}</div></div>}
+
+      <ScanPanel
+        roots={scanRoots}
+        report={scanReport}
+        running={scanRunning}
+        progress={scanProgress}
+        filter={scanFilter}
+        currentStageId={currentStageInfo?.stage.id}
+        currentStageName={currentStageInfo?.stage.name}
+        onAddRoot={() => void addScanRoot()}
+        onRun={() => void runScan()}
+        onCancel={cancelScan}
+        onClear={() => { setScanRoots([]); setScanReport(null); }}
+        onFilter={setScanFilter}
+      />
+
+      <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -283,6 +415,19 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   );
 }
 
+function ScanPanel({ roots, report, running, progress, filter, currentStageId, currentStageName, onAddRoot, onRun, onCancel, onClear, onFilter }: { roots: any[]; report: ProjectScanReport | null; running: boolean; progress: { current: number; total: number; name: string }; filter: "all" | "review" | "issues"; currentStageId?: string; currentStageName?: string; onAddRoot: () => void; onRun: () => void; onCancel: () => void; onClear: () => void; onFilter: (filter: "all" | "review" | "issues") => void }) {
+  const visibleFiles = report?.files.filter((file) => filter === "all" || (filter === "review" ? file.status === "needs-review" || file.status === "unreadable" : report.issues.some((issue) => issue.fileIds?.includes(file.id)))) || [];
+  return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5 shadow-sm">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div><div className="flex items-center gap-2"><SearchCheck className="h-5 w-5 text-emerald-600" /><h3 className="font-bold text-slate-900">本机文件扫描与阶段识别</h3></div><p className="mt-1 text-xs leading-5 text-slate-600">只读取你主动选择的文件夹，在浏览器本地分析。不会移动、重命名、删除或上传源文件。</p></div>
+      <div className="flex flex-wrap gap-2"><button onClick={onAddRoot} disabled={running} className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700">添加文件夹</button><button onClick={onRun} disabled={running || !roots.length} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{running ? "扫描中…" : "开始扫描"}</button>{roots.length > 0 && <button onClick={onClear} disabled={running} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">清空</button>}</div>
+    </div>
+    {roots.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{roots.map((root, index) => <span key={`${root.name}-${index}`} className="rounded-full bg-white px-3 py-1 text-xs text-slate-600">{root.name || "项目文件夹"}</span>)}</div>}
+    {running && <div className="mt-4 rounded-xl border border-emerald-100 bg-white p-3"><div className="flex items-center justify-between text-xs text-slate-600"><span className="truncate">正在读取：{progress.name}</span><button onClick={onCancel} className="ml-3 flex shrink-0 items-center gap-1 font-bold text-rose-600"><X className="h-3 w-3" />取消</button></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-500 transition-all" style={{ width: progress.total ? `${Math.round(progress.current / progress.total * 100)}%` : "8%" }} /></div><div className="mt-1 text-right text-[11px] text-slate-400">{progress.current}/{progress.total || "…"}</div></div>}
+    {report && <div className="mt-4 space-y-4"><div className="grid grid-cols-2 gap-2 md:grid-cols-5">{[["文件", report.fileCount], ["可读", report.readableCount], ["待复核", report.reviewCount], ["问题", report.issues.length], ["阶段", report.inferredStage?.stageName?.split(" ")[1] || "待判断"]].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-white p-3"><div className="text-[11px] text-slate-500">{label}</div><div className="mt-1 truncate text-sm font-bold text-slate-900">{value}</div></div>)}</div><div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-white p-3"><div className="text-xs text-slate-600"><div>推断阶段：<strong className="text-slate-900">{report.inferredStage?.stageName || "暂无足够证据"}</strong>{report.inferredStage && <span className="ml-2 text-emerald-600">置信度 {Math.round(report.inferredStage.confidence * 100)}%</span>}</div>{currentStageName && <div className={cn("mt-1", currentStageId === report.inferredStage?.stageId ? "text-emerald-600" : "text-amber-700")}>系统当前阶段：{currentStageName} · {currentStageId === report.inferredStage?.stageId ? "判断一致" : "与文件证据不一致，请复核"}</div>}</div><div className="flex gap-2"><button onClick={() => downloadScanReport(report, "json")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"><FileDown className="h-3.5 w-3.5" />JSON</button><button onClick={() => downloadScanReport(report, "xlsx")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"><FileDown className="h-3.5 w-3.5" />Excel</button></div></div><div className="flex gap-2"><button onClick={() => onFilter("all")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "all" ? "bg-emerald-600 text-white" : "bg-white text-slate-600")}>全部文件</button><button onClick={() => onFilter("review")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "review" ? "bg-amber-500 text-white" : "bg-white text-slate-600")}>待复核</button><button onClick={() => onFilter("issues")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "issues" ? "bg-rose-500 text-white" : "bg-white text-slate-600")}>问题文件</button></div><div className="max-h-96 overflow-auto rounded-xl border border-emerald-100 bg-white">{visibleFiles.slice(0, 120).map((file) => <div key={file.id} className="flex items-center justify-between gap-3 border-b border-slate-100 p-3 last:border-0"><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{file.relativePath}</div><div className="mt-1 truncate text-[11px] text-slate-500">{file.category} · {file.stageName || "待复核"} · 置信度 {Math.round(file.confidence * 100)}%{file.evidence.length ? ` · ${file.evidence.join("、")}` : ""}</div></div>{(file.status === "needs-review" || file.status === "unreadable") && <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />}</div>)}{visibleFiles.length > 120 && <div className="p-3 text-center text-xs text-slate-400">仅显示前 120 项，完整清单请导出 Excel。</div>}{visibleFiles.length === 0 && <div className="p-6 text-center text-xs text-slate-400">当前筛选没有文件</div>}</div>{report.issues.length > 0 && <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800"><strong>需要人工确认：</strong>{report.issues.slice(0, 5).map((issue) => <div key={`${issue.type}-${issue.title}-${issue.detail}`} className="mt-1">{issue.title}：{issue.detail}</div>)}</div>}</div>}
+  </section>;
+}
+
 function Metric({ icon: Icon, label, value, compact }: any) {
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center min-w-0">
@@ -293,6 +438,15 @@ function Metric({ icon: Icon, label, value, compact }: any) {
       </div>
     </div>
   );
+}
+
+function ManifestPanel({ manifests, loading, uploadingId, uploadProgress, onUpload }: { manifests: ProjectFileManifest[]; loading: boolean; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
+  const grouped = React.useMemo(() => manifests.reduce<Record<string, ProjectFileManifest[]>>((result, manifest) => { (result[manifest.stageId] ||= []).push(manifest); return result; }, {}), [manifests]);
+  return <section className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5 shadow-sm">
+    <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><FileDown className="h-5 w-5 text-violet-600" /><h3 className="font-bold text-slate-900">远程文件清单</h3></div><p className="mt-1 text-xs text-slate-600">其他电脑只同步这些元数据；“仅本机可用”的文件不会传输实际内容。</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-violet-700">{loading ? "读取中…" : `${manifests.length} 个文件`}</span></div>
+    {manifests.length === 0 && !loading && <div className="mt-4 rounded-xl border border-dashed border-violet-200 bg-white p-6 text-center text-xs text-slate-500">还没有发布文件清单。请在来源电脑点击“同步文件清单”。</div>}
+    <div className="mt-4 space-y-3">{(Object.entries(grouped) as Array<[string, ProjectFileManifest[]]>).map(([stageId, files]) => { const stage = STAGES.find((item) => item.id === stageId); const uploaded = files.filter((file) => file.availability === "uploaded").length; return <div key={stageId} className="rounded-xl border border-violet-100 bg-white p-4"><div className="flex items-center justify-between gap-3"><div className="text-sm font-bold text-slate-900">{stage?.name || stageId}</div><span className="text-xs text-slate-500">{uploaded}/{files.length} 已上传</span></div><div className="mt-3 space-y-2">{files.map((manifest) => <div key={manifest.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{manifest.originalName}</div><div className="mt-1 truncate text-[11px] text-slate-500">{manifest.relativePath} · {formatSize(manifest.size)} · {formatTime(manifest.lastIndexedAt)} · V{manifest.version.replace(/^V/i, "")}</div></div><div className="flex shrink-0 items-center gap-2"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", manifest.availability === "uploaded" ? "bg-emerald-100 text-emerald-700" : manifest.availability === "missing" ? "bg-rose-100 text-rose-700" : manifest.availability === "stale" ? "bg-amber-100 text-amber-700" : "bg-violet-100 text-violet-700")}>{manifest.availability === "uploaded" ? "已上传" : manifest.availability === "missing" ? "本机已缺失" : manifest.availability === "stale" ? "索引过期" : "仅本机可用"}</span>{manifest.availability !== "uploaded" && <button onClick={() => onUpload(manifest)} disabled={uploadingId !== null} className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-[10px] font-bold text-white disabled:opacity-50">{uploadingId === manifest.id ? `上传 ${uploadProgress}%` : "上传此文件"}</button>}{manifest.availability === "uploaded" && manifest.canViewContent && <button onClick={() => void downloadProjectManifestContent(manifest.id, manifest.originalName)} className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-emerald-700">查看内容</button>}</div></div>)}</div></div>})}</div>
+  </section>;
 }
 
 function formatSize(size = 0) {

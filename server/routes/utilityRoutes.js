@@ -20,10 +20,11 @@ import {
   getStageFolderName,
 } from "../domain/projectFiles.js";
 import { createUtilityServices } from "../services/utilityServices.js";
+import { canSeeManifestContent, canViewProjectFiles, completeUpload, createUploadSession, getManifest, getUpload, listManifests, recordChunk, updateVisibility, upsertManifests } from "../services/projectFileManifests.js";
 
 export function registerUtilityRoutes(app, context) {
   const services = createUtilityServices(context);
-  const { db, uploadsDir, intakeAudioDir, nowIso, parseJson } = context;
+  const { db, uploadsDir, intakeAudioDir, projectFilesDir, nowIso, parseJson } = context;
 
   const currentUser = (req) => req.authUser || db.prepare("SELECT * FROM users WHERE id = 'admin-local'").get();
   const authenticatedUser = (req, res) => {
@@ -413,6 +414,84 @@ export function registerUtilityRoutes(app, context) {
     }
   });
 
+  app.post("/api/project-file-manifests", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!canViewProjectFiles(user)) return res.status(403).json({ error: "files_permission_required" });
+    const items = Array.isArray(req.body?.items) ? req.body.items : (req.body?.item ? [req.body.item] : []);
+    if (!items.length) return res.status(400).json({ error: "manifest_items_required" });
+    try {
+      const records = upsertManifests({ db, items: items.map((item) => ({ ...item, sourceClientId: item.sourceClientId || context.clientId(req) })), user, nowIso });
+      res.status(201).json({ manifests: records.map((item) => ({ id: item.id, projectId: item.projectId, stageId: item.stageId, originalName: item.originalName, relativePath: item.relativePath, size: item.size, contentType: item.contentType, checksum: item.checksum, version: item.version, bucket: item.bucket, availability: item.availability, lastIndexedAt: item.lastIndexedAt })) });
+    } catch (error) { res.status(400).json({ error: "manifest_save_failed", message: error.message }); }
+  });
+
+  app.get("/api/projects/:projectId/file-manifests", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!canViewProjectFiles(user)) return res.status(403).json({ error: "files_permission_required" });
+    res.json({ manifests: listManifests({ db, user, projectId: req.params.projectId, canSeeSensitive: user.role === "admin" || user.role === "company_admin" }) });
+  });
+
+  app.post("/api/project-file-uploads", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!canViewProjectFiles(user)) return res.status(403).json({ error: "files_permission_required" });
+    const manifest = getManifest({ db, user, fileId: req.body?.fileId });
+    if (!manifest) return res.status(404).json({ error: "file_manifest_not_found" });
+    const project = { ...(req.body?.project || {}), id: manifest.projectId };
+    const stage = { ...(req.body?.stage || {}), id: manifest.stageId };
+    if (!project.name && !project.projectName) return res.status(400).json({ error: "project_required" });
+    if (!stage.name) return res.status(400).json({ error: "stage_required" });
+    const targetDir = path.join(projectFilesDir, getProjectFolderName(project), getStageFolderName(stage), "已归档");
+    fs.mkdirSync(targetDir, { recursive: true });
+    const built = buildProjectStoredFile({ project, stage, fileType: req.body?.fileType || manifest.originalName, filename: manifest.originalName, targetDir });
+    try {
+      const session = createUploadSession({ db, user, fileId: manifest.id, totalSize: manifest.size, chunkSize: req.body?.chunkSize, targetPath: path.join(targetDir, built.storedName), storedName: built.storedName, nowIso, uploadsDir: path.join(projectFilesDir, ".uploads") });
+      res.status(201).json({ ...session, manifestId: manifest.id, storedName: built.storedName, version: built.version });
+    } catch (error) { res.status(error.status || 400).json({ error: error.message }); }
+  });
+
+  app.put("/api/project-file-uploads/:uploadId/chunks/:chunkIndex", express.raw({ type: "application/octet-stream", limit: "8mb" }), (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const upload = getUpload({ db, user, uploadId: req.params.uploadId });
+    if (!upload) return res.status(404).json({ error: "upload_not_found" });
+    try { res.json(recordChunk({ db, upload, chunkIndex: req.params.chunkIndex, body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), nowIso })); }
+    catch (error) { res.status(error.status || 400).json({ error: error.message }); }
+  });
+
+  app.post("/api/project-file-uploads/:uploadId/complete", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const upload = getUpload({ db, user, uploadId: req.params.uploadId });
+    if (!upload) return res.status(404).json({ error: "upload_not_found" });
+    try { res.json(completeUpload({ db, user, upload, checksum: req.body?.checksum, nowIso })); }
+    catch (error) { res.status(error.status || 400).json({ error: error.message }); }
+  });
+
+  app.get("/api/project-files/:fileId/content", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const manifest = getManifest({ db, user, fileId: req.params.fileId });
+    if (!manifest || !canSeeManifestContent(user, manifest)) return res.status(403).json({ error: "file_content_forbidden" });
+    if (!manifest.storagePath || !fs.existsSync(manifest.storagePath)) return res.status(404).json({ error: "file_content_missing" });
+    const root = path.resolve(projectFilesDir);
+    const target = path.resolve(manifest.storagePath);
+    if (!target.startsWith(`${root}${path.sep}`)) return res.status(400).json({ error: "invalid_file_storage_path" });
+    res.sendFile(target, { headers: { "Content-Type": manifest.contentType || "application/octet-stream", "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(manifest.originalName)}` } });
+  });
+
+  app.patch("/api/project-file-manifests/:fileId/visibility", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    try {
+      const updated = updateVisibility({ db, user, fileId: req.params.fileId, visibility: req.body?.visibility });
+      if (!updated) return res.status(404).json({ error: "file_manifest_not_found" });
+      res.json({ ok: true, fileId: updated.id, visibility: updated.visibilityOverride || updated.visibilityPolicy });
+    } catch (error) { res.status(error.status || 400).json({ error: error.message }); }
+  });
+
   app.post("/api/projects/:projectId/files/list", (req, res) => {
     const project = { ...(req.body?.project || {}), id: req.params.projectId };
     const stages = Array.isArray(req.body?.stages) ? req.body.stages : [];
@@ -426,6 +505,9 @@ export function registerUtilityRoutes(app, context) {
   });
 
   app.get("/api/project-files/download", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!canViewProjectFiles(user)) return res.status(403).json({ error: "files_permission_required" });
     const resolved = services.resolveProjectFile(req.query.relativePath);
     if (!resolved) return res.status(404).json({ error: "file_not_found" });
     res.download(resolved.absolutePath);

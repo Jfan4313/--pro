@@ -29,8 +29,42 @@ export type SpeechTranscriptionResult = {
   warning?: string;
 };
 
+export type ProjectFileManifest = {
+  id: string;
+  projectId: string;
+  stageId: string;
+  originalName: string;
+  relativePath: string;
+  storedName?: string;
+  size: number;
+  contentType: string;
+  checksum?: string | null;
+  version: string;
+  bucket: "待提交" | "已归档";
+  availability: "local-only" | "uploaded" | "stale" | "missing";
+  lastIndexedAt: string;
+  uploadedAt?: string | null;
+  visibility: "project" | "sensitive" | "restricted";
+  canViewContent: boolean;
+};
+
 export function getProjectFileDownloadUrl(relativePath: string) {
   return `${API_BASE_URL}/api/project-files/download?relativePath=${encodeURIComponent(relativePath)}`;
+}
+
+export function getProjectManifestContentUrl(fileId: string) {
+  return `${API_BASE_URL}/api/project-files/${encodeURIComponent(fileId)}/content`;
+}
+
+export async function downloadProjectManifestContent(fileId: string, filename: string) {
+  const headers = new Headers({ "X-Client-Id": getClientId(), "X-User-Id": getUserId() });
+  const authToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+  const response = await fetch(getProjectManifestContentUrl(fileId), { headers });
+  if (!response.ok) throw new Error("file_content_forbidden");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a"); link.href = url; link.download = filename; link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 type RequestOptions = Omit<RequestInit, "body"> & {
@@ -222,6 +256,24 @@ export const apiClient = {
       method: "POST",
       body,
     });
+  },
+  publishProjectFileManifests(items: Array<Partial<ProjectFileManifest> & { projectId: string; stageId: string; originalName: string; relativePath: string; sourceClientId?: string }>) {
+    return request<{ manifests: ProjectFileManifest[] }>("/api/project-file-manifests", { method: "POST", body: { items } });
+  },
+  listProjectFileManifests(projectId: string) {
+    return request<{ manifests: ProjectFileManifest[] }>(`/api/projects/${encodeURIComponent(projectId)}/file-manifests`);
+  },
+  createProjectFileUpload(payload: { fileId: string; project: unknown; stage: unknown; fileType?: string; chunkSize?: number }) {
+    return request<{ id: string; manifestId: string; chunkSize: number; totalChunks: number; storedName: string; version: string }>("/api/project-file-uploads", { method: "POST", body: payload });
+  },
+  uploadProjectFileChunk(uploadId: string, chunkIndex: number, chunk: Blob) {
+    return request<{ received: number; chunkIndex: number }>(`/api/project-file-uploads/${encodeURIComponent(uploadId)}/chunks/${chunkIndex}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: chunk });
+  },
+  completeProjectFileUpload(uploadId: string, checksum?: string) {
+    return request<{ checksum: string; size: number; storedName: string; manifestId: string }>(`/api/project-file-uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST", body: { checksum } });
+  },
+  updateProjectFileVisibility(fileId: string, visibility: "project" | "sensitive" | "restricted") {
+    return request<{ ok: boolean; fileId: string; visibility: string }>(`/api/project-file-manifests/${encodeURIComponent(fileId)}/visibility`, { method: "PATCH", body: { visibility } });
   },
   analyzeIntake(payload: {
     inputType: "text" | "image" | "audio";

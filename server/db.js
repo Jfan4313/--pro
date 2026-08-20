@@ -76,6 +76,53 @@ CREATE INDEX IF NOT EXISTS idx_entity_records_resource_updated
 
 CREATE INDEX IF NOT EXISTS idx_sync_events_resource_record
   ON sync_events(resource, recordId);
+
+CREATE TABLE IF NOT EXISTS project_file_manifests (
+  id TEXT PRIMARY KEY,
+  companyId TEXT NOT NULL,
+  projectId TEXT NOT NULL,
+  stageId TEXT NOT NULL,
+  originalName TEXT NOT NULL,
+  relativePath TEXT NOT NULL,
+  storedName TEXT,
+  storagePath TEXT,
+  size INTEGER NOT NULL DEFAULT 0,
+  contentType TEXT NOT NULL DEFAULT 'application/octet-stream',
+  checksum TEXT,
+  version TEXT NOT NULL DEFAULT 'V1',
+  bucket TEXT NOT NULL DEFAULT '待提交',
+  availability TEXT NOT NULL DEFAULT 'local-only',
+  sourceClientId TEXT,
+  lastIndexedAt TEXT NOT NULL,
+  uploadedAt TEXT,
+  visibilityPolicy TEXT NOT NULL DEFAULT 'project',
+  visibilityOverride TEXT,
+  createdBy TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_file_manifests_project
+  ON project_file_manifests(companyId, projectId, stageId, updatedAt);
+CREATE INDEX IF NOT EXISTS idx_project_file_manifests_checksum
+  ON project_file_manifests(companyId, checksum);
+
+CREATE TABLE IF NOT EXISTS project_file_uploads (
+  id TEXT PRIMARY KEY,
+  manifestId TEXT NOT NULL,
+  companyId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  tempPath TEXT NOT NULL,
+  totalSize INTEGER NOT NULL,
+  chunkSize INTEGER NOT NULL,
+  receivedChunks INTEGER NOT NULL DEFAULT 0,
+  totalChunks INTEGER NOT NULL,
+  receivedBytes INTEGER NOT NULL DEFAULT 0,
+  targetPath TEXT,
+  storedName TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY (manifestId) REFERENCES project_file_manifests(id) ON DELETE CASCADE
+);
 `);
 
 function ensureColumn(table, column, definition) {
@@ -92,6 +139,9 @@ ensureColumn("users", "permissions", "TEXT");
 ensureColumn("users", "mustChangePassword", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("users", "lastLoginAt", "TEXT");
 ensureColumn("users", "companyId", "TEXT");
+ensureColumn("project_file_uploads", "targetPath", "TEXT");
+ensureColumn("project_file_uploads", "storedName", "TEXT");
+ensureColumn("project_file_manifests", "storagePath", "TEXT");
 
 db.exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
