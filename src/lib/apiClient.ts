@@ -5,6 +5,10 @@ const viteEnv = (import.meta as any).env || {};
 export const API_BASE_URL =
   viteEnv.VITE_LOCAL_API_URL || "";
 
+export type CompanyEntityType = "internal_person" | "partner_organization" | "supplier_organization" | "external_person" | "external_organization";
+export type ResponsibleEntity = { entityId: string; entityType: CompanyEntityType; name: string; organizationId?: string; organizationName?: string; contactEntityId?: string; contactName?: string; matchType: "existing" | "pending" | "ambiguous"; confidence: number; notificationEligible: boolean };
+export type IntakeGlossaryEntry = { id: string; standardName: string; aliases: string[]; category: "project" | "person" | "organization" | "industry_term"; enabled: boolean };
+
 export function getProjectFileDownloadUrl(relativePath: string) {
   return `${API_BASE_URL}/api/project-files/download?relativePath=${encodeURIComponent(relativePath)}`;
 }
@@ -209,6 +213,10 @@ export const apiClient = {
       deadline: string;
       summary: string;
       transcript?: string;
+      cleanedTranscript?: string;
+      backgroundNotes?: string[];
+      skillVersion?: string;
+      reviewPassApplied?: boolean;
       confidence: number;
       needsManualReview: boolean;
       items?: Array<{
@@ -221,10 +229,12 @@ export const apiClient = {
         projectMatchConfidence?: number;
         assignee: string;
         assignees?: string[];
+        responsibleEntities?: ResponsibleEntity[];
         deadline: string;
         dueTime?: string;
         confidence: number;
         needsManualReview: boolean;
+        reviewReasons?: string[];
       }>;
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
@@ -239,6 +249,15 @@ export const apiClient = {
   },
   updateAIConfig(payload: { endpoint: string; model: string; apiKey?: string; clearApiKey?: boolean; timeoutMs: number }) {
     return request<{ endpoint: string; model: string; hasKey: boolean; configured: boolean; timeoutMs: number; updatedAt?: string | null }>("/api/ai-config", { method: "PUT", body: payload });
+  },
+  getCompanyEntities() {
+    return request<{ entities: Array<ResponsibleEntity & { aliases?: string[]; role?: string; projectIds?: string[]; projectNames?: string[] }>; projects: Array<{ id: string; name: string; projectNumber?: string; aliases?: string[] }> }>("/api/company-entities");
+  },
+  getAIEntityGlossary() {
+    return request<{ entries: IntakeGlossaryEntry[] }>("/api/ai-entity-glossary");
+  },
+  updateAIEntityGlossary(entries: IntakeGlossaryEntry[]) {
+    return request<{ entries: IntakeGlossaryEntry[] }>("/api/ai-entity-glossary", { method: "PUT", body: { entries } });
   },
   getUserSettings<T>() {
     return request<{ value: T; updatedAt: string }>("/api/user-settings");

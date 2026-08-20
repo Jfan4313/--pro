@@ -28,3 +28,18 @@ test("quick intake marks an explicitly mentioned unknown project as new", () => 
   assert.equal(result.projectName, "滨江光伏项目");
   assert.equal(result.items[0].assignee, "王强");
 });
+
+test("local fallback keeps completed statements as background and leaves missing fields blank", () => {
+  const result = analyzeIntake({
+    inputType: "text",
+    text: "数据库已经完成了。然后整理事故分析报告",
+    projects: [],
+    personnel: [],
+  });
+
+  assert.deepEqual(result.backgroundNotes, ["数据库已经完成了"]);
+  assert.equal(result.items.length, 1);
+  assert.match(result.items[0].title, /整理事故分析报告/);
+  assert.equal(result.items[0].deadline, "");
+  assert.ok(result.items[0].reviewReasons.includes("缺少负责人"));
+});

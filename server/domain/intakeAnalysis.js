@@ -46,9 +46,29 @@ function parseLocalDeadline(text = "") {
   return "";
 }
 
-export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projects = [], personnel = [] }) {
+function cleanSpokenText(text = "") {
+  return String(text).replace(/(^|[，,。；;\s])(嗯|呃|啊|那个|就是|然后呢)(?=$|[，,。；;\s])/gu, "$1").replace(/([，,。；;])\1+/g, "$1").replace(/\s+/g, " ").trim();
+}
+
+function parseDueTime(text = "") {
+  const match = String(text).match(/(?:上午|早上|下午|晚上|傍晚)?\s*(\d{1,2})(?:点|[:：])(半|\d{1,2})?/u);
+  if (!match) return "";
+  let hour = Number(match[1]);
+  const minute = match[2] === "半" ? 30 : Number(match[2] || 0);
+  if (/(下午|晚上|傍晚)/u.test(text) && hour < 12) hour += 12;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function titleFor(part = "") {
+  const withoutContext = String(part).replace(/^.*?(?:项目|工程)[，,：:\s]*/u, "").replace(/(?:今天|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天]).*?(?=(让|由|安排|落实|确认|检查|提交|完成|处理|跟进|编制))/u, "");
+  const action = withoutContext.match(/(确认|落实|检查|提交|完成|处理|跟进|编制|整理|修改|通知|协调|核对|制定|更新|补充)[^，,。；;]{1,24}/u)?.[0];
+  return (action || withoutContext).replace(/^(让|由|安排)[^，,。；;]{1,12}(负责|去)?/u, "").trim().slice(0, 30);
+}
+
+export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projects = [], personnel = [], entities = [] }) {
   const trimmed = String(text || "").trim();
-  const normalized = normalizeText(trimmed);
+  const cleanedTranscript = cleanSpokenText(trimmed);
+  const normalized = normalizeText(cleanedTranscript);
   const projectMatches = projects.filter((item) => {
     const candidates = [item?.name, item?.projectName, item?.projectNumber, item?.code, item?.alias, ...(Array.isArray(item?.aliases) ? item.aliases : [])].map(normalizeText).filter(Boolean);
     return candidates.some((candidate) => candidate.length >= 2 && normalized.includes(candidate));
@@ -59,7 +79,8 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
   const projectMention = projectMentionRaw.replace(/(今天|明天|后天|让|安排|负责|去|到).*/u, "").trim();
   const projectName = project?.name || projectMention;
   const projectMatchType = project ? "existing" : (projectMention ? "new" : "unknown");
-  const people = personnel.filter((item) => {
+  const entityDirectory = entities.length ? entities : personnel.map((person) => ({ entityId: String(person.id || ""), entityType: "internal_person", name: person.name, notificationEligible: Boolean(person.accountId || person.loginEnabled), matchType: "existing", confidence: 1 }));
+  const people = entityDirectory.filter((item) => {
     const name = normalizeText(item?.name || "");
     return name && normalized.includes(name);
   });
@@ -67,28 +88,34 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
     ? (String(text || "").match(/(?:安排|通知|协调|交给|让)([\u4e00-\u9fa5]{2,4})(?:和|、|及|去|到|负责|处理|跟进|检查|对接)/)?.[1] || "")
     : "";
   const deadline = parseLocalDeadline(trimmed);
-  const titleSource = trimmed || (attachmentUrl ? "根据附件补充待办事项" : "");
+  const titleSource = cleanedTranscript || (attachmentUrl ? "根据附件补充待办事项" : "");
   const title = titleSource.length > 40 ? `${titleSource.slice(0, 40)}...` : titleSource;
-  const parts = (trimmed.split(/[。；;，,\n]+/).map((part) => part.trim()).filter(Boolean).length > 1
-    ? trimmed.split(/[。；;，,\n]+/).map((part) => part.trim()).filter(Boolean)
-    : [trimmed]);
+  const clauses = cleanedTranscript.split(/[。；;\n]+|(?:然后|另外|还有)|[，,](?=[^，,]{0,10}(?:让|由|安排|落实|确认|检查|提交|完成|处理|跟进|准备|编制|整理|修改))/u).map((part) => part.trim()).filter(Boolean);
+  const backgroundNotes = clauses.filter((part) => /(已经?完成|完成了|已办结|无需再做)/u.test(part));
+  const parts = clauses.filter((part) => !backgroundNotes.includes(part));
   const items = parts.map((part, index) => {
     const partPeople = people.filter((person) => normalizeText(part).includes(normalizeText(person?.name || "")));
-    const person = partPeople[0] || people[0];
+    const matchedEntities = partPeople.length ? partPeople : people;
+    const responsibleEntities = matchedEntities.map((entity) => ({ entityId: entity.entityId || entity.id || "", entityType: entity.entityType || "internal_person", name: entity.name, ...(entity.organizationId ? { organizationId: entity.organizationId } : {}), ...(entity.organizationName ? { organizationName: entity.organizationName } : {}), ...(entity.contactEntityId ? { contactEntityId: entity.contactEntityId } : {}), ...(entity.contactName ? { contactName: entity.contactName } : {}), matchType: entity.matchType || "existing", confidence: Number(entity.confidence ?? 0.8), notificationEligible: Boolean(entity.notificationEligible) }));
+    const names = responsibleEntities.map((entity) => entity.name);
     const itemDeadline = parseLocalDeadline(part) || deadline;
+    const reviewReasons = [...(!responsibleEntities.length ? ["缺少负责人"] : []), ...(!itemDeadline ? ["缺少截止日期"] : []), "AI不可用，已使用本地保守规则拆分"];
     return {
       id: `draft-${index + 1}`,
-      title: part.length > 40 ? `${part.slice(0, 40)}...` : part,
+      title: titleFor(part),
       projectId: project?.id || "",
       projectName,
       projectMatchType,
       projectMatchConfidence: project ? 0.9 : projectMention ? 0.45 : 0,
-      assignees: person ? [person.name] : (inferredAssignee ? [inferredAssignee] : []),
-      assignee: person?.name || inferredAssignee,
+      responsibleEntities,
+      assignees: names.length ? names : (inferredAssignee ? [inferredAssignee] : []),
+      assignee: names[0] || inferredAssignee,
       deadline: itemDeadline,
+      dueTime: parseDueTime(part),
       summary: part,
-      confidence: inputType === "text" ? (project || person || itemDeadline ? 0.55 : 0.25) : 0.1,
-      needsManualReview: inputType !== "text" || !itemDeadline || !person || projectConflict || !part,
+      confidence: inputType === "text" ? (project || responsibleEntities.length || itemDeadline ? 0.55 : 0.25) : 0.1,
+      needsManualReview: true,
+      reviewReasons,
     };
   });
 
@@ -106,6 +133,10 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
     confidence: inputType === "text" ? (project || people.length || deadline ? 0.55 : 0.25) : 0.1,
     needsManualReview: inputType !== "text" || !project || !title || projectConflict || items.some((item) => item.needsManualReview),
     transcript: trimmed,
+    cleanedTranscript,
+    backgroundNotes,
+    skillVersion: "local-fallback-v1",
+    reviewPassApplied: false,
     items,
   };
 }

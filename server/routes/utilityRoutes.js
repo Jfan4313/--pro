@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
-import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIKey, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig } from "../domain/aiService.js";
+import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIEntityGlossary, getAIKey, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig, updateAIEntityGlossary } from "../domain/aiService.js";
+import { getCompanyKnowledge } from "../domain/companyEntities.js";
 import { isCompanyManager } from "../auth.js";
 import {
   buildProjectStoredFile,
@@ -41,6 +42,32 @@ export function registerUtilityRoutes(app, context) {
     } catch (error) {
       console.error("Failed to persist company AI config:", error);
       res.status(500).json({ error: "ai_config_save_failed", message: "服务端无法写入 AI 配置文件，请检查 data 目录权限" });
+    }
+  });
+
+  app.get("/api/company-entities", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    const glossary = getAIEntityGlossary(user.companyId || "company-default");
+    const knowledge = getCompanyKnowledge(db, glossary);
+    res.json({ entities: knowledge.entities.map((entity) => ({ ...entity, matchType: "existing", confidence: 1 })), projects: knowledge.projects });
+  });
+
+  app.get("/api/ai-entity-glossary", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
+    res.json({ entries: getAIEntityGlossary(user.companyId || "company-default") });
+  });
+
+  app.put("/api/ai-entity-glossary", (req, res) => {
+    const user = authenticatedUser(req, res);
+    if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
+    try {
+      res.json({ entries: updateAIEntityGlossary(user.companyId || "company-default", req.body?.entries) });
+    } catch (error) {
+      res.status(400).json({ error: "invalid_glossary", message: error.message });
     }
   });
 
@@ -137,6 +164,7 @@ export function registerUtilityRoutes(app, context) {
   app.post("/api/ai-debug", async (req, res) => {
     const user = authenticatedUser(req, res);
     if (!user) return;
+    if (!isCompanyManager(user)) return res.status(403).json({ error: "company_admin_required" });
     const supplied = req.body && typeof req.body === "object" ? req.body : {};
     const override = supplied.endpoint || supplied.model || supplied.apiKey ? { endpoint: supplied.endpoint, model: supplied.model, timeoutMs: supplied.timeoutMs, apiKey: supplied.apiKey } : null;
     const result = await debugAI(user, db, override);

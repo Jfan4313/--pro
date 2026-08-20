@@ -1,10 +1,10 @@
 import React from "react";
-import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus, BarChart3, RefreshCw, KeyRound, CheckCircle2, XCircle } from "lucide-react";
+import { Bell, Package, AlertTriangle, MessageSquare, Mail, Smartphone, Shield, FolderOpen, Save, FolderPlus, BarChart3, RefreshCw, KeyRound, CheckCircle2, XCircle, BookOpen, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
-import { apiClient } from "@/src/lib/apiClient";
+import { apiClient, type IntakeGlossaryEntry } from "@/src/lib/apiClient";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { flattenProjects } from "@/src/lib/management";
 import { useAuth } from "@/src/lib/auth";
@@ -46,6 +46,8 @@ export function Settings() {
   const [companyAccounts, setCompanyAccounts] = React.useState<Array<{ id: string; name: string; username: string }>>([]);
   const [aiDebug, setAiDebug] = React.useState<Awaited<ReturnType<typeof apiClient.debugAI>> | null>(null);
   const [aiDebugging, setAiDebugging] = React.useState(false);
+  const [glossary, setGlossary] = React.useState<IntakeGlossaryEntry[]>([]);
+  const [glossarySaving, setGlossarySaving] = React.useState(false);
   const isAIManager = user?.role === "admin" || user?.role === "company_admin";
 
   const mergedSettings = {
@@ -89,7 +91,10 @@ export function Settings() {
     if (!user) return;
     void apiClient.getAIConfig().then((config) => setAiConfig((current) => ({ ...current, ...config, apiKey: "" }))).catch(() => undefined);
     void apiClient.getAIUsage({ pageSize: 50 }).then(setUsage).catch(() => undefined);
-    if (isAIManager) void apiClient.listAccounts().then(setCompanyAccounts).catch(() => undefined);
+    if (isAIManager) {
+      void apiClient.listAccounts().then(setCompanyAccounts).catch(() => undefined);
+      void apiClient.getAIEntityGlossary().then((result) => setGlossary(result.entries)).catch(() => undefined);
+    }
   }, [user, isAIManager]);
 
   const saveAIConfig = async () => {
@@ -143,6 +148,19 @@ export function Settings() {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: `AI 连接失败：${failure.message}` }));
     } finally { setAiDebugging(false); }
   };
+
+  const saveGlossary = async () => {
+    setGlossarySaving(true);
+    try {
+      const result = await apiClient.updateAIEntityGlossary(glossary);
+      setGlossary(result.entries);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "工作指令词库已保存" }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.details?.message || "词库保存失败，请检查标准名称和分类" }));
+    } finally { setGlossarySaving(false); }
+  };
+
+  const updateGlossaryEntry = (id: string, patch: Partial<IntakeGlossaryEntry>) => setGlossary((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry));
 
   const handleToggle = async (category: keyof typeof defaultSettings, key: string) => {
     const nextValue = !(mergedSettings as any)[category][key];
@@ -254,7 +272,8 @@ export function Settings() {
               onChange={() => handleToggle('notifications', 'urgentAnnouncements')}
             />
             
-            <div className="h-px bg-slate-100 my-4"></div>
+            <div className="h-px bg-slate-100 my-4">
+</div>
             
             <SettingToggle
               icon={Mail}
@@ -273,7 +292,42 @@ export function Settings() {
           </div>
         </div>
 
-        {user && <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/50 flex items-center gap-2"><KeyRound className="h-5 w-5 text-indigo-600" /><div><h3 className="text-lg font-medium text-slate-800">公司 AI 配置</h3><p className="mt-1 text-xs text-slate-500">公司成员统一使用同一套模型配置；API Key 始终只保存在服务端。</p></div></div>{isAIManager ? <div className="p-6 space-y-4"><label className="block"><span className="form-label">API 地址</span><input value={aiConfig.endpoint} onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })} placeholder="https://api.deepseek.com" className="survey-input" /><span className="mt-1 block text-xs text-slate-500">可填写服务商基础地址，系统会自动调用 /chat/completions。</span></label><div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="form-label">模型名称</span><input value={aiConfig.model} onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })} className="survey-input" /></label><label className="block"><span className="form-label">超时（毫秒）</span><input type="number" min="5000" max="120000" value={aiConfig.timeoutMs} onChange={(event) => setAiConfig({ ...aiConfig, timeoutMs: Number(event.target.value) })} className="survey-input" /></label></div><label className="block"><span className="form-label">公司 API Key {aiConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span><input type="password" value={aiConfig.apiKey} onChange={(event) => setAiConfig({ ...aiConfig, apiKey: event.target.value })} placeholder={aiConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴公司 API Key"} className="survey-input" /></label><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void runAIDebug()} disabled={aiDebugging} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 disabled:opacity-60"><RefreshCw className={cn("h-4 w-4", aiDebugging && "animate-spin")} />{aiDebugging ? "调试中…" : "调试 AI 连接"}</button><button type="button" onClick={() => void saveAIConfig()} disabled={aiSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{aiSaving ? "保存中…" : "保存公司 AI 配置"}</button>{aiConfig.hasKey && <button type="button" onClick={() => void clearAIKey()} disabled={aiSaving} className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 disabled:opacity-60">清除 AI Key</button>}</div></div> : <div className="p-6"><p className="text-sm font-semibold text-slate-800">{aiConfig.configured ? "公司 AI 已配置" : "公司 AI 尚未配置"}</p><p className="mt-1 text-xs text-slate-500">当前模型：{aiConfig.model || "未设置"}。地址和密钥仅公司管理员可查看。</p></div>}</div>}
+        {user && <div className="bg-white rounded-xl border border-indigo-200 shadow-sm overflow-hidden">
+<div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/50 flex items-center gap-2">
+<KeyRound className="h-5 w-5 text-indigo-600" />
+<div>
+<h3 className="text-lg font-medium text-slate-800">公司 AI 配置</h3>
+<p className="mt-1 text-xs text-slate-500">公司成员统一使用同一套模型配置；API Key 始终只保存在服务端。</p>
+</div>
+</div>{isAIManager ? <div className="p-6 space-y-4">
+<label className="block">
+<span className="form-label">API 地址</span>
+<input value={aiConfig.endpoint} onChange={(event) => setAiConfig({ ...aiConfig, endpoint: event.target.value })} placeholder="https://api.deepseek.com" className="survey-input" />
+<span className="mt-1 block text-xs text-slate-500">可填写服务商基础地址，系统会自动调用 /chat/completions。</span>
+</label>
+<div className="grid gap-4 sm:grid-cols-2">
+<label className="block">
+<span className="form-label">模型名称</span>
+<input value={aiConfig.model} onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })} className="survey-input" />
+</label>
+<label className="block">
+<span className="form-label">超时（毫秒）</span>
+<input type="number" min="5000" max="120000" value={aiConfig.timeoutMs} onChange={(event) => setAiConfig({ ...aiConfig, timeoutMs: Number(event.target.value) })} className="survey-input" />
+</label>
+</div>
+<label className="block">
+<span className="form-label">公司 API Key {aiConfig.hasKey && <span className="text-emerald-600">（已配置，留空保持不变）</span>}</span>
+<input type="password" value={aiConfig.apiKey} onChange={(event) => setAiConfig({ ...aiConfig, apiKey: event.target.value })} placeholder={aiConfig.hasKey ? "已配置，如需更换请重新输入" : "粘贴公司 API Key"} className="survey-input" />
+</label>
+<div className="flex flex-wrap gap-2">
+<button type="button" onClick={() => void runAIDebug()} disabled={aiDebugging} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 disabled:opacity-60">
+<RefreshCw className={cn("h-4 w-4", aiDebugging && "animate-spin")} />{aiDebugging ? "调试中…" : "调试 AI 连接"}</button>
+<button type="button" onClick={() => void saveAIConfig()} disabled={aiSaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+<Save className="h-4 w-4" />{aiSaving ? "保存中…" : "保存公司 AI 配置"}</button>{aiConfig.hasKey && <button type="button" onClick={() => void clearAIKey()} disabled={aiSaving} className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 disabled:opacity-60">清除 AI Key</button>}</div>
+</div> : <div className="p-6">
+<p className="text-sm font-semibold text-slate-800">{aiConfig.configured ? "公司 AI 已配置" : "公司 AI 尚未配置"}</p>
+<p className="mt-1 text-xs text-slate-500">当前模型：{aiConfig.model || "未设置"}。地址和密钥仅公司管理员可查看。</p>
+</div>}</div>}
 
         {user && isAIManager && (aiDebugging || aiDebug) && (
           <div
@@ -296,9 +350,18 @@ export function Settings() {
                   <>
                     <p className="mt-1 text-sm text-slate-700">{aiDebug.ok ? "服务商已正常返回测试任务，可以使用公司 AI 功能。" : aiDebug.message || "服务商没有正常响应，请检查配置。"}</p>
                     <dl className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
-                      <div><dt className="font-semibold text-slate-800">模型</dt><dd>{aiDebug.model || "未设置"}</dd></div>
-                      <div><dt className="font-semibold text-slate-800">耗时</dt><dd>{aiDebug.durationMs != null ? `${aiDebug.durationMs} 毫秒` : "未返回"}</dd></div>
-                      <div className="sm:col-span-2"><dt className="font-semibold text-slate-800">测试地址</dt><dd className="break-all">{aiDebug.endpoint || "未设置"}</dd></div>
+                      <div>
+<dt className="font-semibold text-slate-800">模型</dt>
+<dd>{aiDebug.model || "未设置"}</dd>
+</div>
+                      <div>
+<dt className="font-semibold text-slate-800">耗时</dt>
+<dd>{aiDebug.durationMs != null ? `${aiDebug.durationMs} 毫秒` : "未返回"}</dd>
+</div>
+                      <div className="sm:col-span-2">
+<dt className="font-semibold text-slate-800">测试地址</dt>
+<dd className="break-all">{aiDebug.endpoint || "未设置"}</dd>
+</div>
                     </dl>
                   </>
                 )}
@@ -307,7 +370,82 @@ export function Settings() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"><div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2"><BarChart3 className="h-5 w-5 text-violet-600" /><div><h3 className="text-lg font-medium text-slate-800">AI Token 用量</h3><p className="mt-1 text-xs text-slate-500">{isAIManager ? "查看本公司各帐号用量" : "仅显示当前帐号的用量"}；服务商未返回 Token 时不做估算。</p></div></div><div className="p-6 space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><input type="date" value={usageFilters.from} onChange={(event) => setUsageFilters({ ...usageFilters, from: event.target.value })} className="survey-input" aria-label="开始日期" /><input type="date" value={usageFilters.to} onChange={(event) => setUsageFilters({ ...usageFilters, to: event.target.value })} className="survey-input" aria-label="结束日期" />{isAIManager && <select value={usageFilters.userId} onChange={(event) => setUsageFilters({ ...usageFilters, userId: event.target.value })} className="survey-input"><option value="">全部帐号</option>{companyAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}（{account.username}）</option>)}</select>}<input value={usageFilters.model} onChange={(event) => setUsageFilters({ ...usageFilters, model: event.target.value })} placeholder="模型名称" className="survey-input" /><select value={usageFilters.status} onChange={(event) => setUsageFilters({ ...usageFilters, status: event.target.value })} className="survey-input"><option value="">全部状态</option><option value="success">成功</option><option value="error">失败</option><option value="timeout">超时</option></select></div><button type="button" onClick={() => void loadUsage()} disabled={usageLoading} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${usageLoading ? "animate-spin" : ""}`} />查询用量</button><div className="grid grid-cols-2 gap-3 md:grid-cols-5"><UsageMetric label="调用次数" value={usage?.summary.calls || 0} /><UsageMetric label="成功" value={usage?.summary.successes || 0} /><UsageMetric label="失败/超时" value={usage?.summary.failures || 0} /><UsageMetric label="输入 Token" value={usage?.summary.inputTokens || 0} /><UsageMetric label="总 Token" value={usage?.summary.totalTokens || 0} /></div>{isAIManager && usage?.byUser?.length ? <div className="overflow-x-auto"><table className="w-full min-w-[580px] text-sm"><thead><tr className="border-b border-slate-100 text-left text-xs text-slate-400"><th className="py-2">帐号</th><th>调用</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th></tr></thead><tbody>{usage.byUser.map((row) => <tr key={row.userId} className="border-b border-slate-50"><td className="py-3 font-medium text-slate-800">{row.name}<span className="ml-1 text-xs font-normal text-slate-400">@{row.username}</span></td><td>{row.calls}</td><td>{Number(row.inputTokens).toLocaleString()}</td><td>{Number(row.outputTokens).toLocaleString()}</td><td className="font-semibold">{Number(row.totalTokens).toLocaleString()}</td></tr>)}</tbody></table></div> : null}<div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><thead><tr className="border-b border-slate-100 text-left text-xs text-slate-400"><th className="py-2">时间</th>{isAIManager && <th>帐号</th>}<th>模型</th><th>状态</th><th>输入</th><th>输出</th><th>总量</th><th>耗时</th></tr></thead><tbody>{usage?.records?.map((row) => <tr key={row.id} className="border-b border-slate-50"><td className="py-3 text-slate-500">{new Date(row.createdAt).toLocaleString()}</td>{isAIManager && <td>{row.userName}</td>}<td>{row.model}</td><td className={row.status === "success" ? "text-emerald-600" : "text-rose-600"}>{row.status === "success" ? "成功" : row.status === "timeout" ? "超时" : "失败"}</td><td>{row.inputTokens ?? "未提供"}</td><td>{row.outputTokens ?? "未提供"}</td><td>{row.totalTokens ?? "未提供"}</td><td>{row.durationMs}ms</td></tr>)}</tbody></table>{!usageLoading && !usage?.records?.length && <p className="py-8 text-center text-sm text-slate-400">暂无 AI 调用记录</p>}</div></div></div>
+        {user && isAIManager && <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 px-6 py-4"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-indigo-600" /><div><h3 className="text-lg font-medium text-slate-800">工作指令词库</h3><p className="mt-1 text-xs text-slate-500">维护项目、人员、单位和行业术语的标准名称及语音易错称呼；系统不会自动学习用户修改。</p></div></div><button type="button" onClick={() => setGlossary((current) => [...current, { id: crypto.randomUUID?.() || `term-${Date.now()}`, standardName: "", aliases: [], category: "industry_term", enabled: true }])} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-2 text-sm font-medium text-indigo-700"><Plus className="h-4 w-4" />添加词条</button></div>
+          <div className="space-y-3 p-6">{glossary.map((entry) => <div key={entry.id} className="grid gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_1.5fr_10rem_auto_auto]"><input value={entry.standardName} onChange={(event) => updateGlossaryEntry(entry.id, { standardName: event.target.value })} placeholder="标准名称" className="survey-input" /><input value={entry.aliases.join("、")} onChange={(event) => updateGlossaryEntry(entry.id, { aliases: event.target.value.split(/[,，、]/).map((value) => value.trim()).filter(Boolean) })} placeholder="简称、别名、语音易错词" className="survey-input" /><select value={entry.category} onChange={(event) => updateGlossaryEntry(entry.id, { category: event.target.value as IntakeGlossaryEntry["category"] })} className="survey-input"><option value="project">项目</option><option value="person">人员</option><option value="organization">单位</option><option value="industry_term">行业术语</option></select><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={entry.enabled} onChange={(event) => updateGlossaryEntry(entry.id, { enabled: event.target.checked })} />启用</label><button type="button" onClick={() => setGlossary((current) => current.filter((item) => item.id !== entry.id))} className="rounded-lg p-2 text-rose-500 hover:bg-rose-50" aria-label="删除词条"><Trash2 className="h-4 w-4" /></button></div>)}{!glossary.length && <p className="py-4 text-center text-sm text-slate-400">暂无自定义词条，实体标准名称仍会从公司资料自动读取。</p>}<div className="flex justify-end"><button type="button" onClick={() => void saveGlossary()} disabled={glossarySaving} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"><Save className="h-4 w-4" />{glossarySaving ? "保存中…" : "保存工作指令词库"}</button></div></div>
+        </div>}
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+<div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+<BarChart3 className="h-5 w-5 text-violet-600" />
+<div>
+<h3 className="text-lg font-medium text-slate-800">AI Token 用量</h3>
+<p className="mt-1 text-xs text-slate-500">{isAIManager ? "查看本公司各帐号用量" : "仅显示当前帐号的用量"}；服务商未返回 Token 时不做估算。</p>
+</div>
+</div>
+<div className="p-6 space-y-5">
+<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+<input type="date" value={usageFilters.from} onChange={(event) => setUsageFilters({ ...usageFilters, from: event.target.value })} className="survey-input" aria-label="开始日期" />
+<input type="date" value={usageFilters.to} onChange={(event) => setUsageFilters({ ...usageFilters, to: event.target.value })} className="survey-input" aria-label="结束日期" />{isAIManager && <select value={usageFilters.userId} onChange={(event) => setUsageFilters({ ...usageFilters, userId: event.target.value })} className="survey-input">
+<option value="">全部帐号</option>{companyAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}（{account.username}）</option>)}</select>}<input value={usageFilters.model} onChange={(event) => setUsageFilters({ ...usageFilters, model: event.target.value })} placeholder="模型名称" className="survey-input" />
+<select value={usageFilters.status} onChange={(event) => setUsageFilters({ ...usageFilters, status: event.target.value })} className="survey-input">
+<option value="">全部状态</option>
+<option value="success">成功</option>
+<option value="error">失败</option>
+<option value="timeout">超时</option>
+</select>
+</div>
+<button type="button" onClick={() => void loadUsage()} disabled={usageLoading} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60">
+<RefreshCw className={`h-4 w-4 ${usageLoading ? "animate-spin" : ""}`} />查询用量</button>
+<div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+<UsageMetric label="调用次数" value={usage?.summary.calls || 0} />
+<UsageMetric label="成功" value={usage?.summary.successes || 0} />
+<UsageMetric label="失败/超时" value={usage?.summary.failures || 0} />
+<UsageMetric label="输入 Token" value={usage?.summary.inputTokens || 0} />
+<UsageMetric label="总 Token" value={usage?.summary.totalTokens || 0} />
+</div>{isAIManager && usage?.byUser?.length ? <div className="overflow-x-auto">
+<table className="w-full min-w-[580px] text-sm">
+<thead>
+<tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+<th className="py-2">帐号</th>
+<th>调用</th>
+<th>输入 Token</th>
+<th>输出 Token</th>
+<th>总 Token</th>
+</tr>
+</thead>
+<tbody>{usage.byUser.map((row) => <tr key={row.userId} className="border-b border-slate-50">
+<td className="py-3 font-medium text-slate-800">{row.name}<span className="ml-1 text-xs font-normal text-slate-400">@{row.username}</span>
+</td>
+<td>{row.calls}</td>
+<td>{Number(row.inputTokens).toLocaleString()}</td>
+<td>{Number(row.outputTokens).toLocaleString()}</td>
+<td className="font-semibold">{Number(row.totalTokens).toLocaleString()}</td>
+</tr>)}</tbody>
+</table>
+</div> : null}<div className="overflow-x-auto">
+<table className="w-full min-w-[700px] text-sm">
+<thead>
+<tr className="border-b border-slate-100 text-left text-xs text-slate-400">
+<th className="py-2">时间</th>{isAIManager && <th>帐号</th>}<th>模型</th>
+<th>状态</th>
+<th>输入</th>
+<th>输出</th>
+<th>总量</th>
+<th>耗时</th>
+</tr>
+</thead>
+<tbody>{usage?.records?.map((row) => <tr key={row.id} className="border-b border-slate-50">
+<td className="py-3 text-slate-500">{new Date(row.createdAt).toLocaleString()}</td>{isAIManager && <td>{row.userName}</td>}<td>{row.model}</td>
+<td className={row.status === "success" ? "text-emerald-600" : "text-rose-600"}>{row.status === "success" ? "成功" : row.status === "timeout" ? "超时" : "失败"}</td>
+<td>{row.inputTokens ?? "未提供"}</td>
+<td>{row.outputTokens ?? "未提供"}</td>
+<td>{row.totalTokens ?? "未提供"}</td>
+<td>{row.durationMs}ms</td>
+</tr>)}</tbody>
+</table>{!usageLoading && !usage?.records?.length && <p className="py-8 text-center text-sm text-slate-400">暂无 AI 调用记录</p>}</div>
+</div>
+</div>
 
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
@@ -322,13 +460,15 @@ export function Settings() {
                   {archiveRootName || "尚未选择本机文件夹"}
                   {archiveRootName && <span className={cn("ml-2 text-xs", archivePermission === "granted" ? "text-emerald-600" : "text-amber-600")}>{archivePermission === "granted" ? "可读写" : "需要恢复权限"}</span>}
                 </div>
-                <button onClick={() => void chooseArchiveRoot()} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"><FolderOpen className="h-4 w-4" />{archiveRootName ? "重新选择" : "选择文件夹"}</button>
+                <button onClick={() => void chooseArchiveRoot()} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+<FolderOpen className="h-4 w-4" />{archiveRootName ? "重新选择" : "选择文件夹"}</button>
                 {archiveRootName && archivePermission !== "granted" && <button onClick={() => void restoreArchivePermission()} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700">恢复授权</button>}
               </div>
               <p className="mt-2 text-xs text-slate-500">新资料仅写入本机授权目录；项目与文件索引仍可同步，其他设备不能直接下载原文件。</p>
             </div>
 
-            <div className="h-px bg-slate-100"></div>
+            <div className="h-px bg-slate-100">
+</div>
 
             <div className="rounded-lg border border-cyan-100 bg-cyan-50/60 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
@@ -347,7 +487,8 @@ export function Settings() {
               </button>
             </div>
 
-            <div className="h-px bg-slate-100"></div>
+            <div className="h-px bg-slate-100">
+</div>
 
             <SettingToggle
               icon={FileNameIcon}

@@ -71,7 +71,7 @@ test("remote AI calls record successful and failed usage events without estimati
   const fakeDb = { prepare: () => ({ run: (...args: unknown[]) => inserted.push(args) }) };
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: "测试任务", confidence: 0.9 }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ cleanedTranscript: "测试", backgroundNotes: [], items: [{ title: "执行测试", summary: "测试", confidence: 0.9 }] }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
     await ai.analyzeIntakeWithAI({ inputType: "text", text: "测试" }, { id: "user-1", companyId: "company-default" }, fakeDb);
     assert.equal(inserted.length, 1);
     assert.equal(inserted[0][5], null);
@@ -79,12 +79,52 @@ test("remote AI calls record successful and failed usage events without estimati
     assert.equal(inserted[0][8], "success");
 
     globalThis.fetch = async () => new Response("unavailable", { status: 503 });
-    await assert.rejects(() => ai.analyzeIntakeWithAI({ inputType: "text", text: "失败" }, { id: "user-1", companyId: "company-default" }, fakeDb));
+    const fallback = await ai.analyzeIntakeWithAI({ inputType: "text", text: "失败" }, { id: "user-1", companyId: "company-default" }, fakeDb);
+    assert.equal(fallback.skillVersion, "local-fallback-v1");
     assert.equal(inserted.length, 2);
     assert.equal(inserted[1][8], "error");
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("company intake glossary is normalized and persisted separately from public AI config", () => {
+  const entries = ai.updateAIEntityGlossary("company-default", [{ standardName: "化万里轮胎", aliases: ["化万里", "化万里"], category: "project", enabled: true }]);
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0].aliases, ["化万里"]);
+  assert.equal((ai.getAIConfig("company-default") as any).intakeGlossary, undefined);
+  assert.deepEqual(ai.getAIEntityGlossary("company-default"), entries);
+});
+
+test("work instruction agent separates completed background and resolves multiple responsible entities", async () => {
+  ai.updateAIConfig("company-default", { endpoint: "https://example.test/v1/chat/completions", model: "agent-model", apiKey: "secret-key", timeoutMs: 9000 });
+  const appData: Record<string, unknown> = {
+    personnelData: [{ id: "p1", name: "张顺超", accountId: "u1" }, { id: "p2", name: "李越", accountId: "u2" }],
+    externalPartners: [{ id: "o1", name: "顺超公司", contact: "王工" }],
+    suppliers: [],
+    projectBoardData: [{ projects: [{ id: "project-1", name: "化万里轮胎" }] }],
+  };
+  const recorded: unknown[][] = [];
+  const fakeDb = { prepare: (sql: string) => ({
+    get: (key: string) => sql.includes("app_data") && key in appData ? { value: JSON.stringify(appData[key]) } : undefined,
+    run: (...args: unknown[]) => recorded.push(args),
+  }) };
+  const aiPayload = { cleanedTranscript: "化万里轮胎项目：确认事故分析报告和整改通知书；顺超公司落实各区域应急预案。", backgroundNotes: ["数据库已经完成了"], items: [
+    { title: "确认事故分析报告和整改通知书", summary: "明天下午三点前确认", projectName: "化万里轮胎", responsibleEntities: [{ name: "张顺超" }, { name: "李越" }], deadline: "2026-08-21", dueTime: "15:00", confidence: 0.95 },
+    { title: "落实各区域应急预案", summary: "周五前落实开关位置和负责人", projectName: "化万里轮胎", responsibleEntities: [{ name: "顺超公司" }], deadline: "2026-08-21", confidence: 0.9 },
+  ] };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: "create_work_memo_draft", arguments: JSON.stringify(aiPayload) } }] } }], usage: { prompt_tokens: 12, completion_tokens: 8 } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const result = await ai.analyzeIntakeWithAI({ inputType: "text", text: "嗯，化万里轮胎这个项目，事故报告，不是，只要事故分析报告和整改通知书，明天下午三点前让张顺超、李越确认。数据库已经完成了。然后周五前让顺超公司落实各区域应急预案里的开关位置和负责人。" }, { id: "user-1", companyId: "company-default" }, fakeDb);
+    assert.equal(result.reviewPassApplied, true);
+    assert.deepEqual(result.backgroundNotes, ["数据库已经完成了"]);
+    assert.equal(result.items.length, 2);
+    assert.deepEqual(result.items[0].assignees, ["张顺超", "李越"]);
+    assert.equal(result.items[1].responsibleEntities[0].entityType, "partner_organization");
+    assert.equal(result.items[1].responsibleEntities[0].contactName, "王工");
+    assert.equal(result.items[0].projectMatchType, "existing");
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("AI connection debug reuses the saved company key when the form key is blank", async () => {

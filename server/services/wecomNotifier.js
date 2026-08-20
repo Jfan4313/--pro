@@ -39,7 +39,9 @@ export function createWecomNotifier({ nowIso }) {
 
   function formatMemo(item) {
     const priority = item.priority === "high" ? "【重要】" : "";
-    return `${priority}${markdownEscape(item.title)}\n>负责人：${markdownEscape(item.assignee)}\n>截止：${markdownEscape(item.dueDate)}`;
+    const structured = Array.isArray(item.responsibleEntities) ? item.responsibleEntities.filter((entity) => entity.matchType !== "ambiguous").map((entity) => entity.contactName ? `${entity.name}＋${entity.contactName}` : entity.name) : [];
+    const owners = structured.length ? structured : Array.isArray(item.assignees) && item.assignees.length ? item.assignees : [item.assignee].filter(Boolean);
+    return `${priority}${markdownEscape(item.title)}\n>负责人：${markdownEscape(owners.join("、") || "待补充")}\n>截止：${markdownEscape(item.dueDate)}`;
   }
 
   function notifyMemoChange(previous = [], next = []) {
@@ -93,6 +95,7 @@ export function createWecomNotifier({ nowIso }) {
     eveningHour,
     sendMarkdown,
     notifyMemoChange,
+    buildDigest,
     startScheduledDigest,
   };
 }
