@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import express from "express";
 import { analyzeIntake } from "../domain/intakeAnalysis.js";
 import { analyzeIntakeWithAI, debugAI, getAIConfig, getAIEntityGlossary, getAIKey, getSpeechProviderConfig, getSpeechProviderSecrets, resolveTranscriptionEndpoint, transcribeAudio, updateAIConfig, updateAIEntityGlossary, updateSpeechProviderConfig } from "../domain/aiService.js";
 import { getCompanyKnowledge } from "../domain/companyEntities.js";
