@@ -179,7 +179,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
       assignee: names[0] || inferredAssignee,
       deadline: itemDeadline,
       dueTime: parseDueTime(part),
-      summary: `${part.replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/u, "").replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:之前|前|做完|完成)?/u, "").replace(/[。；;]+$/u, "").trim()}。完成标准：完成上述事项及其明确交付物，并在工作备忘中留下完成记录。`,
+      summary: part.replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/u, "").replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:之前|前|做完|完成)?/u, "").replace(/[。；;]+$/u, "").trim() || titleFor(part, projectName),
       confidence: inputType === "text" ? (project || responsibleEntities.length || itemDeadline ? 0.55 : 0.25) : 0.1,
       needsManualReview: true,
       reviewReasons,

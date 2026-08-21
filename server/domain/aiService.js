@@ -300,9 +300,14 @@ function stripStructuredSummaryMetadata(value = "") {
 function buildTaskSummary(item, projectName, deadline, names, sourceText) {
   const raw = String(item?.summary || item?.title || "").trim();
   const title = compactTaskTitle(item?.title || raw, projectName);
-  const detail = stripStructuredSummaryMetadata(raw) || `围绕“${title}”完成相关资料、现场动作或交付物，并在完成后更新工作备忘`;
-  const completion = `完成标准：完成上述事项及其明确交付物；如包含多个并列对象，应全部完成后再标记任务完成`;
-  return `${detail.replace(/[。；;]+$/u, "")}。${completion}。`;
+  const detail = stripStructuredSummaryMetadata(raw)
+    .replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:上午|下午|早上|晚上|傍晚)?\s*\d{1,2}(?:点|[:：]\d{1,2})?(?:之前|前)?/gu, "")
+    .replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/gu, "")
+    .replace(/(?:归属项目|项目)[：:][^，,。；;]+/gu, "")
+    .replace(/[，,。；;]+/gu, "，")
+    .replace(/^[，,]+|[，,]+$/gu, "")
+    .trim();
+  return detail || title;
 }
 function normalizeProjectSpeech(value = "") {
   return normalizeName(value).replace(/[鼓谷顾]/gu, "古");

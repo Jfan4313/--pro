@@ -61,7 +61,7 @@ test("local fallback matches a project name fragment and keeps coordinated objec
   const today = new Date();
   const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   assert.equal(result.items[0].deadline, localToday);
-  assert.match(result.items[0].summary, /完成标准/);
+  assert.doesNotMatch(result.items[0].summary, /完成标准|负责人|截止日期|归属项目/);
 });
 
 test("local fallback extracts a spoken responsible person and creates a complete task title", () => {
