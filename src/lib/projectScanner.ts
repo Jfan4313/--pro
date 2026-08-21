@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { STAGES } from "./projectLifecycle";
+import { PROJECT_ARCHIVE_STRUCTURE } from "./projectArchiveStructure";
 
 export type ScanFileStatus = "classified" | "needs-review" | "unsupported" | "unreadable";
 
@@ -118,6 +119,7 @@ const DIRECTORY_STAGE_RULES: Array<{ stage: typeof STAGES[number]; terms: RegExp
     // construction-stage document.
     { stage: STAGES[2], terms: /招投标|招标|投标|标书|技术标|商务标|报价|澄清答疑|商务|预算|成本|收益|加分项|方案汇报/i },
     { stage: STAGES[4], terms: /项目备案|备案|报建|规划许可|接入系统|接入批复|并网申请|接入申请|供电局|许可|批复/i },
+    { stage: STAGES[9], terms: /运营维护|运维|运行数据|发电量|巡检|维修工单|备品备件|质保|保险|客户运维/i },
     { stage: STAGES[8], terms: /验收|并网验收|并网供电|竣工|运维|移交|运行/i },
     { stage: STAGES[6], terms: /项目交底|交底|安全教育|安全技术|人员资格|特种作业|危险源/i },
     { stage: STAGES[7], terms: /施工进场|进场|开工|施工|材料.*设备|设备.*材料|现场照片|作业指导|专项施工方案|分包方|开工资料|施工方案|日程安排/i },
@@ -231,19 +233,73 @@ function classifySignal(value: string) {
 export function classifyArchiveCategory(name: string, content = "", folderLabels: string[] = []) {
   const folderValue = normalizeText(folderLabels.join(" "));
   const value = normalizeText(`${folderValue} ${name} ${content}`);
+  // 目录中的业务文件夹是最高证据。保留目录层级，归档器会据此创建
+  // 真正的子文件夹；正文里的“施工日期”等词只能产生冲突提示。
+  const folderRules: Array<[RegExp, string]> = [
+    [/招标文件/, "招投标资料/招标文件"],
+    [/技术标/, "招投标资料/技术标"],
+    [/商务标/, "招投标资料/商务标"],
+    [/报价文件|报价单/, "招投标资料/报价文件"],
+    [/澄清答疑|答疑/, "招投标资料/澄清答疑"],
+    [/投标过程/, "招投标资料/投标过程"],
+    [/招投标资料|招投标|招标|投标|标书/, "招投标资料/其他"],
+    [/并网资料整理/, "并网资料整理"],
+    [/接入批复|并网申请|并网通知/, "并网资料整理/接入批复资料"],
+    [/发改委项目备案|备案申请|备案证书/, "发改委项目备案"],
+    [/合同协议|总承包合同|能源管理合同|购售电合同/, "合同协议"],
+    [/合同审批与盖章/, "合同审批与盖章"],
+    [/业主交底/, "业主交底"],
+    [/施工交底/, "施工交底"],
+    [/施工日程与进度|施工周报|施工日志/, "施工管理"],
+    [/施工实施/, "施工实施"],
+    [/隐蔽工程与节点报验/, "隐蔽工程与节点报验"],
+    [/施工质量与安全/, "施工质量与安全"],
+    [/施工照片与影像/, "施工照片与影像"],
+    [/运营维护|运行数据与发电量|发电量|设备巡检|故障维修|备品备件|保险与质保|客户运维/, "运营维护"],
+    [/现场勘察/, "现场勘察"],
+    [/前期收资/, "前期收资"],
+    [/项目模型/, "项目模型"],
+    [/项目照片/, "项目照片"],
+    [/设备与成本/, "设备与成本"],
+    [/电气设计|结构设计|项目设计资料|项目模型|深化电气设计|深化结构设计|设计院盖章蓝图/, "设计与技术"],
+    [/方案汇报|会议纪要|商务条款|投资收益测算|成本与报价/, "商务沟通"],
+  ];
+  const normalizedFolders = folderLabels.map((label) => normalizeText(label));
+  if (/项目模型/.test(folderValue)) {
+    if (/pvsyst|发电分析/.test(value)) return "项目模型/PVsyst模型";
+    if (/三维/.test(value)) return "项目模型/三维模型";
+    if (/组件排布|排布/.test(value)) return "项目模型/组件排布模型";
+  }
+  if (/招投标|招标|投标|标书/.test(folderValue)) {
+    if (/技术标/.test(value)) return "招投标资料/技术标";
+    if (/商务标/.test(value)) return "招投标资料/商务标";
+    if (/澄清|答疑/.test(value)) return "招投标资料/澄清答疑";
+    if (/报价|报价单|清单价/.test(value)) return "招投标资料/报价文件";
+  }
+  const knownFolderMatch = Object.values(PROJECT_ARCHIVE_STRUCTURE).flatMap((paths) => paths)
+    .map((path) => ({ path, leaf: normalizeText(path.split("/").at(-1) || path) }))
+    .filter((item) => normalizedFolders.includes(item.leaf))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+  if (knownFolderMatch) return knownFolderMatch.path;
+  const folderMatch = folderRules.find(([terms]) => terms.test(folderValue));
+  if (folderMatch) {
+    if (folderMatch[1] === "招投标资料/其他" && /报价/.test(folderValue)) return "招投标资料/报价文件";
+    return folderMatch[1];
+  }
   if (/招投标|招标|投标|标书|技术标|商务标|澄清答疑/.test(value)) {
     if (/技术标/.test(value)) return "招投标资料/技术标";
     if (/商务标/.test(value)) return "招投标资料/商务标";
     if (/澄清|答疑/.test(value)) return "招投标资料/澄清答疑";
-    if (/报价|报价单|清单价/.test(value)) return "招投标资料/报价";
+    if (/报价|报价单|清单价/.test(value)) return "招投标资料/报价文件";
     return "招投标资料/其他";
   }
-  if (/合同|协议|盖章|营业执照|身份证|产权|租赁|发票|付款/.test(value)) return "合同与权属";
+  if (/合同|协议|盖章|营业执照|身份证|产权|租赁|发票|付款/.test(value)) return "合同协议";
+  if (/备案|许可|批复|报建/.test(value)) return "发改委项目备案";
+  if (/运维|运行数据|发电量|巡检|维修工单|备品备件|质保|保险/.test(value)) return "运营维护";
   if (/设计|图纸|蓝图|方案|pvsyst|建模|bom|设备清单/.test(value)) return "设计与技术";
   if (/勘察|航拍|现场|照片|录像|测量/.test(value)) return "现场勘察";
   if (/施工|进场|日志|隐蔽|安全|交底|验收|并网|竣工/.test(value)) return "施工与验收";
   if (/预算|成本|造价|收益|irr|报价/.test(value)) return "商务与成本";
-  if (/备案|许可|批复|报建|规划/.test(value)) return "备案与报建";
   if (/会议|纪要|沟通|汇报/.test(value)) return "会议与沟通";
   return "其他资料";
 }
@@ -342,7 +398,8 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
     const classificationSource = pathStage ? "folder" : filenameStage.stageId ? "filename" : contentStage.stageId ? "content" : "none";
     const needsReview = !chosenStage.stageId || chosenStage.needsReview || Boolean(pathStage?.parentConflicts.length);
     const hash = await sha256(file).catch(() => undefined);
-    files.push({ ...base, hash, status: SUPPORTED_EXTENSIONS.has(extension) ? (needsReview ? "needs-review" : "classified") : (pathStage ? "classified" : "needs-review"), category: classifyArchiveCategory(file.name, content, folderLabels), stageId: chosenStage.stageId, stageName: chosenStage.stageName, confidence: chosenStage.confidence, evidence: chosenStage.evidence, contentSummary: content ? truncate(content.replace(/\s+/g, " "), 240) : undefined, sheetNames, suggestedPath: chosenStage.stageId ? `${chosenStage.stageId}/已归档/${file.name}` : undefined, pathStageKey: pathStage?.stageKey, pathStageName: pathStage?.stageName, pathStageEvidence: pathStage?.evidence, folderLabels, classificationSource, folderEvidence: pathStage?.evidence, contentConflict: conflicts.length ? conflicts.join("；") : undefined, needsReview });
+    const archiveCategory = classifyArchiveCategory(file.name, content, folderLabels);
+    files.push({ ...base, hash, status: SUPPORTED_EXTENSIONS.has(extension) ? (needsReview ? "needs-review" : "classified") : (pathStage ? "classified" : "needs-review"), category: archiveCategory, stageId: chosenStage.stageId, stageName: chosenStage.stageName, confidence: chosenStage.confidence, evidence: chosenStage.evidence, contentSummary: content ? truncate(content.replace(/\s+/g, " "), 240) : undefined, sheetNames, suggestedPath: chosenStage.stageId ? `${chosenStage.stageId}/已归档/${archiveCategory}/${file.name}` : undefined, logicalPath: chosenStage.stageId ? `${chosenStage.stageId}/已归档/${archiveCategory}/${file.name}` : undefined, pathStageKey: pathStage?.stageKey, pathStageName: pathStage?.stageName, pathStageEvidence: pathStage?.evidence, folderLabels, classificationSource, folderEvidence: pathStage?.evidence, contentConflict: conflicts.length ? conflicts.join("；") : undefined, needsReview });
   }
   const projectFileGroups = new Map<string, ScannedFile[]>();
   for (const file of files) {

@@ -195,13 +195,15 @@ function inferLegacyCategory(name: string) {
 }
 
 function meaningfulFolderLabels(labels: string[], stage: ArchiveStage, category: string) {
-  const stageName = sanitizeArchiveSegment(String(stage.name || "").replace(/[①②③④⑤⑥⑦⑧⑨⑩]/g, "")).toLocaleLowerCase();
-  const categories = categoryParts(category).map((item) => item.toLocaleLowerCase());
+  const stageName = String(stage.name || "").replace(/[①②③④⑤⑥⑦⑧⑨⑩]/g, "").replace(/^\d+[_-]?/, "").trim().toLocaleLowerCase();
+  const categoryRoots = categoryParts(category).map((item) => item.toLocaleLowerCase());
   return labels.map((part) => sanitizeArchiveSegment(part)).filter((part) => {
     const normalized = part.toLocaleLowerCase();
-    if (!normalized || normalized === stageName || categories.some((categoryPart) => normalized.includes(categoryPart) || categoryPart.includes(normalized))) return false;
-    if (/^(0?[1-9][-_])/.test(normalized) || /项目立项|现场勘察|前期收资|初步设计|商务沟通|签订合同|项目备案|深化设计|项目交底|施工资料|施工进场|开工资料|验收并网|竣工资料/.test(normalized)) return false;
-    if (category.startsWith("招投标资料") && /招投标|招标|投标|标书|技术标|商务标|澄清|答疑/.test(normalized)) return false;
+    if (!normalized || normalized === stageName || categoryRoots.includes(normalized)) return false;
+    // 只移除项目阶段根目录（例如 02_初步设计），不再移除“施工方案、
+    // 技术标附件、现场照片”等有业务含义的子目录。
+    if (/^(0?[1-9]|10)[_-]/.test(normalized)) return false;
+    if (/^\d+[_-]?(项目立项|初步设计|商务沟通|签订合同|项目备案|深化设计|项目交底|施工进场|验收并网|运营维护)/.test(normalized)) return false;
     return true;
   });
 }
@@ -270,8 +272,13 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     }
     const versionNumber = await nextVersion(archivedDirectory, stem, ext);
     const version = `V${versionNumber}`;
-    const storedName = autoRename ? `${stem}_${version}_${formatDateStamp()}${ext}` : file.name;
-    if (!autoRename && await fileExists(archivedDirectory, storedName)) throw Object.assign(new Error("archive_file_exists"), { code: "archive_file_exists" });
+    // 保留来源文件名是默认行为。版本后缀只在同一逻辑目录下已有不同
+    // 内容的同名文件时使用，避免把文件名当成目录结构的替代品。
+    let storedName = preserveFolders ? sanitizeArchiveSegment(file.name || "资料") : (autoRename ? `${stem}_${version}_${formatDateStamp()}${ext}` : file.name);
+    if (await fileExists(archivedDirectory, storedName)) {
+      if (preserveFolders) storedName = `${sanitizeArchiveSegment(base || "资料")}_${version}_${formatDateStamp()}${ext}`;
+      else if (!autoRename) throw Object.assign(new Error("archive_file_exists"), { code: "archive_file_exists" });
+    }
     await writeBlob(archivedDirectory, storedName, file);
     const storageKey = [...archiveParts, storedName].join("/");
     return {

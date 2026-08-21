@@ -58,3 +58,20 @@ test("最近的招投标目录锁定商务阶段，正文施工日期不能覆�
   assert.equal(file.category, "招投标资料/技术标");
   assert.match(file.contentConflict || "", /施工/);
 });
+
+test("按真实业务子目录生成分类，不把子目录压进文件名", async () => {
+  const root = { name: "项目", async *values() {
+    yield directory("测试项目", [directory("02_初步设计", [directory("项目模型", [fileEntry("PVsyst结果.pdf", "发电量分析")])])]);
+  } };
+  const report = await scanProjectDirectories([root]);
+  assert.equal(report.files[0].category, "项目模型/PVsyst模型");
+});
+
+test("生命周期包含运营维护，光伏备案不强制环评消防规划", async () => {
+  const { STAGES } = await import("../src/lib/projectLifecycle");
+  assert.equal(STAGES.length, 10);
+  assert.equal(STAGES.at(-1)?.id, "10_operations");
+  const filing = STAGES.find((stage) => stage.id === "5_filing");
+  assert.ok(filing);
+  assert.equal(filing?.checklist.some((item) => /环评|消防|规划/.test(item.label)), false);
+});

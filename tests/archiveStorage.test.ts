@@ -127,7 +127,7 @@ test("归档文件保留来源子文件夹层级", async () => {
   const provider = new LocalFolderStorageProvider(root);
   const file = new File(["hello"], "方案.pdf", { type: "application/pdf" });
   const archived = await provider.writeFile({ project, stage: stages[0], file, fileType: "方案", sourceRelativePath: "测试项目/开工资料/施工方案/方案.pdf", preserveFolders: true });
-  assert.match(archived.storageKey, /已归档\/方案\/方案_V1_/);
+  assert.match(archived.storageKey, /已归档\/方案\/开工资料\/施工方案\/方案\.pdf$/);
 });
 
 test("旧平铺归档先重建并校验后才能删除旧副本", async () => {
