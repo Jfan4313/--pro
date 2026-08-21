@@ -76,7 +76,7 @@ test("local fallback extracts a spoken responsible person and creates a complete
   assert.equal(result.items[0].title, "完成事故分析报告和处罚单");
   assert.deepEqual(result.items[0].assignees, ["苏俊鹏"]);
   assert.equal(result.items[0].responsibleEntities[0].matchType, "pending");
-  assert.match(result.items[0].summary, /项目：处罚万力轮胎/);
+  assert.doesNotMatch(result.items[0].summary, /负责人|截止日期|项目：/);
 });
 
 test("local fallback merges project travel context into the following field task", () => {
@@ -91,5 +91,19 @@ test("local fallback merges project travel context into the following field task
   assert.equal(result.items[0].projectId, "project-penalty");
   assert.match(result.items[0].title, /拍摄无人机/);
   assert.doesNotMatch(result.items[0].title, /今天|去处罚万力轮胎/);
-  assert.match(result.items[0].summary, /处罚万力轮胎/);
+  assert.doesNotMatch(result.items[0].summary, /负责人|截止日期|归属项目/);
+});
+
+test("local fallback corrects a common speech variant to the strongest existing project", () => {
+  const result = analyzeIntake({
+    inputType: "text",
+    text: "今天去腰鼓好邻居现场完成并网作业",
+    projects: [{ id: "project-neighbor", name: "云浮腰古好邻居" }, { id: "project-grid", name: "智能微电网二期", projectNumber: "PRJ-0002" }],
+    personnel: [],
+  });
+
+  assert.equal(result.projectId, "project-neighbor");
+  assert.equal(result.projectName, "云浮腰古好邻居");
+  assert.equal(result.projectMatchType, "existing");
+  assert.doesNotMatch(result.items[0].summary, /负责人|截止日期|归属项目/);
 });

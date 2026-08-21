@@ -2,6 +2,10 @@ function normalizeText(value = "") {
   return String(value).toLowerCase().replace(/\s+/g, "");
 }
 
+function normalizeProjectSpeech(value = "") {
+  return normalizeText(value).replace(/[鼓谷顾]/gu, "古");
+}
+
 function addDays(date, days) {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
@@ -106,7 +110,7 @@ function mergeContextClauses(clauses = [], projects = []) {
 
 function projectCandidateScore(project, normalizedInput) {
   const candidates = [project?.name, project?.projectName, project?.projectNumber, project?.code, project?.alias, ...(Array.isArray(project?.aliases) ? project.aliases : [])]
-    .map(normalizeText).filter((candidate) => candidate.length >= 2);
+    .map(normalizeProjectSpeech).filter((candidate) => candidate.length >= 2);
   let score = 0;
   for (const candidate of candidates) {
     if (normalizedInput.includes(candidate)) score = Math.max(score, 100 + candidate.length);
@@ -127,7 +131,8 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
   const trimmed = String(text || "").trim();
   const cleanedTranscript = cleanSpokenText(trimmed);
   const normalized = normalizeText(cleanedTranscript);
-  const scoredProjects = projects.map((item) => ({ item, score: projectCandidateScore(item, normalized) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
+  const projectNormalized = normalizeProjectSpeech(cleanedTranscript);
+  const scoredProjects = projects.map((item) => ({ item, score: projectCandidateScore(item, projectNormalized) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
   const bestScore = scoredProjects[0]?.score || 0;
   const projectMatches = scoredProjects.filter((entry) => entry.score === bestScore && bestScore > 0).map((entry) => entry.item);
   const project = scoredProjects[0]?.item || null;
@@ -174,7 +179,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
       assignee: names[0] || inferredAssignee,
       deadline: itemDeadline,
       dueTime: parseDueTime(part),
-      summary: `执行事项：${titleFor(part, projectName)}。${projectName ? `项目：${projectName}。` : "项目：待确认。"}${names.length ? `负责人：${names.join("、")}。` : "负责人：待选择。"}${itemDeadline ? `截止日期：${itemDeadline}。` : "截止日期：待选择。"}完成标准：按任务标题完成对应事项，并在工作备忘中留下完成记录。`,
+      summary: `${part.replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/u, "").replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:之前|前|做完|完成)?/u, "").replace(/[。；;]+$/u, "").trim()}。完成标准：完成上述事项及其明确交付物，并在工作备忘中留下完成记录。`,
       confidence: inputType === "text" ? (project || responsibleEntities.length || itemDeadline ? 0.55 : 0.25) : 0.1,
       needsManualReview: true,
       reviewReasons,

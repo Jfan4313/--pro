@@ -288,26 +288,51 @@ function compactTaskTitle(value = "", projectName = "") {
     .slice(0, 20) || "待补充任务";
 }
 
+function stripStructuredSummaryMetadata(value = "") {
+  return String(value)
+    .split(/[。；;\n]+/u)
+    .map((part) => part.trim())
+    .filter((part) => part && !/^(?:归属项目|项目|负责人|责任人|截止日期|完成标准)\s*[：:]/u.test(part))
+    .join("。")
+    .replace(/。{2,}/gu, "。")
+    .trim();
+}
 function buildTaskSummary(item, projectName, deadline, names, sourceText) {
   const raw = String(item?.summary || item?.title || "").trim();
   const title = compactTaskTitle(item?.title || raw, projectName);
-  const detail = raw && raw !== title ? raw : `围绕“${title}”完成相关资料、现场动作或交付物，并在完成后更新工作备忘。`;
-  const clauses = [
-    `执行事项：${detail}`,
-    projectName ? `归属项目：${projectName}` : "归属项目：待确认",
-    names.length ? `负责人：${names.join("、")}` : "负责人：待确认",
-    deadline ? `截止日期：${deadline}` : "截止日期：待确认",
-    `完成标准：完成上述事项及其明确交付物；如包含多个并列对象，应全部完成后再标记任务完成。`,
-  ];
-  if (sourceText && detail === raw && raw.length < 12) clauses.unshift(`原始要求：${sourceText}`);
-  return clauses.join("。") + "。";
+  const detail = stripStructuredSummaryMetadata(raw) || `围绕“${title}”完成相关资料、现场动作或交付物，并在完成后更新工作备忘`;
+  const completion = `完成标准：完成上述事项及其明确交付物；如包含多个并列对象，应全部完成后再标记任务完成`;
+  return `${detail.replace(/[。；;]+$/u, "")}。${completion}。`;
+}
+function normalizeProjectSpeech(value = "") {
+  return normalizeName(value).replace(/[鼓谷顾]/gu, "古");
+}
+function projectSpeechScore(project, normalizedInput) {
+  const names = [project?.name, project?.projectName, project?.projectNumber, project?.code, ...(project?.aliases || [])]
+    .map(normalizeProjectSpeech).filter((name) => name.length >= 2);
+  let score = 0;
+  for (const name of names) {
+    if (normalizedInput.includes(name)) score = Math.max(score, 100 + name.length);
+    else if (name.includes(normalizedInput) && normalizedInput.length >= 2) score = Math.max(score, 80 + normalizedInput.length);
+    else if (name.length >= 4) {
+      for (let length = Math.min(name.length - 1, 12); length >= 3; length -= 1) {
+        if (Array.from({ length: name.length - length + 1 }, (_, index) => name.slice(index, index + length)).some((fragment) => normalizedInput.includes(fragment))) {
+          score = Math.max(score, 60 + length);
+          break;
+        }
+      }
+    }
+  }
+  return score;
 }
 function matchProject(item, projects, glossary, sourceText = "") {
   const requested = normalizeName(item?.projectName || item?.projectId || "");
-  const source = normalizeName(sourceText);
-  const sourceMatches = !requested ? projects.filter((candidate) => [candidate.name, candidate.projectNumber, ...(candidate.aliases || [])].some((name) => normalizeName(name).length >= 2 && source.includes(normalizeName(name)))) : [];
-  if (!requested && sourceMatches.length === 1) return { project: sourceMatches[0], ambiguous: false };
-  if (!requested && sourceMatches.length > 1) return { project: sourceMatches[0], ambiguous: true };
+  const source = normalizeProjectSpeech(sourceText);
+  const sourceScored = projects.map((candidate) => ({ candidate, score: projectSpeechScore(candidate, source) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
+  const sourceBest = sourceScored[0]?.score || 0;
+  const sourceMatches = sourceScored.filter((entry) => entry.score === sourceBest && sourceBest >= 63).map((entry) => entry.candidate);
+  if (sourceMatches.length === 1) return { project: sourceMatches[0], ambiguous: false };
+  if (sourceMatches.length > 1) return { project: sourceMatches[0], ambiguous: true };
   const direct = projects.filter((candidate) => String(candidate.id) === String(item?.projectId || "") || [candidate.name, candidate.projectNumber, ...(candidate.aliases || [])].some((name) => normalizeName(name) === requested));
   if (direct.length === 1) return { project: direct[0], ambiguous: false };
   if (requested.length >= 2) {
