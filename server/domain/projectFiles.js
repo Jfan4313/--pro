@@ -130,19 +130,20 @@ export function listProjectFilesFromDisk({ rootPath, project, stages = [] }) {
     const files = ["待提交", "已归档"].flatMap((bucket) => {
       const bucketPath = path.join(stagePath, bucket);
       if (!fs.existsSync(bucketPath)) return [];
-      return fs.readdirSync(bucketPath, { withFileTypes: true })
-        .filter((item) => item.isFile())
-        .map((item) => {
-          const absolutePath = path.join(bucketPath, item.name);
+      const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((item) => {
+          const absolutePath = path.join(directory, item.name);
+          if (item.isDirectory()) return walk(absolutePath);
+          if (!item.isFile()) return [];
           const stat = fs.statSync(absolutePath);
-          return {
+          return [{
             name: item.name,
             bucket,
             size: stat.size,
             updatedAt: stat.mtime.toISOString(),
             relativePath: path.relative(rootPath, absolutePath),
-          };
+          }];
         });
+      return walk(bucketPath);
     });
 
     return {

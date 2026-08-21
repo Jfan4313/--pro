@@ -32,7 +32,16 @@ export type ArchiveFileIndex = {
   checksum: string;
   createdAt: string;
   bucket?: "待提交" | "已归档";
+  category?: string;
+  classificationSource?: string;
+  classificationConfidence?: number;
+  reviewStatus?: "confirmed" | "needs-review";
+  classificationEvidence?: string;
+  wasSkipped?: boolean;
 };
+
+export type ArchiveCleanupCandidate = { storageKey: string; targetStorageKey: string; name: string; size: number; checksum: string; modifiedAt?: string; status: "ready" | "verified" | "conflict" };
+export type ArchiveRebuildResult = { verified: ArchiveCleanupCandidate[]; copied: number; skipped: number; conflicts: number; failed: number };
 
 export type ArchiveFolderState = {
   status: "pending" | "ready" | "error";
@@ -53,8 +62,11 @@ export interface ArchiveStorageProvider {
   readonly id: ArchiveStorageProviderId;
   checkAvailability(): Promise<ArchiveAvailability>;
   ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
-  writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string }): Promise<ArchiveFileIndex>;
-  writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string }): Promise<ArchiveFileIndex>;
+  writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex>;
+  writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex>;
+  previewGeneratedArchiveFiles(): Promise<ArchiveCleanupCandidate[]>;
+  rebuildGeneratedArchiveFiles(candidates: ArchiveCleanupCandidate[]): Promise<ArchiveRebuildResult>;
+  deleteGeneratedArchiveFiles(candidates: ArchiveCleanupCandidate[]): Promise<{ deleted: number; failed: number }>;
   listFiles(input: { project: ArchiveProject; stages: ArchiveStage[]; projectFolder?: string }): Promise<ArchiveFileIndex[]>;
   readFile(storageKey: string): Promise<File>;
   getDownloadTarget(storageKey: string): Promise<{ url: string; revoke: () => void }>;
@@ -66,8 +78,11 @@ export abstract class CloudObjectStorageProvider implements ArchiveStorageProvid
   readonly id = "cloud-object-storage" as const;
   abstract checkAvailability(): Promise<ArchiveAvailability>;
   abstract ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
-  abstract writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string }): Promise<ArchiveFileIndex>;
-  abstract writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string }): Promise<ArchiveFileIndex>;
+  abstract writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex>;
+  abstract writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex>;
+  abstract previewGeneratedArchiveFiles(): Promise<ArchiveCleanupCandidate[]>;
+  abstract rebuildGeneratedArchiveFiles(candidates: ArchiveCleanupCandidate[]): Promise<ArchiveRebuildResult>;
+  abstract deleteGeneratedArchiveFiles(candidates: ArchiveCleanupCandidate[]): Promise<{ deleted: number; failed: number }>;
   abstract listFiles(input: { project: ArchiveProject; stages: ArchiveStage[]; projectFolder?: string }): Promise<ArchiveFileIndex[]>;
   abstract readFile(storageKey: string): Promise<File>;
   abstract getDownloadTarget(storageKey: string): Promise<{ url: string; revoke: () => void }>;
@@ -163,6 +178,43 @@ async function sha256(file: File) {
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function categoryParts(category = "其他资料") {
+  return String(category || "其他资料").split("/").map((part) => sanitizeArchiveSegment(part)).filter(Boolean);
+}
+
+function inferLegacyCategory(name: string) {
+  if (/技术标/i.test(name)) return "招投标资料/技术标";
+  if (/商务标/i.test(name)) return "招投标资料/商务标";
+  if (/澄清|答疑/i.test(name)) return "招投标资料/澄清答疑";
+  if (/招投标|招标|投标|标书/i.test(name)) return /报价/i.test(name) ? "招投标资料/报价" : "招投标资料/其他";
+  if (/合同|协议|权属|执照|身份证/i.test(name)) return "合同与权属";
+  if (/备案|报建|许可|批复|并网申请|接入申请/i.test(name)) return "备案与报建";
+  if (/设计|图纸|蓝图|方案|bom/i.test(name)) return "设计与技术";
+  if (/施工|开工|进场|日志|验收|竣工/i.test(name)) return "施工与验收";
+  return "其他资料";
+}
+
+function meaningfulFolderLabels(labels: string[], stage: ArchiveStage, category: string) {
+  const stageName = sanitizeArchiveSegment(String(stage.name || "").replace(/[①②③④⑤⑥⑦⑧⑨⑩]/g, "")).toLocaleLowerCase();
+  const categories = categoryParts(category).map((item) => item.toLocaleLowerCase());
+  return labels.map((part) => sanitizeArchiveSegment(part)).filter((part) => {
+    const normalized = part.toLocaleLowerCase();
+    if (!normalized || normalized === stageName || categories.some((categoryPart) => normalized.includes(categoryPart) || categoryPart.includes(normalized))) return false;
+    if (/^(0?[1-9][-_])/.test(normalized) || /项目立项|现场勘察|前期收资|初步设计|商务沟通|签订合同|项目备案|深化设计|项目交底|施工资料|施工进场|开工资料|验收并网|竣工资料/.test(normalized)) return false;
+    if (category.startsWith("招投标资料") && /招投标|招标|投标|标书|技术标|商务标|澄清|答疑/.test(normalized)) return false;
+    return true;
+  });
+}
+
+async function findDuplicate(directory: any, checksum: string) {
+  for await (const entry of directory.values()) {
+    if (entry.kind !== "file") continue;
+    const existing = await entry.getFile();
+    if (existing.size && await sha256(existing) === checksum) return existing;
+  }
+  return null;
+}
+
 export class LocalFolderStorageProvider implements ArchiveStorageProvider {
   readonly id = "local-folder" as const;
 
@@ -200,18 +252,28 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     return { projectFolder, generatedThroughStageId: stages.at(-1)?.id };
   }
 
-  async writeFile({ project, stage, file, fileType, autoRename = true, projectFolder: fixedProjectFolder }: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string }) {
+  async writeFile({ project, stage, file, fileType, autoRename = true, projectFolder: fixedProjectFolder, sourceRelativePath, folderLabels, preserveFolders = false, classificationSource, classificationConfidence, classificationEvidence }: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex> {
     const { projectFolder } = await this.ensureProjectStructure(project, [stage], fixedProjectFolder);
-    const archivedDirectory = await getDirectoryByParts(this.rootHandle, [projectFolder, getArchiveStageFolder(stage), "已归档"]);
+    const sourceParts = preserveFolders ? String(sourceRelativePath || "").split("/").filter(Boolean) : [];
+    const localFolderLabels = folderLabels || (sourceParts.length > 1 ? sourceParts.slice(1, -1) : []);
+    const category = fileType || "其他资料";
+    const sourceFolders = preserveFolders ? meaningfulFolderLabels(localFolderLabels, stage, category) : [];
+    const archiveParts = [projectFolder, getArchiveStageFolder(stage), "已归档", ...categoryParts(category), ...sourceFolders];
+    const archivedDirectory = await getDirectoryByParts(this.rootHandle, archiveParts, true);
     const { base, ext } = splitFilename(file.name || "资料");
-    const stem = [getArchiveProjectCode(project), getArchiveStageCode(stage), sanitizeArchiveSegment(fileType || base || "资料"), sanitizeArchiveSegment(base || "资料")].join("_");
+    const stem = preserveFolders ? sanitizeArchiveSegment(base || "资料") : [getArchiveProjectCode(project), getArchiveStageCode(stage), sanitizeArchiveSegment(fileType || base || "资料"), sanitizeArchiveSegment(base || "资料")].join("_");
+    const checksum = await sha256(file);
+    const duplicate = await findDuplicate(archivedDirectory, checksum);
+    if (duplicate) {
+      const match = duplicate.name.match(/_V(\d+)_\d{8}/i);
+      return { storageProvider: this.id, storageKey: [...archiveParts, duplicate.name].join("/"), projectId: project.id, stageId: stage.id, originalName: file.name, storedName: duplicate.name, version: `V${match?.[1] || "1"}`, size: duplicate.size, contentType: duplicate.type || file.type || "application/octet-stream", checksum, createdAt: new Date(duplicate.lastModified).toISOString(), bucket: "已归档", category, classificationSource, classificationConfidence, classificationEvidence, reviewStatus: "confirmed", wasSkipped: true };
+    }
     const versionNumber = await nextVersion(archivedDirectory, stem, ext);
     const version = `V${versionNumber}`;
     const storedName = autoRename ? `${stem}_${version}_${formatDateStamp()}${ext}` : file.name;
     if (!autoRename && await fileExists(archivedDirectory, storedName)) throw Object.assign(new Error("archive_file_exists"), { code: "archive_file_exists" });
-    const checksum = await sha256(file);
     await writeBlob(archivedDirectory, storedName, file);
-    const storageKey = [projectFolder, getArchiveStageFolder(stage), "已归档", storedName].join("/");
+    const storageKey = [...archiveParts, storedName].join("/");
     return {
       storageProvider: this.id,
       storageKey,
@@ -225,12 +287,19 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
       checksum,
       createdAt: new Date().toISOString(),
       bucket: "已归档" as const,
+      category,
+      classificationSource,
+      classificationConfidence,
+      classificationEvidence,
+      reviewStatus: "confirmed",
     };
   }
 
-  async writeUncertainFile({ project, file, fileType, projectFolder: fixedProjectFolder }: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string }) {
+  async writeUncertainFile({ project, file, fileType, projectFolder: fixedProjectFolder, folderLabels = [] }: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex> {
     const { projectFolder } = await this.ensureProjectStructure(project, [], fixedProjectFolder);
-    const directory = await getDirectoryByParts(this.rootHandle, [projectFolder, "未确定"]);
+    const safeFolders = folderLabels.map((part) => sanitizeArchiveSegment(part)).filter(Boolean);
+    const targetParts = [projectFolder, "未确定", ...safeFolders];
+    const directory = await getDirectoryByParts(this.rootHandle, targetParts, true);
     const { base, ext } = splitFilename(file.name || "资料");
     const stem = [getArchiveProjectCode(project), "未确定", sanitizeArchiveSegment(fileType || base || "资料"), sanitizeArchiveSegment(base || "资料")].join("_");
     const versionNumber = await nextVersion(directory, stem, ext);
@@ -238,7 +307,81 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     const storedName = `${stem}_${version}_${formatDateStamp()}${ext}`;
     const checksum = await sha256(file);
     await writeBlob(directory, storedName, file);
-    return { storageProvider: this.id, storageKey: [projectFolder, "未确定", storedName].join("/"), projectId: project.id, stageId: "unconfirmed", originalName: file.name, storedName, version, size: file.size, contentType: file.type || "application/octet-stream", checksum, createdAt: new Date().toISOString(), bucket: "待提交" as const };
+    return { storageProvider: this.id, storageKey: [...targetParts, storedName].join("/"), projectId: project.id, stageId: "unconfirmed", originalName: file.name, storedName, version, size: file.size, contentType: file.type || "application/octet-stream", checksum, createdAt: new Date().toISOString(), bucket: "待提交" as const, category: fileType || "待复核", classificationSource: "none", classificationConfidence: 0, reviewStatus: "needs-review" };
+  }
+
+  async previewGeneratedArchiveFiles() {
+    const availability = await this.checkAvailability();
+    if (!availability.available) throw Object.assign(new Error("archive_permission_required"), { code: "archive_permission_required" });
+    const candidates: ArchiveCleanupCandidate[] = [];
+    const generatedName = /_V\d+_\d{8}(?:\.[^.]+)?$/i;
+    const walk = async (directory: any, parts: string[]) => {
+      for await (const entry of directory.values()) {
+        if (entry.kind === "directory") await walk(entry, [...parts, entry.name]);
+        else if (entry.kind === "file" && generatedName.test(entry.name) && parts.at(-1) === "已归档") {
+          const file = await entry.getFile().catch(() => null);
+          if (!file) continue;
+          const category = categoryParts(inferLegacyCategory(entry.name));
+          candidates.push({ storageKey: [...parts, entry.name].join("/"), targetStorageKey: [...parts, ...category, entry.name].join("/"), name: entry.name, size: file.size, checksum: await sha256(file), modifiedAt: new Date(file.lastModified).toISOString(), status: "ready" });
+        }
+      }
+    };
+    for await (const entry of this.rootHandle.values()) {
+      if (entry.kind !== "directory") continue;
+      await walk(entry, [entry.name]);
+    }
+    return candidates;
+  }
+
+  async rebuildGeneratedArchiveFiles(candidates: ArchiveCleanupCandidate[]) {
+    const verified: ArchiveCleanupCandidate[] = [];
+    let copied = 0;
+    let skipped = 0;
+    let conflicts = 0;
+    let failed = 0;
+    for (const candidate of candidates) {
+      try {
+        const source = await this.readFile(candidate.storageKey);
+        if (await sha256(source) !== candidate.checksum) { conflicts += 1; continue; }
+        const targetParts = candidate.targetStorageKey.split("/").filter(Boolean);
+        const targetName = targetParts.pop();
+        if (!targetName || targetParts.some((part) => part === "..")) { failed += 1; continue; }
+        const targetDirectory = await getDirectoryByParts(this.rootHandle, targetParts, true);
+        let targetFile: File | null = null;
+        try { targetFile = await (await targetDirectory.getFileHandle(targetName)).getFile(); } catch (error: any) { if (error?.name !== "NotFoundError") throw error; }
+        if (targetFile) {
+          if (await sha256(targetFile) !== candidate.checksum) { conflicts += 1; continue; }
+          skipped += 1;
+        } else {
+          await writeBlob(targetDirectory, targetName, source);
+          targetFile = await (await targetDirectory.getFileHandle(targetName)).getFile();
+          if (targetFile.size !== source.size || await sha256(targetFile) !== candidate.checksum) { conflicts += 1; continue; }
+          copied += 1;
+        }
+        verified.push({ ...candidate, status: "verified" });
+      } catch { failed += 1; }
+    }
+    return { verified, copied, skipped, conflicts, failed };
+  }
+
+  async deleteGeneratedArchiveFiles(candidates: ArchiveCleanupCandidate[]) {
+    const generatedName = /_V\d+_\d{8}(?:\.[^.]+)?$/i;
+    let deleted = 0;
+    let failed = 0;
+    for (const candidate of candidates.filter((item) => item.status === "verified")) {
+      const parts = String(candidate.storageKey).split("/").filter(Boolean);
+      const name = parts.at(-1) || "";
+      if (parts.length < 3 || !generatedName.test(name) || parts.at(-2) !== "已归档") { failed += 1; continue; }
+      try {
+        const source = await this.readFile(candidate.storageKey);
+        const target = await this.readFile(candidate.targetStorageKey);
+        if (await sha256(source) !== candidate.checksum || await sha256(target) !== candidate.checksum) { failed += 1; continue; }
+        const directory = await getDirectoryByParts(this.rootHandle, parts.slice(0, -1));
+        await directory.removeEntry(name);
+        deleted += 1;
+      } catch { failed += 1; }
+    }
+    return { deleted, failed };
   }
 
   async listFiles({ project, stages, projectFolder: fixedProjectFolder }: { project: ArchiveProject; stages: ArchiveStage[]; projectFolder?: string }) {
@@ -255,12 +398,14 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
           if (error?.name === "NotFoundError") continue;
           throw error;
         }
-        for await (const entry of directory.values()) {
-          if (entry.kind !== "file") continue;
-          const file = await entry.getFile();
+        const walk = async (current: any, pathParts: string[]) => {
+          for await (const entry of current.values()) {
+            if (entry.kind === "directory") { await walk(entry, [...pathParts, entry.name]); continue; }
+            if (entry.kind !== "file") continue;
+            const file = await entry.getFile();
           results.push({
             storageProvider: this.id,
-            storageKey: [projectFolder, getArchiveStageFolder(stage), bucket, entry.name].join("/"),
+            storageKey: [...pathParts, entry.name].join("/"),
             projectId: project.id,
             stageId: stage.id,
             originalName: entry.name,
@@ -268,11 +413,18 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
             version: entry.name.match(/_(V\d+)_\d{8}(?:\.[^.]+)?$/)?.[1] || "",
             size: file.size,
             contentType: file.type || "application/octet-stream",
-            checksum: "",
+            checksum: await sha256(file),
             createdAt: new Date(file.lastModified).toISOString(),
             bucket,
+            category: pathParts.slice(3).join("/") || "其他资料",
+            classificationSource: "folder",
+            classificationConfidence: 0.9,
+            classificationEvidence: pathParts.slice(3).join("/") || getArchiveStageFolder(stage),
+            reviewStatus: "confirmed",
           });
-        }
+          }
+        };
+        await walk(directory, [projectFolder, getArchiveStageFolder(stage), bucket]);
       }
     }
     return results;

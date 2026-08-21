@@ -34,8 +34,12 @@ export type ProjectFileManifest = {
   projectId: string;
   stageId: string;
   originalName: string;
-  relativePath: string;
-  storedName?: string;
+  logicalPath: string;
+  category: string;
+  classificationSource: "folder" | "filename" | "content" | "ai" | "manual" | "none";
+  classificationConfidence: number;
+  reviewStatus: "confirmed" | "needs-review";
+  classificationEvidence: string;
   size: number;
   contentType: string;
   checksum?: string | null;
@@ -250,14 +254,13 @@ export const apiClient = {
       storedName: string;
       version: string;
       relativePath: string;
-      absolutePath: string;
       uploadedAt: string;
     }>(`/api/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(stageId)}/upload`, {
       method: "POST",
       body,
     });
   },
-  publishProjectFileManifests(items: Array<Partial<ProjectFileManifest> & { projectId: string; stageId: string; originalName: string; relativePath: string; sourceClientId?: string }>) {
+  publishProjectFileManifests(items: Array<Partial<ProjectFileManifest> & { projectId: string; stageId: string; originalName: string; logicalPath: string; sourceClientId?: string }>) {
     return request<{ manifests: ProjectFileManifest[] }>("/api/project-file-manifests", { method: "POST", body: { items } });
   },
   listProjectFileManifests(projectId: string) {
@@ -321,8 +324,8 @@ export const apiClient = {
       }>;
     }>("/api/intake/analyze", { method: "POST", body: payload });
   },
-  analyzeProjectArchive(payload: { projects: Array<{ projectKey: string; projectName: string; localStageId: string; localConfidence: number; stageSummaries: unknown[]; files: Array<{ name: string; relativePath: string; extension: string; pathStageName?: string }> }> }) {
-    return request<{ aiApplied: boolean; warning?: string; projects: Array<{ projectKey: string; currentStageId: string; confidence: number; reason: string }> }>("/api/project-archive/analyze", { method: "POST", body: payload });
+  analyzeProjectArchive(payload: { projects: Array<{ projectKey: string; projectName: string; localStageId: string; localConfidence: number; stageSummaries: unknown[]; files: Array<{ id: string; name: string; folderLabels: string[]; extension: string; localStageId?: string; localCategory: string; classificationSource: string; needsReview: boolean }> }> }) {
+    return request<{ aiApplied: boolean; warning?: string; projects: Array<{ projectKey: string; currentStageId: string; confidence: number; reason: string; files: Array<{ id: string; stageId: string; category: string; confidence: number; reason: string }> }> }>("/api/project-archive/analyze", { method: "POST", body: payload });
   },
   transcribeAudio(audioId: string, browserTranscript = "") {
     return request<SpeechTranscriptionResult>("/api/intake/transcribe", { method: "POST", body: { audioId, browserTranscript } });

@@ -25,6 +25,12 @@ export type ScannedFile = {
   pathStageKey?: string;
   pathStageName?: string;
   pathStageEvidence?: string;
+  folderLabels: string[];
+  classificationSource: "folder" | "filename" | "content" | "none";
+  folderEvidence?: string;
+  contentConflict?: string;
+  needsReview: boolean;
+  logicalPath?: string;
   error?: string;
 };
 
@@ -106,25 +112,38 @@ function getPathSegments(relativePath: string) {
   return relativePath.split("/").filter(Boolean);
 }
 
-function detectPathStage(relativePath: string) {
-  const segments = getPathSegments(relativePath).slice(1, -1);
-  const rules: Array<{ stage: typeof STAGES[number]; terms: RegExp }> = [
+const DIRECTORY_STAGE_RULES: Array<{ stage: typeof STAGES[number]; terms: RegExp }> = [
+    // Specific business folders must be checked before generic construction
+    // wording. A tender can contain construction dates without becoming a
+    // construction-stage document.
+    { stage: STAGES[2], terms: /招投标|招标|投标|标书|技术标|商务标|报价|澄清答疑|商务|预算|成本|收益|加分项|方案汇报/i },
+    { stage: STAGES[4], terms: /项目备案|备案|报建|规划许可|接入系统|接入批复|并网申请|接入申请|供电局|许可|批复/i },
     { stage: STAGES[8], terms: /验收|并网验收|并网供电|竣工|运维|移交|运行/i },
     { stage: STAGES[6], terms: /项目交底|交底|安全教育|安全技术|人员资格|特种作业|危险源/i },
     { stage: STAGES[7], terms: /施工进场|进场|开工|施工|材料.*设备|设备.*材料|现场照片|作业指导|专项施工方案|分包方|开工资料|施工方案|日程安排/i },
     { stage: STAGES[5], terms: /深化设计|施工图|蓝图|设计变更|物料.?bom|图纸|设计资料|光伏图纸/i },
-    { stage: STAGES[4], terms: /项目备案|备案|报建|规划许可|接入系统|接入批复|并网申请|供电局/i },
-    { stage: STAGES[3], terms: /合同|协议|购售电|权属|营业执照|身份证|产权/i },
-    { stage: STAGES[2], terms: /商务|投标|招投标|报价|预算|成本|收益|加分项|方案汇报/i },
+    { stage: STAGES[3], terms: /合同|协议|签约|补充协议|购售电|权属|营业执照|身份证|产权/i },
     { stage: STAGES[1], terms: /初步设计|初设|pvsyst|发电分析|设备清单|组件|逆变器|可研/i },
     { stage: STAGES[0], terms: /项目立项|现场勘察|前期收资|勘察|航拍|测量|屋顶结构|电费详情/i },
-  ];
-  for (const segment of segments) {
+];
+
+export function getSanitizedFolderLabels(relativePath: string) {
+  return getPathSegments(relativePath).slice(1, -1).map((segment) => segment.replace(/[\\/:*?"<>|]/g, "_").trim()).filter(Boolean);
+}
+
+export function detectPathStage(relativePath: string) {
+  const segments = getSanitizedFolderLabels(relativePath);
+  const matches: Array<{ stageKey: string; stageName: string; evidence: string; index: number }> = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
     const normalized = normalizeText(segment);
-    const matched = rules.find((rule) => rule.terms.test(normalized));
-    if (matched) return { stageKey: matched.stage.id, stageName: matched.stage.name, evidence: segment };
+    const matched = DIRECTORY_STAGE_RULES.find((rule) => rule.terms.test(normalized));
+    if (matched) matches.push({ stageKey: matched.stage.id, stageName: matched.stage.name, evidence: segment, index });
   }
-  return undefined;
+  const winner = matches.at(-1);
+  if (!winner) return undefined;
+  const parentConflicts = matches.filter((item) => item.stageKey !== winner.stageKey).map((item) => `${item.evidence}→${item.stageName}`);
+  return { ...winner, parentConflicts };
 }
 
 function getProjectKey(relativePath: string) {
@@ -193,8 +212,8 @@ function stageTerms(stage: typeof STAGES[number]) {
 const stageTermCache = new Map<string, string[]>();
 const scanHandleRegistry = new Map<string, Map<string, any>>();
 
-function classifyFile(name: string, relativePath: string, content = "") {
-  const haystack = normalizeText(`${name} ${relativePath} ${content}`);
+function classifySignal(value: string) {
+  const haystack = normalizeText(value);
   const scored = STAGES.map((stage) => {
     const terms = stageTermCache.get(stage.id) || stageTerms(stage);
     stageTermCache.set(stage.id, terms);
@@ -209,8 +228,16 @@ function classifyFile(name: string, relativePath: string, content = "") {
   return { stageId: top.stage.id, stageName: top.stage.name, confidence, evidence: top.evidence, needsReview: confidence < 0.65 || top.score === second?.score };
 }
 
-function classifyCategory(name: string, content: string) {
-  const value = normalizeText(`${name} ${content}`);
+export function classifyArchiveCategory(name: string, content = "", folderLabels: string[] = []) {
+  const folderValue = normalizeText(folderLabels.join(" "));
+  const value = normalizeText(`${folderValue} ${name} ${content}`);
+  if (/招投标|招标|投标|标书|技术标|商务标|澄清答疑/.test(value)) {
+    if (/技术标/.test(value)) return "招投标资料/技术标";
+    if (/商务标/.test(value)) return "招投标资料/商务标";
+    if (/澄清|答疑/.test(value)) return "招投标资料/澄清答疑";
+    if (/报价|报价单|清单价/.test(value)) return "招投标资料/报价";
+    return "招投标资料/其他";
+  }
   if (/合同|协议|盖章|营业执照|身份证|产权|租赁|发票|付款/.test(value)) return "合同与权属";
   if (/设计|图纸|蓝图|方案|pvsyst|建模|bom|设备清单/.test(value)) return "设计与技术";
   if (/勘察|航拍|现场|照片|录像|测量/.test(value)) return "现场勘察";
@@ -287,33 +314,41 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
     options.onProgress?.({ current: index + 1, total: allEntries.length, name: entry.relativePath });
     let file: File;
     try { file = await entry.handle.getFile(); } catch (error: any) {
-      files.push({ id: fileId(entry.relativePath, 0, ""), name: entry.relativePath.split("/").pop() || entry.relativePath, relativePath: entry.relativePath, extension: extensionOf(entry.relativePath), size: 0, modifiedAt: "", status: "unreadable", category: "待复核", confidence: 0, evidence: [], error: error?.message || "无法读取文件" });
+      files.push({ id: fileId(entry.relativePath, 0, ""), name: entry.relativePath.split("/").pop() || entry.relativePath, relativePath: entry.relativePath, extension: extensionOf(entry.relativePath), size: 0, modifiedAt: "", status: "unreadable", category: "待复核", confidence: 0, evidence: [], folderLabels: getSanitizedFolderLabels(entry.relativePath), classificationSource: "none", needsReview: true, error: error?.message || "无法读取文件" });
       continue;
     }
     const extension = extensionOf(file.name);
     const base = { id: fileId(entry.relativePath, file.size, new Date(file.lastModified).toISOString()), name: file.name, relativePath: entry.relativePath, extension, size: file.size, modifiedAt: new Date(file.lastModified).toISOString() };
-    if (file.size > maxFileSize) { files.push({ ...base, status: "needs-review", category: "超大文件", confidence: 0, evidence: [`超过 ${(maxFileSize / 1024 / 1024).toFixed(0)} MB 限制`], error: "文件过大，未读取内容" }); continue; }
+    const folderLabels = getSanitizedFolderLabels(entry.relativePath);
+    const pathStage = detectPathStage(entry.relativePath);
+    if (file.size > maxFileSize) {
+      files.push({ ...base, status: pathStage ? "classified" : "needs-review", category: classifyArchiveCategory(file.name, "", folderLabels), stageId: pathStage?.stageKey, stageName: pathStage?.stageName, pathStageKey: pathStage?.stageKey, pathStageName: pathStage?.stageName, pathStageEvidence: pathStage?.evidence, confidence: pathStage ? 0.96 : 0, evidence: pathStage ? [`目录：${pathStage.evidence}`] : [`超过 ${(maxFileSize / 1024 / 1024).toFixed(0)} MB 限制`], folderLabels, classificationSource: pathStage ? "folder" : "none", folderEvidence: pathStage?.evidence, contentConflict: pathStage?.parentConflicts.length ? `上层目录冲突：${pathStage.parentConflicts.join("、")}` : undefined, needsReview: !pathStage || Boolean(pathStage.parentConflicts.length), error: "文件过大，未读取内容" });
+      continue;
+    }
     let content = "";
     let sheetNames: string[] | undefined;
     try { const extracted = await extractContent(file, extension, maxTextLength); content = extracted.text || ""; sheetNames = extracted.sheetNames; } catch (error: any) {
-      files.push({ ...base, status: "needs-review", category: "待复核", confidence: 0, evidence: [], error: error?.message || "内容解析失败" });
+      files.push({ ...base, status: pathStage ? "classified" : "needs-review", category: classifyArchiveCategory(file.name, "", folderLabels), stageId: pathStage?.stageKey, stageName: pathStage?.stageName, pathStageKey: pathStage?.stageKey, pathStageName: pathStage?.stageName, pathStageEvidence: pathStage?.evidence, confidence: pathStage ? 0.96 : 0, evidence: pathStage ? [`目录：${pathStage.evidence}`] : [], folderLabels, classificationSource: pathStage ? "folder" : "none", folderEvidence: pathStage?.evidence, contentConflict: pathStage?.parentConflicts.length ? `上层目录冲突：${pathStage.parentConflicts.join("、")}` : undefined, needsReview: !pathStage || Boolean(pathStage.parentConflicts.length), error: error?.message || "内容解析失败" });
       continue;
     }
-    const stage = classifyFile(file.name, entry.relativePath, content);
+    const filenameStage = classifySignal(file.name);
+    const contentStage = classifySignal(content);
+    const fallbackStage = filenameStage.stageId ? filenameStage : contentStage;
+    const chosenStage = pathStage ? { stageId: pathStage.stageKey, stageName: pathStage.stageName, confidence: 0.96, evidence: [`目录：${pathStage.evidence}`], needsReview: false } : fallbackStage;
+    const conflicts: string[] = [];
+    if (pathStage?.parentConflicts.length) conflicts.push(`上层目录冲突：${pathStage.parentConflicts.join("、")}`);
+    if (pathStage && filenameStage.stageId && filenameStage.stageId !== pathStage.stageKey) conflicts.push(`文件名更接近“${filenameStage.stageName}”`);
+    if (pathStage && contentStage.stageId && contentStage.stageId !== pathStage.stageKey) conflicts.push(`正文更接近“${contentStage.stageName}”`);
+    const classificationSource = pathStage ? "folder" : filenameStage.stageId ? "filename" : contentStage.stageId ? "content" : "none";
+    const needsReview = !chosenStage.stageId || chosenStage.needsReview || Boolean(pathStage?.parentConflicts.length);
     const hash = await sha256(file).catch(() => undefined);
-    files.push({ ...base, hash, status: SUPPORTED_EXTENSIONS.has(extension) ? (stage.needsReview ? "needs-review" : "classified") : "needs-review", category: classifyCategory(file.name, content), stageId: stage.stageId, stageName: stage.stageName, confidence: stage.confidence, evidence: stage.evidence, contentSummary: content ? truncate(content.replace(/\s+/g, " "), 240) : undefined, sheetNames, suggestedPath: stage.stageId ? `${stage.stageId}/待提交/${file.name}` : undefined });
+    files.push({ ...base, hash, status: SUPPORTED_EXTENSIONS.has(extension) ? (needsReview ? "needs-review" : "classified") : (pathStage ? "classified" : "needs-review"), category: classifyArchiveCategory(file.name, content, folderLabels), stageId: chosenStage.stageId, stageName: chosenStage.stageName, confidence: chosenStage.confidence, evidence: chosenStage.evidence, contentSummary: content ? truncate(content.replace(/\s+/g, " "), 240) : undefined, sheetNames, suggestedPath: chosenStage.stageId ? `${chosenStage.stageId}/已归档/${file.name}` : undefined, pathStageKey: pathStage?.stageKey, pathStageName: pathStage?.stageName, pathStageEvidence: pathStage?.evidence, folderLabels, classificationSource, folderEvidence: pathStage?.evidence, contentConflict: conflicts.length ? conflicts.join("；") : undefined, needsReview });
   }
   const projectFileGroups = new Map<string, ScannedFile[]>();
   for (const file of files) {
     const projectKey = getProjectKey(file.relativePath);
-    const pathStage = detectPathStage(file.relativePath);
     file.projectKey = projectKey;
     file.projectName = cleanProjectName(projectKey);
-    if (pathStage) {
-      file.pathStageKey = pathStage.stageKey;
-      file.pathStageName = pathStage.stageName;
-      file.pathStageEvidence = pathStage.evidence;
-    }
     const group = projectFileGroups.get(projectKey) || [];
     group.push(file);
     projectFileGroups.set(projectKey, group);
@@ -325,7 +360,7 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
   const byName = new Map<string, ScannedFile[]>();
   files.forEach((file) => { const key = normalizeText(file.name); const list = byName.get(key) || []; list.push(file); byName.set(key, list); });
   for (const group of byName.values()) if (group.length > 1 && new Set(group.map((file) => file.hash).filter(Boolean)).size > 1) issues.push({ type: "version-conflict", title: "同名文件内容不同", detail: group.map((file) => `${file.relativePath}（${file.modifiedAt.slice(0, 10)}）`).join("、"), fileIds: group.map((file) => file.id), confidence: 0.86 });
-  files.filter((file) => file.stageId && file.confidence >= 0.7).forEach((file) => { const expected = STAGES.find((stage) => stage.id === file.stageId)?.files || []; const pathStage = STAGES.find((stage) => normalizeText(file.relativePath).includes(normalizeText(stage.name))); if (pathStage && pathStage.id !== file.stageId) issues.push({ type: "misplaced", title: "目录阶段与内容判断不一致", detail: `${file.relativePath} 的内容更接近“${file.stageName}”，但目录名称更接近“${pathStage.name}”`, fileIds: [file.id], confidence: 0.74 }); void expected; });
+  files.filter((file) => file.contentConflict).forEach((file) => issues.push({ type: "misplaced", title: "目录与其他证据不一致", detail: `${file.relativePath} 保持归入“${file.stageName || "未确定"}”：${file.contentConflict}`, fileIds: [file.id], confidence: 0.9 }));
   const stageCounts = new Map<string, number>();
   files.forEach((file) => file.stageId && stageCounts.set(file.stageId, (stageCounts.get(file.stageId) || 0) + Math.max(file.confidence, 0.1)));
   const topStage = [...stageCounts.entries()].sort((a, b) => b[1] - a[1])[0];

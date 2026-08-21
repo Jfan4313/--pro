@@ -84,6 +84,12 @@ CREATE TABLE IF NOT EXISTS project_file_manifests (
   stageId TEXT NOT NULL,
   originalName TEXT NOT NULL,
   relativePath TEXT NOT NULL,
+  logicalPath TEXT,
+  category TEXT,
+  classificationSource TEXT,
+  classificationConfidence REAL,
+  reviewStatus TEXT,
+  classificationEvidence TEXT,
   storedName TEXT,
   storagePath TEXT,
   size INTEGER NOT NULL DEFAULT 0,
@@ -142,6 +148,12 @@ ensureColumn("users", "companyId", "TEXT");
 ensureColumn("project_file_uploads", "targetPath", "TEXT");
 ensureColumn("project_file_uploads", "storedName", "TEXT");
 ensureColumn("project_file_manifests", "storagePath", "TEXT");
+ensureColumn("project_file_manifests", "logicalPath", "TEXT");
+ensureColumn("project_file_manifests", "category", "TEXT");
+ensureColumn("project_file_manifests", "classificationSource", "TEXT");
+ensureColumn("project_file_manifests", "classificationConfidence", "REAL");
+ensureColumn("project_file_manifests", "reviewStatus", "TEXT");
+ensureColumn("project_file_manifests", "classificationEvidence", "TEXT");
 
 db.exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);

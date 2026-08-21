@@ -8,7 +8,7 @@ import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
-import { ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
+import { ArchiveCleanupCandidate, ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 import { downloadScanReport, getScannedFileHandle, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
@@ -31,8 +31,13 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [scanReport, setScanReport] = React.useState<ProjectScanReport | null>(null);
   const [selectedImportProjects, setSelectedImportProjects] = React.useState<string[]>([]);
   const [projectNameOverrides, setProjectNameOverrides] = React.useState<Record<string, string>>({});
+  const [fileClassificationOverrides, setFileClassificationOverrides] = React.useState<Record<string, { stageId: string; category: string }>>({});
   const [importingProjects, setImportingProjects] = React.useState(false);
   const [aiArchiveReviewing, setAiArchiveReviewing] = React.useState(false);
+  const [cleanupCandidates, setCleanupCandidates] = React.useState<ArchiveCleanupCandidate[]>([]);
+  const [cleanupScanning, setCleanupScanning] = React.useState(false);
+  const [cleanupRebuilding, setCleanupRebuilding] = React.useState(false);
+  const [cleanupDeleting, setCleanupDeleting] = React.useState(false);
   const [scanRunning, setScanRunning] = React.useState(false);
   const [scanProgress, setScanProgress] = React.useState({ current: 0, total: 0, name: "" });
   const [scanFilter, setScanFilter] = React.useState<"all" | "review" | "issues">("all");
@@ -216,6 +221,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       setScanReport(report);
       setSelectedImportProjects([]);
       setProjectNameOverrides({});
+      setFileClassificationOverrides({});
       setScanFilter("all");
       window.dispatchEvent(new CustomEvent("show-toast", { detail: `扫描完成，共识别 ${report.fileCount} 个文件` }));
     } catch (error: any) {
@@ -239,12 +245,16 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     try {
       const existingNames = new Set(projects.map((project: any) => String(project.name || "").trim().toLocaleLowerCase()));
       const selected = scanReport.projects.filter((project) => selectedImportProjects.includes(project.projectKey));
-      const aiReview: { aiApplied: boolean; projects: Array<{ projectKey: string; currentStageId: string; confidence: number; reason: string }> } = await apiClient.analyzeProjectArchive({ projects: selected.map((project) => {
+      type AiFileDecision = { id: string; stageId: string; category: string; confidence: number; reason: string };
+      type AiProjectDecision = { projectKey: string; currentStageId: string; confidence: number; reason: string; files: AiFileDecision[] };
+      const aiReview: { aiApplied: boolean; projects: AiProjectDecision[] } = await apiClient.analyzeProjectArchive({ projects: selected.map((project) => {
         const projectName = projectNameOverrides[project.projectKey]?.trim() || project.projectName;
         const stageIds = project.stageSummaries.map((stage) => stage.stageKey).filter((stageId) => STAGES.some((stage) => stage.id === stageId));
-        return { projectKey: project.projectKey, projectName, localStageId: stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id, localConfidence: project.confidence, stageSummaries: project.stageSummaries, files: scanReport.files.filter((file) => file.projectKey === project.projectKey).slice(0, 400).map((file) => ({ name: file.name, relativePath: file.relativePath, extension: file.extension, pathStageName: file.pathStageName })) };
-      }) }).catch(() => ({ aiApplied: false, projects: [] }));
+        return { projectKey: project.projectKey, projectName, localStageId: stageIds.length ? stageIds.sort((a, b) => STAGES.findIndex((stage) => stage.id === a) - STAGES.findIndex((stage) => stage.id === b)).at(-1)! : STAGES[0].id, localConfidence: project.confidence, stageSummaries: project.stageSummaries, files: scanReport.files.filter((file) => file.projectKey === project.projectKey).slice(0, 400).map((file) => { const override = fileClassificationOverrides[file.id]; return { id: file.id, name: file.name, folderLabels: file.folderLabels, extension: file.extension, localStageId: override?.stageId || file.stageId, localCategory: override?.category || file.category, classificationSource: override ? "manual" : file.classificationSource, needsReview: override ? false : file.needsReview }; }) };
+      }) }).catch(() => ({ aiApplied: false, projects: [] as AiProjectDecision[] }));
       const aiDecisions = new Map(aiReview.projects.map((decision) => [decision.projectKey, decision]));
+      const aiFileDecisions = new Map<string, AiFileDecision>();
+      for (const decision of aiReview.projects) for (const file of decision.files || []) aiFileDecisions.set(`${decision.projectKey}\u0000${file.id}`, file);
       setAiArchiveReviewing(false);
       const imported: any[] = [];
       const renamedExisting: any[] = [];
@@ -298,11 +308,16 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
             if (!handle || file.status === "unreadable") { archiveReviewCount += 1; continue; }
             try {
               const sourceFile = await handle.getFile();
-              const uncertain = file.status !== "classified" || (!file.pathStageKey && (!file.stageId || file.confidence < 0.65));
-              if (uncertain) { await provider.writeUncertainFile({ project, file: sourceFile, fileType: file.category, projectFolder: structure.projectFolder }); uncertainArchivedCount += 1; }
+              const aiFile = aiFileDecisions.get(`${file.projectKey}\u0000${file.id}`);
+              const manualOverride = fileClassificationOverrides[file.id];
+              const canUseAi = !manualOverride && file.classificationSource !== "folder" && file.needsReview && aiFile && aiFile.confidence >= 0.65;
+              const finalStageId = manualOverride?.stageId || file.pathStageKey || (canUseAi ? aiFile.stageId : file.stageId);
+              const finalCategory = manualOverride?.category || (canUseAi ? aiFile.category : file.category);
+              const uncertain = !finalStageId || (!manualOverride && file.needsReview && !canUseAi && file.classificationSource !== "folder");
+              if (uncertain) { await provider.writeUncertainFile({ project, file: sourceFile, fileType: finalCategory, projectFolder: structure.projectFolder, folderLabels: file.folderLabels }); uncertainArchivedCount += 1; }
               else {
-                const targetStage = STAGES.find((stage) => stage.id === (file.pathStageKey || file.stageId)) || STAGES[currentIndex];
-                await provider.writeFile({ project, stage: targetStage, file: sourceFile, fileType: file.category, autoRename: true, projectFolder: structure.projectFolder });
+                const targetStage = STAGES.find((stage) => stage.id === finalStageId) || STAGES[currentIndex];
+                await provider.writeFile({ project, stage: targetStage, file: sourceFile, fileType: finalCategory, autoRename: true, projectFolder: structure.projectFolder, sourceRelativePath: file.relativePath, folderLabels: file.folderLabels, preserveFolders: true, classificationSource: manualOverride ? "manual" : canUseAi ? "ai" : file.classificationSource, classificationConfidence: manualOverride ? 1 : canUseAi ? aiFile.confidence : file.confidence, classificationEvidence: manualOverride ? "项目经理人工确认" : canUseAi ? aiFile.reason : (file.folderEvidence || file.evidence.join("、")) });
               }
               archivedCount += 1;
             } catch { archiveReviewCount += 1; }
@@ -324,6 +339,45 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
 
   const cancelScan = () => scanAbortRef.current?.abort();
 
+  const previewArchiveCleanup = async () => {
+    setCleanupScanning(true);
+    try {
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) throw new Error("archive_permission_required");
+      setCleanupCandidates(await provider.previewGeneratedArchiveFiles());
+    } catch (error: any) { window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message === "archive_permission_required" ? "请先授权本机归档文件夹" : "无法读取旧归档文件" })); }
+    finally { setCleanupScanning(false); }
+  };
+
+  const rebuildOldArchives = async () => {
+    if (!cleanupCandidates.length) return;
+    setCleanupRebuilding(true);
+    try {
+      const provider = await getLocalArchiveProvider();
+      if (!provider) throw new Error("archive_permission_required");
+      const result = await provider.rebuildGeneratedArchiveFiles(cleanupCandidates);
+      setCleanupCandidates(result.verified);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `旧归档重建完成：复制 ${result.copied} 个，已存在 ${result.skipped} 个，冲突 ${result.conflicts} 个，失败 ${result.failed} 个` }));
+      await loadFiles();
+    } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "旧归档重建失败，旧文件未删除" })); }
+    finally { setCleanupRebuilding(false); }
+  };
+
+  const deleteOldArchives = async () => {
+    const verified = cleanupCandidates.filter((item) => item.status === "verified");
+    if (!verified.length || !window.confirm(`已完成哈希校验。确认删除 ${verified.length} 个旧的平铺归档副本吗？新目录副本和原始项目文件不会删除。`)) return;
+    setCleanupDeleting(true);
+    try {
+      const provider = await getLocalArchiveProvider();
+      const result = await provider?.deleteGeneratedArchiveFiles(verified);
+      setCleanupCandidates([]);
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已清理 ${result?.deleted || 0} 个旧归档副本${result?.failed ? `，${result.failed} 个失败` : ""}` }));
+      await loadFiles();
+    } catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "旧归档清理失败，原文件未改变" })); }
+    finally { setCleanupDeleting(false); }
+  };
+
   const syncLocalManifest = async () => {
     if (!selectedProject) return;
     setManifestSyncing(true);
@@ -337,7 +391,12 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         projectId: selectedProject.id,
         stageId: file.stageId,
         originalName: file.originalName || file.storedName,
-        relativePath: file.storageKey,
+        logicalPath: file.storageKey,
+        category: file.category || "其他资料",
+        classificationSource: file.classificationSource || "folder",
+        classificationConfidence: file.classificationConfidence ?? 0.9,
+        reviewStatus: file.reviewStatus || "confirmed",
+        classificationEvidence: file.classificationEvidence || "本机归档逻辑目录",
         size: file.size,
         contentType: file.contentType || "application/octet-stream",
         checksum: file.checksum || undefined,
@@ -361,18 +420,16 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       const provider = await getLocalArchiveProvider();
       const availability = await provider?.checkAvailability();
       if (!provider || !availability?.available) throw new Error("archive_permission_required");
-      const file = await provider.readFile(manifest.relativePath);
+      const file = await provider.readFile(manifest.logicalPath);
       const stage = STAGES.find((item) => item.id === manifest.stageId) || STAGES[0];
-      const session = await apiClient.createProjectFileUpload({ fileId: manifest.id, project: selectedProject, stage, fileType: manifest.originalName });
+      const session = await apiClient.createProjectFileUpload({ fileId: manifest.id, project: selectedProject, stage, fileType: manifest.category || manifest.originalName });
       const chunkSize = session.chunkSize;
       for (let offset = 0, index = 0; offset < file.size || (file.size === 0 && index === 0); offset += chunkSize, index += 1) {
         await apiClient.uploadProjectFileChunk(session.id, index, file.slice(offset, Math.min(file.size, offset + chunkSize)));
         setUploadProgress(file.size ? Math.round(Math.min(file.size, offset + chunkSize) / file.size * 100) : 100);
         if (file.size === 0) break;
       }
-      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-      const checksum = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      await apiClient.completeProjectFileUpload(session.id, checksum);
+      await apiClient.completeProjectFileUpload(session.id, manifest.checksum || undefined);
       await loadManifests();
       window.dispatchEvent(new CustomEvent("show-toast", { detail: `${manifest.originalName} 已上传，其他电脑现在可以按权限查看` }));
     } catch (error: any) { window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "文件上传失败，可稍后重试" })); }
@@ -461,14 +518,18 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         filter={scanFilter}
         currentStageId={currentStageInfo?.stage.id}
         currentStageName={currentStageInfo?.stage.name}
+        classificationOverrides={fileClassificationOverrides}
+        onClassificationChange={(fileId, value) => setFileClassificationOverrides((current) => ({ ...current, [fileId]: value }))}
         onAddRoot={() => void addScanRoot()}
         onRun={() => void runScan()}
         onCancel={cancelScan}
-        onClear={() => { setScanRoots([]); setScanReport(null); }}
+        onClear={() => { setScanRoots([]); setScanReport(null); setFileClassificationOverrides({}); }}
         onFilter={setScanFilter}
       />
 
       <ProjectStructureSummary report={scanReport} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={projects} nameOverrides={projectNameOverrides} onNameChange={(projectKey, name) => setProjectNameOverrides((current) => ({ ...current, [projectKey]: name }))} onToggle={toggleImportProject} onImport={importScannedProjects} />
+
+      <ArchiveCleanupPanel candidates={cleanupCandidates} scanning={cleanupScanning} rebuilding={cleanupRebuilding} deleting={cleanupDeleting} onPreview={() => void previewArchiveCleanup()} onRebuild={() => void rebuildOldArchives()} onDelete={() => void deleteOldArchives()} />
 
       <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />
 
@@ -523,7 +584,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   );
 }
 
-function ScanPanel({ roots, report, running, progress, filter, currentStageId, currentStageName, onAddRoot, onRun, onCancel, onClear, onFilter }: { roots: any[]; report: ProjectScanReport | null; running: boolean; progress: { current: number; total: number; name: string }; filter: "all" | "review" | "issues"; currentStageId?: string; currentStageName?: string; onAddRoot: () => void; onRun: () => void; onCancel: () => void; onClear: () => void; onFilter: (filter: "all" | "review" | "issues") => void }) {
+function ScanPanel({ roots, report, running, progress, filter, currentStageId, currentStageName, classificationOverrides, onClassificationChange, onAddRoot, onRun, onCancel, onClear, onFilter }: { roots: any[]; report: ProjectScanReport | null; running: boolean; progress: { current: number; total: number; name: string }; filter: "all" | "review" | "issues"; currentStageId?: string; currentStageName?: string; classificationOverrides: Record<string, { stageId: string; category: string }>; onClassificationChange: (fileId: string, value: { stageId: string; category: string }) => void; onAddRoot: () => void; onRun: () => void; onCancel: () => void; onClear: () => void; onFilter: (filter: "all" | "review" | "issues") => void }) {
   const visibleFiles = report?.files.filter((file) => filter === "all" || (filter === "review" ? file.status === "needs-review" || file.status === "unreadable" : report.issues.some((issue) => issue.fileIds?.includes(file.id)))) || [];
   return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5 shadow-sm">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -532,8 +593,14 @@ function ScanPanel({ roots, report, running, progress, filter, currentStageId, c
     </div>
     {roots.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{roots.map((root, index) => <span key={`${root.name}-${index}`} className="rounded-full bg-white px-3 py-1 text-xs text-slate-600">{root.name || "项目文件夹"}</span>)}</div>}
     {running && <div className="mt-4 rounded-xl border border-emerald-100 bg-white p-3"><div className="flex items-center justify-between text-xs text-slate-600"><span className="truncate">正在读取：{progress.name}</span><button onClick={onCancel} className="ml-3 flex shrink-0 items-center gap-1 font-bold text-rose-600"><X className="h-3 w-3" />取消</button></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-500 transition-all" style={{ width: progress.total ? `${Math.round(progress.current / progress.total * 100)}%` : "8%" }} /></div><div className="mt-1 text-right text-[11px] text-slate-400">{progress.current}/{progress.total || "…"}</div></div>}
-    {report && <div className="mt-4 space-y-4"><div className="grid grid-cols-2 gap-2 md:grid-cols-5">{[["文件", report.fileCount], ["可读", report.readableCount], ["待复核", report.reviewCount], ["问题", report.issues.length], ["阶段", report.inferredStage?.stageName?.split(" ")[1] || "待判断"]].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-white p-3"><div className="text-[11px] text-slate-500">{label}</div><div className="mt-1 truncate text-sm font-bold text-slate-900">{value}</div></div>)}</div><div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-white p-3"><div className="text-xs text-slate-600"><div>推断阶段：<strong className="text-slate-900">{report.inferredStage?.stageName || "暂无足够证据"}</strong>{report.inferredStage && <span className="ml-2 text-emerald-600">置信度 {Math.round(report.inferredStage.confidence * 100)}%</span>}</div>{currentStageName && <div className={cn("mt-1", currentStageId === report.inferredStage?.stageId ? "text-emerald-600" : "text-amber-700")}>系统当前阶段：{currentStageName} · {currentStageId === report.inferredStage?.stageId ? "判断一致" : "与文件证据不一致，请复核"}</div>}</div><div className="flex gap-2"><button onClick={() => downloadScanReport(report, "json")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"><FileDown className="h-3.5 w-3.5" />JSON</button><button onClick={() => downloadScanReport(report, "xlsx")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"><FileDown className="h-3.5 w-3.5" />Excel</button></div></div><div className="flex gap-2"><button onClick={() => onFilter("all")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "all" ? "bg-emerald-600 text-white" : "bg-white text-slate-600")}>全部文件</button><button onClick={() => onFilter("review")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "review" ? "bg-amber-500 text-white" : "bg-white text-slate-600")}>待复核</button><button onClick={() => onFilter("issues")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "issues" ? "bg-rose-500 text-white" : "bg-white text-slate-600")}>问题文件</button></div><div className="max-h-96 overflow-auto rounded-xl border border-emerald-100 bg-white">{visibleFiles.slice(0, 120).map((file) => <div key={file.id} className="flex items-center justify-between gap-3 border-b border-slate-100 p-3 last:border-0"><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{file.relativePath}</div><div className="mt-1 truncate text-[11px] text-slate-500">{file.category} · {file.stageName || "待复核"} · 置信度 {Math.round(file.confidence * 100)}%{file.evidence.length ? ` · ${file.evidence.join("、")}` : ""}</div></div>{(file.status === "needs-review" || file.status === "unreadable") && <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />}</div>)}{visibleFiles.length > 120 && <div className="p-3 text-center text-xs text-slate-400">仅显示前 120 项，完整清单请导出 Excel。</div>}{visibleFiles.length === 0 && <div className="p-6 text-center text-xs text-slate-400">当前筛选没有文件</div>}</div>{report.issues.length > 0 && <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800"><strong>需要人工确认：</strong>{report.issues.slice(0, 5).map((issue) => <div key={`${issue.type}-${issue.title}-${issue.detail}`} className="mt-1">{issue.title}：{issue.detail}</div>)}</div>}</div>}
+    {report && <div className="mt-4 space-y-4"><div className="grid grid-cols-2 gap-2 md:grid-cols-5">{[["文件", report.fileCount], ["可读", report.readableCount], ["待复核", report.reviewCount], ["问题", report.issues.length], ["阶段", report.inferredStage?.stageName?.split(" ")[1] || "待判断"]].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-white p-3"><div className="text-[11px] text-slate-500">{label}</div><div className="mt-1 truncate text-sm font-bold text-slate-900">{value}</div></div>)}</div><div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-100 bg-white p-3"><div className="text-xs text-slate-600"><div>推断阶段：<strong className="text-slate-900">{report.inferredStage?.stageName || "暂无足够证据"}</strong>{report.inferredStage && <span className="ml-2 text-emerald-600">置信度 {Math.round(report.inferredStage.confidence * 100)}%</span>}</div>{currentStageName && <div className={cn("mt-1", currentStageId === report.inferredStage?.stageId ? "text-emerald-600" : "text-amber-700")}>系统当前阶段：{currentStageName} · {currentStageId === report.inferredStage?.stageId ? "判断一致" : "与文件证据不一致，请复核"}</div>}</div><div className="flex gap-2"><button onClick={() => downloadScanReport(report, "json")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"><FileDown className="h-3.5 w-3.5" />JSON</button><button onClick={() => downloadScanReport(report, "xlsx")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"><FileDown className="h-3.5 w-3.5" />Excel</button></div></div><div className="flex gap-2"><button onClick={() => onFilter("all")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "all" ? "bg-emerald-600 text-white" : "bg-white text-slate-600")}>全部文件</button><button onClick={() => onFilter("review")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "review" ? "bg-amber-500 text-white" : "bg-white text-slate-600")}>待复核</button><button onClick={() => onFilter("issues")} className={cn("rounded-lg px-3 py-1.5 text-xs font-bold", filter === "issues" ? "bg-rose-500 text-white" : "bg-white text-slate-600")}>问题文件</button></div><div className="max-h-96 overflow-auto rounded-xl border border-emerald-100 bg-white">{visibleFiles.slice(0, 120).map((file) => <ScanFileRow key={file.id} file={file} override={classificationOverrides[file.id]} onChange={(value) => onClassificationChange(file.id, value)} />)}{visibleFiles.length > 120 && <div className="p-3 text-center text-xs text-slate-400">仅显示前 120 项，完整清单请导出 Excel。</div>}{visibleFiles.length === 0 && <div className="p-6 text-center text-xs text-slate-400">当前筛选没有文件</div>}</div>{report.issues.length > 0 && <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs text-amber-800"><strong>需要人工确认：</strong>{report.issues.slice(0, 5).map((issue) => <div key={`${issue.type}-${issue.title}-${issue.detail}`} className="mt-1">{issue.title}：{issue.detail}</div>)}</div>}</div>}
   </section>;
+}
+
+function ScanFileRow({ file, override, onChange }: { key?: string; file: ProjectScanReport["files"][number]; override?: { stageId: string; category: string }; onChange: (value: { stageId: string; category: string }) => void }) {
+  const stageId = override?.stageId || file.stageId || "";
+  const category = override?.category || file.category;
+  return <div className="flex flex-col gap-2 border-b border-slate-100 p-3 last:border-0 lg:flex-row lg:items-center"><div className="min-w-0 flex-1"><div className="truncate text-xs font-semibold text-slate-900">{file.relativePath}</div><div className="mt-1 truncate text-[11px] text-slate-500">{category} · {STAGES.find((stage) => stage.id === stageId)?.name || "待复核"} · 置信度 {override ? "人工确认" : `${Math.round(file.confidence * 100)}%`}{file.contentConflict ? ` · ${file.contentConflict}` : ""}</div></div><div className="flex flex-wrap items-center gap-2"><select value={stageId} onChange={(event) => onChange({ stageId: event.target.value, category })} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"><option value="">未确定阶段</option>{STAGES.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select><input value={category} onChange={(event) => onChange({ stageId, category: event.target.value })} className="w-36 rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-700" aria-label="资料类别" />{(file.status === "needs-review" || file.status === "unreadable") && !override && <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />}</div></div>;
 }
 
 function Metric({ icon: Icon, label, value, compact }: any) {
@@ -558,13 +625,34 @@ function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing,
   </section>;
 }
 
+function ArchiveCleanupPanel({ candidates, scanning, rebuilding, deleting, onPreview, onRebuild, onDelete }: { candidates: ArchiveCleanupCandidate[]; scanning: boolean; rebuilding: boolean; deleting: boolean; onPreview: () => void; onRebuild: () => void; onDelete: () => void }) {
+  const totalSize = candidates.reduce((sum, item) => sum + item.size, 0);
+  const verified = candidates.filter((item) => item.status === "verified").length;
+  return <section className="rounded-2xl border border-rose-100 bg-rose-50/40 p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">旧归档重建与清理</h3><p className="mt-1 text-xs text-slate-600">先把平铺文件重建到分类目录并核对 SHA-256，只有校验成功的旧副本才能删除。</p></div><div className="flex flex-wrap gap-2"><button onClick={onPreview} disabled={scanning || rebuilding || deleting} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">{scanning ? "扫描旧归档…" : "预览旧平铺归档"}</button>{candidates.length > 0 && verified === 0 && <button onClick={onRebuild} disabled={scanning || rebuilding || deleting} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{rebuilding ? "重建并校验中…" : `重建 ${candidates.length} 个`}</button>}{verified > 0 && <button onClick={onDelete} disabled={scanning || rebuilding || deleting} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{deleting ? "清理中…" : `确认清理 ${verified} 个旧副本`}</button>}</div></div>{candidates.length > 0 && <div className="mt-3 rounded-xl border border-rose-100 bg-white p-3 text-xs text-rose-800">共 {candidates.length} 个旧平铺文件，约 {formatSize(totalSize)}；其中 {verified} 个已完成重建与哈希校验。未校验、冲突和人工文件不会删除。</div>}{!candidates.length && !scanning && <p className="mt-3 text-xs text-slate-500">尚未生成迁移预览。原始来源文件始终不会移动或删除。</p>}</section>;
+}
+
 function ManifestPanel({ manifests, loading, uploadingId, uploadProgress, onUpload }: { manifests: ProjectFileManifest[]; loading: boolean; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
   const grouped = React.useMemo(() => manifests.reduce<Record<string, ProjectFileManifest[]>>((result, manifest) => { (result[manifest.stageId] ||= []).push(manifest); return result; }, {}), [manifests]);
   return <section className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5 shadow-sm">
     <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><FileDown className="h-5 w-5 text-violet-600" /><h3 className="font-bold text-slate-900">远程文件清单</h3></div><p className="mt-1 text-xs text-slate-600">其他电脑只同步这些元数据；“仅本机可用”的文件不会传输实际内容。</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-violet-700">{loading ? "读取中…" : `${manifests.length} 个文件`}</span></div>
     {manifests.length === 0 && !loading && <div className="mt-4 rounded-xl border border-dashed border-violet-200 bg-white p-6 text-center text-xs text-slate-500">还没有发布文件清单。请在来源电脑点击“同步文件清单”。</div>}
-    <div className="mt-4 space-y-3">{(Object.entries(grouped) as Array<[string, ProjectFileManifest[]]>).map(([stageId, files]) => { const stage = STAGES.find((item) => item.id === stageId); const uploaded = files.filter((file) => file.availability === "uploaded").length; return <div key={stageId} className="rounded-xl border border-violet-100 bg-white p-4"><div className="flex items-center justify-between gap-3"><div className="text-sm font-bold text-slate-900">{stage?.name || stageId}</div><span className="text-xs text-slate-500">{uploaded}/{files.length} 已上传</span></div><div className="mt-3 space-y-2">{files.map((manifest) => <div key={manifest.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{manifest.originalName}</div><div className="mt-1 truncate text-[11px] text-slate-500">{manifest.relativePath} · {formatSize(manifest.size)} · {formatTime(manifest.lastIndexedAt)} · V{manifest.version.replace(/^V/i, "")}</div></div><div className="flex shrink-0 items-center gap-2"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", manifest.availability === "uploaded" ? "bg-emerald-100 text-emerald-700" : manifest.availability === "missing" ? "bg-rose-100 text-rose-700" : manifest.availability === "stale" ? "bg-amber-100 text-amber-700" : "bg-violet-100 text-violet-700")}>{manifest.availability === "uploaded" ? "已上传" : manifest.availability === "missing" ? "本机已缺失" : manifest.availability === "stale" ? "索引过期" : "仅本机可用"}</span>{manifest.availability !== "uploaded" && <button onClick={() => onUpload(manifest)} disabled={uploadingId !== null} className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-[10px] font-bold text-white disabled:opacity-50">{uploadingId === manifest.id ? `上传 ${uploadProgress}%` : "上传此文件"}</button>}{manifest.availability === "uploaded" && manifest.canViewContent && <button onClick={() => void downloadProjectManifestContent(manifest.id, manifest.originalName)} className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-emerald-700">查看内容</button>}</div></div>)}</div></div>})}</div>
+    <div className="mt-4 space-y-3">{(Object.entries(grouped) as Array<[string, ProjectFileManifest[]]>).map(([stageId, files]) => { const stage = STAGES.find((item) => item.id === stageId); const uploaded = files.filter((file) => file.availability === "uploaded").length; return <div key={stageId} className="rounded-xl border border-violet-100 bg-white p-4"><div className="flex items-center justify-between gap-3"><div className="text-sm font-bold text-slate-900">{stage?.name || stageId}</div><span className="text-xs text-slate-500">{uploaded}/{files.length} 已上传</span></div><ManifestDirectoryTree files={files} /><div className="mt-3 space-y-2">{files.map((manifest) => <div key={manifest.id}><ManifestFileRow manifest={manifest} uploadingId={uploadingId} uploadProgress={uploadProgress} onUpload={onUpload} /></div>)}</div></div>})}</div>
   </section>;
+}
+
+function ManifestDirectoryTree({ files }: { files: ProjectFileManifest[] }) {
+  const paths = React.useMemo(() => files.map((file) => {
+    const parts = file.logicalPath.split("/").filter(Boolean);
+    const bucketIndex = parts.findIndex((part) => part === "已归档" || part === "待提交" || part === "未确定");
+    return { file, parts: bucketIndex >= 0 ? parts.slice(bucketIndex, -1) : [file.category || "其他资料"] };
+  }), [files]);
+  const folders = Array.from(new Set(paths.map((item) => item.parts.join("/")).filter(Boolean))).sort();
+  return <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3"><div className="mb-2 text-[10px] font-bold text-violet-700">远程逻辑目录（不包含来源电脑路径）</div>{folders.map((folder) => <div key={folder} className="flex items-center gap-1.5 py-0.5 text-[11px] text-slate-600"><FolderOpen className="h-3.5 w-3.5 shrink-0 text-violet-500" /><span>{folder}</span><span className="text-slate-400">· {paths.filter((item) => item.parts.join("/") === folder).length} 个文件</span></div>)}</div>;
+}
+
+function ManifestFileRow({ manifest, uploadingId, uploadProgress, onUpload }: { manifest: ProjectFileManifest; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
+  const sourceLabel = manifest.classificationSource === "manual" ? "人工确认" : manifest.classificationSource === "folder" ? "目录判断" : manifest.classificationSource === "ai" ? "DeepSeek 建议" : manifest.classificationSource === "filename" ? "文件名判断" : manifest.classificationSource === "content" ? "正文辅助" : "待确认";
+  return <div className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{manifest.originalName}</div><div className="mt-1 truncate text-[11px] text-slate-500" title={manifest.logicalPath}>{manifest.logicalPath} · {formatSize(manifest.size)} · {formatTime(manifest.lastIndexedAt)} · V{manifest.version.replace(/^V/i, "")}</div><div className="mt-1 text-[10px] text-slate-400">{manifest.category} · {sourceLabel}{manifest.reviewStatus === "needs-review" ? " · 需要人工复核" : ""}{manifest.classificationEvidence ? ` · ${manifest.classificationEvidence}` : ""}</div></div><div className="flex shrink-0 items-center gap-2"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", manifest.availability === "uploaded" ? "bg-emerald-100 text-emerald-700" : manifest.availability === "missing" ? "bg-rose-100 text-rose-700" : manifest.availability === "stale" ? "bg-amber-100 text-amber-700" : "bg-violet-100 text-violet-700")}>{manifest.availability === "uploaded" ? "已上传" : manifest.availability === "missing" ? "本机已缺失" : manifest.availability === "stale" ? "索引过期" : "仅本机可用"}</span>{manifest.availability !== "uploaded" && <button onClick={() => onUpload(manifest)} disabled={uploadingId !== null} className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-[10px] font-bold text-white disabled:opacity-50">{uploadingId === manifest.id ? `上传 ${uploadProgress}%` : "上传此文件"}</button>}{manifest.availability === "uploaded" && manifest.canViewContent && <button onClick={() => void downloadProjectManifestContent(manifest.id, manifest.originalName)} className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-emerald-700">查看内容</button>}</div></div>;
 }
 
 function formatSize(size = 0) {

@@ -64,6 +64,10 @@ class MemoryDirectoryHandle {
     return file;
   }
 
+  async removeEntry(name: string) {
+    if (!this.entries.delete(name)) throw Object.assign(new Error("missing"), { name: "NotFoundError" });
+  }
+
   async *values() {
     yield* this.entries.values();
   }
@@ -106,15 +110,49 @@ test("local provider versions files and exposes provider-neutral indexes", async
   const second = await provider.writeFile({ project, stage: stages[0], file, fileType: "方案", projectFolder: first.storageKey.split("/")[0] });
 
   assert.equal(first.version, "V1");
-  assert.equal(second.version, "V2");
+  assert.equal(second.version, "V1");
+  assert.equal(second.wasSkipped, true);
   assert.equal(first.storageProvider, "local-folder");
   assert.match(first.checksum, /^[a-f0-9]{64}$/);
-  assert.notEqual(first.storageKey, second.storageKey);
+  assert.equal(first.storageKey, second.storageKey);
 
   const listed = await provider.listFiles({ project, stages: [stages[0]], projectFolder: first.storageKey.split("/")[0] });
-  assert.equal(listed.length, 2);
-  assert.deepEqual(listed.map((item) => item.version), ["V1", "V2"]);
+  assert.equal(listed.length, 1);
+  assert.deepEqual(listed.map((item) => item.version), ["V1"]);
   assert.equal((await provider.readFile(first.storageKey)).size, 5);
+});
+
+test("归档文件保留来源子文件夹层级", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const file = new File(["hello"], "方案.pdf", { type: "application/pdf" });
+  const archived = await provider.writeFile({ project, stage: stages[0], file, fileType: "方案", sourceRelativePath: "测试项目/开工资料/施工方案/方案.pdf", preserveFolders: true });
+  assert.match(archived.storageKey, /已归档\/方案\/方案_V1_/);
+});
+
+test("旧平铺归档先重建并校验后才能删除旧副本", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const structure = await provider.ensureProjectStructure(project, [stages[2]]);
+  const projectDirectory = root.entries.get(structure.projectFolder) as MemoryDirectoryHandle;
+  const stageDirectory = projectDirectory.entries.get("03_商务沟通") as MemoryDirectoryHandle;
+  const archived = stageDirectory.entries.get("已归档") as MemoryDirectoryHandle;
+  const oldName = "PRJ-0001_03_招投标_技术标书_V1_20260821.pdf";
+  const oldHandle = await archived.getFileHandle(oldName, { create: true });
+  const writable = await oldHandle.createWritable();
+  await writable.write(new Blob(["tender"]));
+  await writable.close();
+
+  const preview = await provider.previewGeneratedArchiveFiles();
+  assert.equal(preview.length, 1);
+  assert.match(preview[0].targetStorageKey, /已归档\/招投标资料\/技术标/);
+  const rebuilt = await provider.rebuildGeneratedArchiveFiles(preview);
+  assert.equal(rebuilt.verified.length, 1);
+  assert.ok(archived.entries.has(oldName));
+  const deleted = await provider.deleteGeneratedArchiveFiles(rebuilt.verified);
+  assert.equal(deleted.deleted, 1);
+  assert.equal(archived.entries.has(oldName), false);
+  assert.equal((await provider.readFile(rebuilt.verified[0].targetStorageKey)).size, 6);
 });
 
 test("legacy server folders remain readable after project-number naming is enabled", (context) => {

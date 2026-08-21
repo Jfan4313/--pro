@@ -4,9 +4,30 @@ import path from "node:path";
 
 const AVAILABILITIES = new Set(["local-only", "uploaded", "stale", "missing"]);
 const VISIBILITIES = new Set(["project", "sensitive", "restricted"]);
+const REVIEW_STATUSES = new Set(["confirmed", "needs-review"]);
 
 function safeString(value, fallback = "") {
   return String(value ?? fallback).trim();
+}
+
+export function normalizeLogicalPath(value) {
+  const raw = safeString(value).replace(/\\/g, "/");
+  if (!raw || raw.startsWith("/") || /^[a-zA-Z]:\//.test(raw) || raw.startsWith("~") || raw.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw Object.assign(new Error("invalid_logical_path"), { status: 400 });
+  }
+  if (/(^|\/)(users|home|private|volumes)(\/|$)/i.test(raw) || raw.length > 1000) throw Object.assign(new Error("invalid_logical_path"), { status: 400 });
+  return raw;
+}
+
+function publicLogicalPath(row) {
+  if (row.logicalPath) {
+    try { return normalizeLogicalPath(row.logicalPath); } catch {}
+  }
+  const legacy = safeString(row.relativePath).replace(/\\/g, "/");
+  if (/已归档|待提交|未确定/.test(legacy)) {
+    try { return normalizeLogicalPath(legacy); } catch {}
+  }
+  return safeString(row.originalName, "未命名文件").replace(/[\\/:*?"<>|]/g, "_");
 }
 
 function publicManifest(row, canSeeSensitive = true) {
@@ -17,8 +38,12 @@ function publicManifest(row, canSeeSensitive = true) {
     projectId: row.projectId,
     stageId: row.stageId,
     originalName: row.originalName,
-    relativePath: row.relativePath,
-    storedName: row.storedName,
+    logicalPath: publicLogicalPath(row),
+    category: row.category || "其他资料",
+    classificationSource: row.classificationSource || "none",
+    classificationConfidence: Number(row.classificationConfidence || 0),
+    reviewStatus: row.reviewStatus || (row.logicalPath ? "confirmed" : "needs-review"),
+    classificationEvidence: row.classificationEvidence || "",
     size: row.size,
     contentType: row.contentType,
     checksum: row.checksum,
@@ -46,13 +71,21 @@ function normalizeItem(item, user, nowIso) {
   const id = safeString(item.id) || crypto.randomUUID();
   const availability = AVAILABILITIES.has(item.availability) ? item.availability : "local-only";
   const visibilityPolicy = VISIBILITIES.has(item.visibilityPolicy) ? item.visibilityPolicy : "project";
+  const logicalPath = normalizeLogicalPath(item.logicalPath);
   return {
     id,
     companyId: user.companyId || "company-default",
     projectId: safeString(item.projectId),
     stageId: safeString(item.stageId),
     originalName: safeString(item.originalName || item.name, "未命名文件"),
-    relativePath: safeString(item.relativePath, safeString(item.originalName || item.name, "未命名文件")),
+    // Keep the legacy NOT NULL column private and free of source-device paths.
+    relativePath: logicalPath,
+    logicalPath,
+    category: safeString(item.category, "其他资料"),
+    classificationSource: ["folder", "filename", "content", "ai", "manual", "none"].includes(item.classificationSource) ? item.classificationSource : "none",
+    classificationConfidence: Math.max(0, Math.min(1, Number(item.classificationConfidence || 0))),
+    reviewStatus: REVIEW_STATUSES.has(item.reviewStatus) ? item.reviewStatus : "confirmed",
+    classificationEvidence: safeString(item.classificationEvidence).slice(0, 1000),
     size: Math.max(0, Number(item.size || 0)),
     contentType: safeString(item.contentType, "application/octet-stream"),
     checksum: safeString(item.checksum) || null,
@@ -82,9 +115,9 @@ export function upsertManifests({ db, items, user, nowIso }) {
   const normalized = items.map((item) => normalizeItem(item, user, nowIso)).filter((item) => item.projectId && item.stageId);
   const transaction = db.transaction(() => {
     const upsert = db.prepare(`INSERT INTO project_file_manifests
-      (id, companyId, projectId, stageId, originalName, relativePath, size, contentType, checksum, version, bucket, availability, sourceClientId, lastIndexedAt, visibilityPolicy, visibilityOverride, createdBy, updatedAt)
-      VALUES (@id, @companyId, @projectId, @stageId, @originalName, @relativePath, @size, @contentType, @checksum, @version, @bucket, @availability, @sourceClientId, @lastIndexedAt, @visibilityPolicy, @visibilityOverride, @createdBy, @updatedAt)
-      ON CONFLICT(id) DO UPDATE SET originalName=excluded.originalName, relativePath=excluded.relativePath, size=excluded.size, contentType=excluded.contentType, checksum=excluded.checksum, version=excluded.version, bucket=excluded.bucket, availability=CASE WHEN project_file_manifests.availability='uploaded' AND excluded.checksum != project_file_manifests.checksum THEN 'stale' ELSE excluded.availability END, sourceClientId=excluded.sourceClientId, lastIndexedAt=excluded.lastIndexedAt, visibilityPolicy=excluded.visibilityPolicy, visibilityOverride=excluded.visibilityOverride, updatedAt=excluded.updatedAt`);
+      (id, companyId, projectId, stageId, originalName, relativePath, logicalPath, category, classificationSource, classificationConfidence, reviewStatus, classificationEvidence, size, contentType, checksum, version, bucket, availability, sourceClientId, lastIndexedAt, visibilityPolicy, visibilityOverride, createdBy, updatedAt)
+      VALUES (@id, @companyId, @projectId, @stageId, @originalName, @relativePath, @logicalPath, @category, @classificationSource, @classificationConfidence, @reviewStatus, @classificationEvidence, @size, @contentType, @checksum, @version, @bucket, @availability, @sourceClientId, @lastIndexedAt, @visibilityPolicy, @visibilityOverride, @createdBy, @updatedAt)
+      ON CONFLICT(id) DO UPDATE SET originalName=excluded.originalName, relativePath=excluded.relativePath, logicalPath=excluded.logicalPath, category=excluded.category, classificationSource=excluded.classificationSource, classificationConfidence=excluded.classificationConfidence, reviewStatus=excluded.reviewStatus, classificationEvidence=excluded.classificationEvidence, size=excluded.size, contentType=excluded.contentType, checksum=excluded.checksum, version=excluded.version, bucket=excluded.bucket, availability=CASE WHEN project_file_manifests.availability='uploaded' AND excluded.checksum != project_file_manifests.checksum THEN 'stale' ELSE excluded.availability END, sourceClientId=excluded.sourceClientId, lastIndexedAt=excluded.lastIndexedAt, visibilityPolicy=excluded.visibilityPolicy, visibilityOverride=excluded.visibilityOverride, updatedAt=excluded.updatedAt`);
     for (const item of normalized) upsert.run(item);
     const byProject = new Map();
     for (const item of normalized) { const key = `${item.projectId}:${item.sourceClientId || ""}`; const list = byProject.get(key) || []; list.push(item.id); byProject.set(key, list); }
@@ -96,7 +129,7 @@ export function upsertManifests({ db, items, user, nowIso }) {
 }
 
 export function listManifests({ db, user, projectId, canSeeSensitive = false }) {
-  const rows = db.prepare("SELECT * FROM project_file_manifests WHERE companyId=? AND projectId=? ORDER BY stageId, relativePath, originalName").all(user.companyId || "company-default", projectId);
+  const rows = db.prepare("SELECT * FROM project_file_manifests WHERE companyId=? AND projectId=? ORDER BY stageId, COALESCE(logicalPath, relativePath), originalName").all(user.companyId || "company-default", projectId);
   return rows.map((row) => publicManifest(row, canSeeSensitive || isManager(user)));
 }
 
@@ -144,12 +177,25 @@ export function recordChunk({ db, upload, chunkIndex, body, nowIso }) {
   return { received: body.length, chunkIndex: Number(chunkIndex) };
 }
 
-export function completeUpload({ db, user, upload, checksum, nowIso }) {
+async function sha256File(filePath) {
+  const hash = crypto.createHash("sha256");
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", resolve);
+    stream.on("error", reject);
+  });
+  return hash.digest("hex");
+}
+
+export async function completeUpload({ db, user, upload, checksum, nowIso }) {
   if (!upload || upload.status !== "pending") throw Object.assign(new Error("upload_not_pending"), { status: 409 });
   const stat = fs.statSync(upload.tempPath);
   if (stat.size !== upload.totalSize || upload.receivedChunks < upload.totalChunks) throw Object.assign(new Error("upload_incomplete"), { status: 409 });
-  const actual = crypto.createHash("sha256").update(fs.readFileSync(upload.tempPath)).digest("hex");
-  if (checksum && checksum !== actual) throw Object.assign(new Error("checksum_mismatch"), { status: 422 });
+  const actual = await sha256File(upload.tempPath);
+  const manifest = getManifest({ db, user, fileId: upload.manifestId });
+  const expectedChecksum = checksum || manifest?.checksum;
+  if (expectedChecksum && expectedChecksum !== actual) throw Object.assign(new Error("checksum_mismatch"), { status: 422 });
   fs.mkdirSync(path.dirname(upload.targetPath), { recursive: true });
   fs.renameSync(upload.tempPath, upload.targetPath);
   const timestamp = nowIso();

@@ -58,7 +58,9 @@ test("local fallback matches a project name fragment and keeps coordinated objec
   assert.equal(result.items.length, 1);
   assert.match(result.items[0].title, /处罚清单/);
   assert.match(result.items[0].title, /事故分析报告/);
-  assert.equal(result.items[0].deadline, new Date().toISOString().slice(0, 10));
+  const today = new Date();
+  const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  assert.equal(result.items[0].deadline, localToday);
   assert.match(result.items[0].summary, /完成标准/);
 });
 

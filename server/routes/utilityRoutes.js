@@ -257,7 +257,7 @@ export function registerUtilityRoutes(app, context) {
         localStageId: String(item.localStageId || "").slice(0, 80),
         localConfidence: Number(item.localConfidence || 0),
         stageSummaries: Array.isArray(item.stageSummaries) ? item.stageSummaries.slice(0, 20) : [],
-        files: Array.isArray(item.files) ? item.files.slice(0, 400).map((file) => ({ name: String(file.name || "").slice(0, 200), relativePath: String(file.relativePath || "").slice(0, 500), extension: String(file.extension || "").slice(0, 20), pathStageName: String(file.pathStageName || "").slice(0, 120) })) : [],
+        files: Array.isArray(item.files) ? item.files.slice(0, 400).map((file) => ({ id: String(file.id || "").slice(0, 300), name: path.basename(String(file.name || "")).slice(0, 200), folderLabels: Array.isArray(file.folderLabels) ? file.folderLabels.slice(-12).map((label) => path.basename(String(label || "")).replace(/[\\/:*?"<>|]/g, "_").slice(0, 120)).filter(Boolean) : [], extension: String(file.extension || "").slice(0, 20), localStageId: String(file.localStageId || "").slice(0, 80), localCategory: String(file.localCategory || "").slice(0, 120), classificationSource: String(file.classificationSource || "none").slice(0, 30), needsReview: Boolean(file.needsReview) })) : [],
       })) : [];
       res.json(await analyzeProjectArchiveWithAI({ projects }, user, db));
     } catch (error) { res.status(502).json({ error: "project_archive_ai_unavailable", message: error.message }); }
@@ -423,7 +423,6 @@ export function registerUtilityRoutes(app, context) {
         storedName,
         version,
         relativePath,
-        absolutePath: targetPath,
         uploadedAt: nowIso(),
       });
     } catch (error) {
@@ -439,7 +438,7 @@ export function registerUtilityRoutes(app, context) {
     if (!items.length) return res.status(400).json({ error: "manifest_items_required" });
     try {
       const records = upsertManifests({ db, items: items.map((item) => ({ ...item, sourceClientId: item.sourceClientId || context.clientId(req) })), user, nowIso });
-      res.status(201).json({ manifests: records.map((item) => ({ id: item.id, projectId: item.projectId, stageId: item.stageId, originalName: item.originalName, relativePath: item.relativePath, size: item.size, contentType: item.contentType, checksum: item.checksum, version: item.version, bucket: item.bucket, availability: item.availability, lastIndexedAt: item.lastIndexedAt })) });
+      res.status(201).json({ manifests: records.map((item) => ({ id: item.id, projectId: item.projectId, stageId: item.stageId, originalName: item.originalName, logicalPath: item.logicalPath, category: item.category, classificationSource: item.classificationSource, classificationConfidence: item.classificationConfidence, reviewStatus: item.reviewStatus, classificationEvidence: item.classificationEvidence, size: item.size, contentType: item.contentType, checksum: item.checksum, version: item.version, bucket: item.bucket, availability: item.availability, lastIndexedAt: item.lastIndexedAt })) });
     } catch (error) { res.status(400).json({ error: "manifest_save_failed", message: error.message }); }
   });
 
@@ -460,7 +459,8 @@ export function registerUtilityRoutes(app, context) {
     const stage = { ...(req.body?.stage || {}), id: manifest.stageId };
     if (!project.name && !project.projectName) return res.status(400).json({ error: "project_required" });
     if (!stage.name) return res.status(400).json({ error: "stage_required" });
-    const targetDir = path.join(projectFilesDir, getProjectFolderName(project), getStageFolderName(stage), "已归档");
+    const categoryParts = String(manifest.category || "其他资料").split("/").map((part) => part.replace(/[\\/:*?"<>|]/g, "_").trim()).filter(Boolean);
+    const targetDir = path.join(projectFilesDir, getProjectFolderName(project), getStageFolderName(stage), "已归档", ...categoryParts);
     fs.mkdirSync(targetDir, { recursive: true });
     const built = buildProjectStoredFile({ project, stage, fileType: req.body?.fileType || manifest.originalName, filename: manifest.originalName, targetDir });
     try {
@@ -478,12 +478,12 @@ export function registerUtilityRoutes(app, context) {
     catch (error) { res.status(error.status || 400).json({ error: error.message }); }
   });
 
-  app.post("/api/project-file-uploads/:uploadId/complete", (req, res) => {
+  app.post("/api/project-file-uploads/:uploadId/complete", async (req, res) => {
     const user = authenticatedUser(req, res);
     if (!user) return;
     const upload = getUpload({ db, user, uploadId: req.params.uploadId });
     if (!upload) return res.status(404).json({ error: "upload_not_found" });
-    try { res.json(completeUpload({ db, user, upload, checksum: req.body?.checksum, nowIso })); }
+    try { res.json(await completeUpload({ db, user, upload, checksum: req.body?.checksum, nowIso })); }
     catch (error) { res.status(error.status || 400).json({ error: error.message }); }
   });
 

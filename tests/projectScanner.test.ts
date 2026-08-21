@@ -45,3 +45,16 @@ test("从多项目第一层目录和阶段目录生成项目与阶段汇总", as
   assert.ok(report.projects[1].stageSummaries.some((stage) => stage.stageName === "② 初步设计"));
   assert.equal(report.files.find((file) => file.name === "现场勘察记录.txt")?.pathStageEvidence, "01_项目立项");
 });
+
+test("最近的招投标目录锁定商务阶段，正文施工日期不能覆盖", async () => {
+  const root = { name: "项目", async *values() {
+    yield directory("测试项目", [directory("施工资料", [directory("历史招投标", [fileEntry("技术标书.txt", "计划施工日期 2026年9月，开工后进场")])])]);
+  } };
+  const report = await scanProjectDirectories([root]);
+  const file = report.files[0];
+  assert.equal(file.stageId, "3_business");
+  assert.equal(file.classificationSource, "folder");
+  assert.equal(file.folderEvidence, "历史招投标");
+  assert.equal(file.category, "招投标资料/技术标");
+  assert.match(file.contentConflict || "", /施工/);
+});
