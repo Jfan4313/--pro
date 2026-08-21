@@ -67,6 +67,8 @@ function titleFor(part = "", projectName = "") {
     .replace(/^.*?(?:项目|工程)[，,：:\s]*/u, "")
     .replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:需要|要)?/u, "")
     .replace(/^(?:今天|今日|明天|后天)?(?:需要|要|需要把|要把|把|将)\s*/u, "")
+    .replace(/^(?:去|到|前往|在|进入)\s*/u, "")
+    .replace(/^去做\s*/u, "")
     .replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/u, "")
     .replace(/^(让|由|安排)[^，,。；;]{1,12}(负责|去)?/u, "")
     .replace(/(?:今天|今日|明天|后天)(?:之前|前|做完|完成)?$/u, "")
@@ -76,8 +78,30 @@ function titleFor(part = "", projectName = "") {
   const completedObject = withoutContext.match(/^(.+?)(?:完成|做完|办完)$/u)?.[1]?.trim();
   const afterBa = withoutContext.match(/^(?:把|将)\s*(.+?)(?:完成|做完|办完)$/u)?.[1]?.trim();
   const action = withoutContext.match(/(确认|落实|检查|提交|处理|跟进|编制|整理|修改|通知|协调|核对|制定|更新|补充|处罚)[^，,。；;]{1,40}/u)?.[0];
-  const result = (afterBa || completedObject ? `完成${afterBa || completedObject}` : action || (/(处罚清单|事故分析报告|整改通知书|处罚单)/u.test(withoutContext) ? `完成${withoutContext}` : withoutContext)).trim();
-  return result.slice(0, 48);
+  let result = (afterBa || completedObject ? `完成${afterBa || completedObject}` : action || (/(处罚清单|事故分析报告|整改通知书|处罚单)/u.test(withoutContext) ? `完成${withoutContext}` : withoutContext)).trim();
+  result = result.replace(/^拍(?=无人机|照片|影像)/u, "拍摄").replace(/飞一些?/u, "采集").replace(/和飞/u, "及采集");
+  return result.slice(0, 32);
+}
+
+function mergeContextClauses(clauses = [], projects = []) {
+  const actionPattern = /(拍摄?|照片|影像|飞行|采集|建模|检查|确认|整理|提交|完成|处理|落实|编制|修改|通知|协调|核对|制定|更新|补充|跟进|准备|测量|巡检|安装|拆除|采购|联系|对接)/u;
+  const contextOnlyPattern = /^(?:(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])?\s*(?:去|到|前往|在)?\s*[^，,。；;\n]{0,30}(?:项目|工程|现场|区域|地点))\s*$/u;
+  const knownProjectNames = projects.flatMap((project) => [project?.name, project?.projectName, ...(project?.aliases || [])]).map(normalizeText).filter((name) => name.length >= 2);
+  const merged = [];
+  let context = "";
+  for (const clause of clauses) {
+    const value = String(clause || "").replace(/^[，,。；;]+|[，,。；;]+$/gu, "").trim();
+    if (!value) continue;
+    const isKnownProjectContext = knownProjectNames.some((name) => normalizeText(value).includes(name));
+    if ((!actionPattern.test(value) && contextOnlyPattern.test(value)) || (isKnownProjectContext && /(?:今天|今日|明天|后天)?\s*(?:去|到|前往|在)/u.test(value) && !actionPattern.test(value.replace(/处罚/u, "")))) {
+      context = `${context}${value}`;
+      continue;
+    }
+    merged.push(`${context}${value}`.trim());
+    context = "";
+  }
+  if (context) merged.push(context.trim());
+  return merged;
 }
 
 function projectCandidateScore(project, normalizedInput) {
@@ -106,7 +130,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
   const scoredProjects = projects.map((item) => ({ item, score: projectCandidateScore(item, normalized) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
   const bestScore = scoredProjects[0]?.score || 0;
   const projectMatches = scoredProjects.filter((entry) => entry.score === bestScore && bestScore > 0).map((entry) => entry.item);
-  const project = projectMatches.length === 1 ? projectMatches[0] : null;
+  const project = scoredProjects[0]?.item || null;
   const projectConflict = projectMatches.length > 1;
   const projectMentionRaw = String(text || "").match(/(?:新项目|项目|工程|标段)[：:\s]?([\u4e00-\u9fa5A-Za-z0-9_-]{2,30})/i)?.[1] || "";
   const projectMention = projectMentionRaw.replace(/(今天|明天|后天|让|安排|负责|去|到).*/u, "").trim();
@@ -125,7 +149,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
   const deadline = parseLocalDeadline(trimmed);
   const titleSource = cleanedTranscript || (attachmentUrl ? "根据附件补充待办事项" : "");
   const title = titleSource.length > 40 ? `${titleSource.slice(0, 40)}...` : titleSource;
-  const clauses = cleanedTranscript.split(/[。；;\n]+|(?:然后|另外|还有)|[，,](?=[^，,]{0,10}(?:让|由|安排|落实|确认|检查|提交|完成|处理|跟进|准备|编制|整理|修改))/u).map((part) => part.trim()).filter(Boolean);
+  const clauses = mergeContextClauses(cleanedTranscript.split(/[。；;\n]+|(?:然后|另外|还有)|[，,](?=[^，,]{0,10}(?:让|由|安排|落实|确认|检查|提交|完成|处理|跟进|准备|编制|整理|修改))/u).map((part) => part.trim()).filter(Boolean), projects);
   const backgroundNotes = clauses.filter((part) => /(已经?完成|完成了|已办结|无需再做)/u.test(part));
   const parts = clauses.filter((part) => !backgroundNotes.includes(part));
   const items = parts.map((part, index) => {
@@ -144,7 +168,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
       projectId: project?.id || "",
       projectName,
       projectMatchType,
-      projectMatchConfidence: project ? 0.9 : projectMention ? 0.45 : 0,
+      projectMatchConfidence: projectConflict ? 0.65 : project ? 0.9 : projectMention ? 0.45 : 0,
       responsibleEntities,
       assignees: names.length ? names : (inferredAssignee ? [inferredAssignee] : []),
       assignee: names[0] || inferredAssignee,
@@ -162,7 +186,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
     projectId: project?.id || "",
     projectName,
     projectMatchType,
-    projectMatchConfidence: project ? 0.9 : projectMention ? 0.45 : 0,
+    projectMatchConfidence: projectConflict ? 0.65 : project ? 0.9 : projectMention ? 0.45 : 0,
     projectCandidates: projectMatches.map((item) => ({ id: item.id, name: item.name, projectNumber: item.projectNumber || item.code || "" })),
     assignees: people.map((person) => person.name),
     assignee: people[0]?.name || inferredAssignee,

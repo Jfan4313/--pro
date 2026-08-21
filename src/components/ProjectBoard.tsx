@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw, GripVertical } from "lucide-react";
+import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
@@ -7,7 +7,7 @@ import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { getProjectNumber } from "@/src/lib/management";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
-import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
+import { getProjectNameConflicts, hasProjectIdentityConflict, isValidProjectNumber, normalizeProjectNumber, sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { ArchiveFolderState, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
 import { useAuth } from "@/src/lib/auth";
 import { apiClient } from "@/src/lib/apiClient";
@@ -46,7 +46,8 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
   const [appSettings] = useUserSettings<any>({});
   const [archivedProjects, setArchivedProjects] = useSyncedAppData<any[]>("projectArchive", []);
   const [, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
-  const { conflicts: projectNumberConflicts, reserveProjectNumber } = useProjectNumbering();
+  const { allProjects, conflicts: projectNumberConflicts, reserveProjectNumber } = useProjectNumbering();
+  const projectNameConflicts = useMemo(() => getProjectNameConflicts(allProjects), [allProjects]);
 
   const getConstructProgress = (project: any) => {
     const projectSchedule = scheduleData.find((s: any) => s.id === project.id || s.name === project.name || (project.name && s.name && s.name.includes(project.name)));
@@ -77,8 +78,6 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<any>(null);
-  const [draggedItem, setDraggedItem] = useState<{ columnId: string, projectId: string } | null>(null);
-  const [dragOverItem, setDragOverItem] = useState<{ columnId: string, projectId: string | null } | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [projectScope, setProjectScope] = useState<"all" | "mine">("all");
@@ -118,81 +117,16 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     window.dispatchEvent(new CustomEvent("show-toast", { detail: `已归档 ${selected.length} 个项目` }));
   };
 
-  const handleDragStart = (e: React.DragEvent, columnId: string, projectId: string) => {
-    e.dataTransfer.setData("text/plain", JSON.stringify({ columnId, projectId }));
-    e.dataTransfer.effectAllowed = "move";
-    setDraggedItem({ columnId, projectId });
-  };
-
-  const handleDragOver = (e: React.DragEvent, columnId: string, projectId: string | null) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-    
-    if (dragOverItem?.columnId !== columnId || dragOverItem?.projectId !== projectId) {
-      setDragOverItem({ columnId, projectId });
-    }
-  };
-
-  const handleDragEnd = () => {
-    setDraggedItem(null);
-    setDragOverItem(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetColumnId: string, targetProjectId: string | null) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverItem(null);
-    setDraggedItem(null);
-
-    try {
-      const { columnId: sourceColumnId, projectId: sourceProjectId } = JSON.parse(e.dataTransfer.getData("text/plain"));
-      
-      if (sourceColumnId === targetColumnId && sourceProjectId === targetProjectId) return;
-
-      if (sourceColumnId !== targetColumnId) {
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: '阶段变更请在「全生命周期」模块中办理，完成后看板节点将同步自动变更。' }));
-        return;
-      }
-
-      setData((prevData: any) => {
-      const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;
-      const newData = [...currentData];
-      const sourceColIndex = newData.findIndex(c => c.id === sourceColumnId);
-      const targetColIndex = newData.findIndex(c => c.id === targetColumnId);
-
-      if (sourceColIndex === -1 || targetColIndex === -1) return currentData;
-
-        const sourceCol = { ...newData[sourceColIndex], projects: [...newData[sourceColIndex].projects] };
-        const targetCol = sourceCol; // Because sourceColumnId === targetColumnId
-
-        const projectIndex = sourceCol.projects.findIndex(p => p.id === sourceProjectId);
-        if (projectIndex === -1) return prevData;
-
-        const [project] = sourceCol.projects.splice(projectIndex, 1);
-
-        if (targetProjectId) {
-          const targetProjectIndex = targetCol.projects.findIndex(p => p.id === targetProjectId);
-          targetCol.projects.splice(targetProjectIndex, 0, project);
-        } else {
-          targetCol.projects.push(project);
-        }
-
-        sourceCol.count = sourceCol.projects.length;
-
-        newData[sourceColIndex] = sourceCol;
-
-        return newData;
-      });
-    } catch (err) {
-      console.error("Drop error", err);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
+    const name = String(formData.get('name') || "").trim().replace(/\s+/g, " ");
+    if (!name) return;
+    if (hasProjectIdentityConflict(allProjects, { name }).nameConflict) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `项目名称“${name}”已存在，请修改名称或编辑原项目` }));
+      return;
+    }
     const projectNumber = await reserveProjectNumber();
     const managerId = formData.get('managerId') as string;
     const selectedManager = projectManagers.find((manager) => manager.id === managerId);
@@ -200,7 +134,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     const newProject = {
       id: `p${Date.now()}`,
       projectNumber,
-      name: formData.get('name') as string,
+      name,
       type: formData.get('type') as string,
       businessModel: formData.get('businessModel') as string,
       manager: selectedManager?.name || "",
@@ -333,13 +267,26 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     e.preventDefault();
     if (!editingProject) return;
     
+    const normalizedProject = { ...editingProject, name: String(editingProject.name || "").trim().replace(/\s+/g, " "), projectNumber: normalizeProjectNumber(editingProject.projectNumber) };
+    if (!normalizedProject.name) return;
+    if (!isValidProjectNumber(normalizedProject.projectNumber)) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目编号格式应为 PRJ-0001' }));
+      return;
+    }
+    const conflict = hasProjectIdentityConflict(allProjects, normalizedProject);
+    if (conflict.nameConflict || conflict.numberConflict) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: conflict.nameConflict ? `项目名称“${normalizedProject.name}”已存在` : `项目编号“${normalizedProject.projectNumber}”已存在` }));
+      return;
+    }
+    const isArchived = archivedProjects.some((project: any) => project.id === normalizedProject.id);
     setData((prevData: any) => {
       const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;
       return currentData.map((col: any) => ({
         ...col,
-        projects: col.projects.map((p: any) => p.id === editingProject.id ? editingProject : p)
+        projects: sortProjectsNaturally(col.projects.map((p: any) => p.id === normalizedProject.id ? normalizedProject : p))
       }));
     });
+    if (isArchived) void setArchivedProjects((current: any[]) => sortProjectsNaturally(current.map((project: any) => project.id === normalizedProject.id ? normalizedProject : project)));
     
     setEditingProject(null);
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '项目信息已更新' }));
@@ -380,21 +327,16 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
         </div>
       </div>
 
-      {projectNumberConflicts.length > 0 && <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">检测到重复项目编号：{projectNumberConflicts.map((item) => item.projectNumber).join("、")}。为避免进入错误项目，重复编号暂不可用于跳转。</div>}
+      {(projectNumberConflicts.length > 0 || projectNameConflicts.length > 0) && <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{projectNumberConflicts.length > 0 && <div>重复项目编号：{projectNumberConflicts.map((item) => item.projectNumber).join("、")}。重复编号暂不可用于跳转。</div>}{projectNameConflicts.length > 0 && <div>重复项目名称：{projectNameConflicts.map((item) => item.projectName).join("、")}。请逐项点击编辑修正，系统不会自动合并或删除。</div>}</div>}
 
-      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">在建和已推进项目可归档到这里，归档只改变项目展示状态，不删除业务资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{sortProjectsNaturally(archivedProjects).map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button></div>)}</div>}</div>}
+      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">归档项目也可以修改名称和编号，修改不会移动项目资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{sortProjectsNaturally(archivedProjects).map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => setEditingProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50"><Edit2 className="h-3.5 w-3.5" />编辑</button><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button></div></div>)}</div>}</div>}
 
       <div className="flex-1 overflow-y-auto pb-4 custom-scrollbar">
         <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {(Array.isArray(data) && data.length > 0 ? data : boardSeed).map((column) => (
             <div 
               key={column.id} 
-              className={cn(
-                "min-h-[360px] flex flex-col bg-slate-50/50 rounded-2xl border p-3 md:p-4 transition-all duration-300",
-                dragOverItem?.columnId === column.id && !dragOverItem?.projectId ? "border-indigo-400 bg-indigo-50/50 ring-4 ring-indigo-500/5" : "border-slate-200/60 shadow-sm"
-              )}
-              onDragOver={(e) => handleDragOver(e, column.id, null)}
-              onDrop={(e) => handleDrop(e, column.id, null)}
+              className="min-h-[360px] flex flex-col bg-slate-50/50 rounded-2xl border border-slate-200/60 p-3 md:p-4 shadow-sm"
             >
               <div className="flex items-center justify-between mb-5 px-1 shrink-0">
                 <div className="flex items-center gap-2.5">
@@ -424,9 +366,6 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                   const statusColor = config.color;
                   const statusTooltip = config.tooltip;
                   
-                  const isDragging = draggedItem?.projectId === project.id;
-                  const isDragOver = dragOverItem?.projectId === project.id;
-                  
                   const hasSafetyRisk = personnelData.some((person: any) => 
                     !person.safetyTrained && 
                     (person.name === project.manager || (person.projects && person.projects.some((p: any) => p.name === project.name)))
@@ -439,18 +378,14 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                       tabIndex={0}
                       onClick={() => onOpenProject?.(project.id)}
                       onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenProject?.(project.id); } }}
-                      onDragOver={(e) => handleDragOver(e, column.id, project.id)}
-                      onDrop={(e) => handleDrop(e, column.id, project.id)}
                       className={cn(
                         "bg-white p-5 rounded-2xl border shadow-sm transition-all cursor-pointer relative group overflow-hidden focus:outline-none focus:ring-2 focus:ring-indigo-400",
-                        isDragging ? "opacity-50 scale-95 border-indigo-300" : "border-slate-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/5",
-                        isDragOver ? "border-t-4 border-t-indigo-500 mt-6" : "",
+                        "border-slate-200 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/5",
                         hasSafetyRisk ? "border-rose-200 shadow-rose-100/50" : ""
                       )}
                     >
                       <div className="flex justify-between items-start mb-3">
                         <input type="checkbox" checked={selectedProjectIds.includes(project.id)} onChange={(e) => { e.stopPropagation(); setSelectedProjectIds((current) => e.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id)); }} onClick={(e) => e.stopPropagation()} className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600" aria-label={`选择归档项目 ${project.name}`} />
-                        <button type="button" draggable onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, column.id, project.id); }} onDragEnd={(e) => { e.stopPropagation(); handleDragEnd(); }} onClick={(e) => e.stopPropagation()} className="cursor-grab rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500 active:cursor-grabbing" title="拖动排序" aria-label={`拖动排序 ${project.name}`}><GripVertical className="h-4 w-4" /></button>
                         {project.type && <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border", typeColors[project.type] || "bg-slate-100 text-slate-700 border-slate-200")}>
                           {project.type}
                         </span>}
@@ -599,6 +534,19 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <form id="edit-project-form" onSubmit={handleEditSubmit} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">项目编号</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingProject.projectNumber || ""}
+                    onChange={(e) => setEditingProject({ ...editingProject, projectNumber: e.target.value.toLocaleUpperCase() })}
+                    onBlur={(e) => setEditingProject({ ...editingProject, projectNumber: normalizeProjectNumber(e.target.value) })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    placeholder="PRJ-0001"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">编号必须唯一，保存后项目列表将按编号重新排序；不会自动重命名本机归档文件夹。</p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">项目名称</label>
                   <input 

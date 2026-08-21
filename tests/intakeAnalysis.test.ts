@@ -78,3 +78,18 @@ test("local fallback extracts a spoken responsible person and creates a complete
   assert.equal(result.items[0].responsibleEntities[0].matchType, "pending");
   assert.match(result.items[0].summary, /项目：处罚万力轮胎/);
 });
+
+test("local fallback merges project travel context into the following field task", () => {
+  const result = analyzeIntake({
+    inputType: "text",
+    text: "今天去处罚万力轮胎，然后拍无人机以及飞一些无人机照片",
+    projects: [{ id: "project-penalty", name: "处罚万力轮胎" }],
+    personnel: [],
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].projectId, "project-penalty");
+  assert.match(result.items[0].title, /拍摄无人机/);
+  assert.doesNotMatch(result.items[0].title, /今天|去处罚万力轮胎/);
+  assert.match(result.items[0].summary, /处罚万力轮胎/);
+});
