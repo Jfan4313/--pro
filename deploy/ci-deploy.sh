@@ -106,10 +106,18 @@ done
     cp -a "$APP_DIR/node_modules/better-sqlite3" node_modules/better-sqlite3
     chown -R www-data:www-data node_modules/better-sqlite3
   fi
-  echo "Rebuilding better-sqlite3 for server Node.js $node_major (10 minute timeout)."
-  timeout --signal=TERM 600 \
+  if runuser -u www-data -- env HOME="$stage_dir/npm-home" \
+    node -e "const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.close();"; then
+    echo "Existing better-sqlite3 binary is compatible with server Node.js $node_major."
+  else
+    echo "Rebuilding better-sqlite3 with local Node.js headers (10 minute timeout)."
+    test -d /usr/include/node
+    timeout --signal=TERM 600 \
+      runuser -u www-data -- env HOME="$stage_dir/npm-home" npm_config_nodedir=/usr \
+      npm rebuild better-sqlite3 --build-from-source --no-audit --no-fund
     runuser -u www-data -- env HOME="$stage_dir/npm-home" \
-    npm rebuild better-sqlite3 --build-from-source --no-audit --no-fund
+      node -e "const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.close();"
+  fi
 chown -R root:root "$release_dir"
 
 if [[ -e "$backup_dir" || -e "$failed_dir" ]]; then
