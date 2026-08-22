@@ -74,8 +74,8 @@ test("local fallback extracts a spoken responsible person and creates a complete
 
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].title, "完成事故分析报告和处罚单");
-  assert.deepEqual(result.items[0].assignees, ["苏俊鹏"]);
-  assert.equal(result.items[0].responsibleEntities[0].matchType, "pending");
+  assert.deepEqual(result.items[0].assignees, []);
+  assert.deepEqual(result.items[0].responsibleEntities, []);
   assert.doesNotMatch(result.items[0].summary, /负责人|截止日期|项目：/);
 });
 

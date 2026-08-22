@@ -121,8 +121,8 @@ test("work instruction agent separates completed background and resolves multipl
     assert.deepEqual(result.backgroundNotes, ["数据库已经完成了"]);
     assert.equal(result.items.length, 2);
     assert.deepEqual(result.items[0].assignees, ["张顺超", "李越"]);
-    assert.equal(result.items[1].responsibleEntities[0].entityType, "partner_organization");
-    assert.equal(result.items[1].responsibleEntities[0].contactName, "王工");
+    assert.equal(result.items[1].responsibleEntities.length, 0);
+    assert.equal(result.items[1].assignees.length, 0);
     assert.equal(result.items[0].projectMatchType, "existing");
   } finally { globalThis.fetch = originalFetch; }
 });

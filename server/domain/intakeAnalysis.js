@@ -141,16 +141,14 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
   const projectMention = projectMentionRaw.replace(/(今天|明天|后天|让|安排|负责|去|到).*/u, "").trim();
   const projectName = project?.name || projectMention || (projectMatches.length === 1 ? projectMatches[0].name : "");
   const projectMatchType = project ? "existing" : (projectMention ? "new" : "unknown");
-  const entityDirectory = entities.length ? entities : personnel.map((person) => ({ entityId: String(person.id || ""), entityType: "internal_person", name: person.name, notificationEligible: Boolean(person.accountId || person.loginEnabled), matchType: "existing", confidence: 1 }));
+  const entityDirectory = (entities.length ? entities : personnel.map((person) => ({ entityId: String(person.id || ""), entityType: "internal_person", name: person.name, notificationEligible: Boolean(person.accountId || person.loginEnabled), matchType: "existing", confidence: 1 }))).filter((item) => item.entityType === "internal_person" || !item.entityType);
   const people = entityDirectory.filter((item) => {
     const name = normalizeText(item?.name || "");
     return name && normalized.includes(name);
   });
   const spokenResponsibleCandidate = String(text || "").match(/(?:负责人|责任人)(?:是|为|：|:|\s)?([\u4e00-\u9fa5]{2,4})(?=$|[，,。；;\s])/u)?.[1] || "";
   const inferredSpokenResponsible = /(?:后面|待|选择|确认|未定|未知)/u.test(spokenResponsibleCandidate) ? "" : spokenResponsibleCandidate;
-  const inferredAssignee = people.length === 0
-    ? (inferredSpokenResponsible || String(text || "").match(/(?:安排|通知|协调|交给|让)([\u4e00-\u9fa5]{2,4})(?:和|、|及|去|到|负责|处理|跟进|检查|对接)/)?.[1] || "")
-    : "";
+  const inferredAssignee = people.length === 0 ? "" : (inferredSpokenResponsible || "");
   const deadline = parseLocalDeadline(trimmed);
   const titleSource = cleanedTranscript || (attachmentUrl ? "根据附件补充待办事项" : "");
   const title = titleSource.length > 40 ? `${titleSource.slice(0, 40)}...` : titleSource;
@@ -161,9 +159,6 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
     const partPeople = people.filter((person) => normalizeText(part).includes(normalizeText(person?.name || "")));
     const matchedEntities = partPeople.length ? partPeople : people;
     const responsibleEntities = matchedEntities.map((entity) => ({ entityId: entity.entityId || entity.id || "", entityType: entity.entityType || "internal_person", name: entity.name, ...(entity.organizationId ? { organizationId: entity.organizationId } : {}), ...(entity.organizationName ? { organizationName: entity.organizationName } : {}), ...(entity.contactEntityId ? { contactEntityId: entity.contactEntityId } : {}), ...(entity.contactName ? { contactName: entity.contactName } : {}), matchType: entity.matchType || "existing", confidence: Number(entity.confidence ?? 0.8), notificationEligible: Boolean(entity.notificationEligible) }));
-    if (!responsibleEntities.length && inferredAssignee) {
-      responsibleEntities.push({ entityId: `pending-person:${normalizeText(inferredAssignee)}`, entityType: "external_person", name: inferredAssignee, matchType: "pending", confidence: 0.45, notificationEligible: false });
-    }
     const names = responsibleEntities.map((entity) => entity.name);
     const itemDeadline = parseLocalDeadline(part) || deadline;
     const reviewReasons = [...(!responsibleEntities.length ? ["缺少负责人"] : []), ...(!itemDeadline ? ["缺少截止日期"] : []), ...(projectConflict ? ["项目存在多个候选，请人工选择"] : []), "AI不可用，已使用本地保守规则拆分"];
@@ -175,8 +170,8 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
       projectMatchType,
       projectMatchConfidence: projectConflict ? 0.65 : project ? 0.9 : projectMention ? 0.45 : 0,
       responsibleEntities,
-      assignees: names.length ? names : (inferredAssignee ? [inferredAssignee] : []),
-      assignee: names[0] || inferredAssignee,
+      assignees: names,
+      assignee: names[0] || "",
       deadline: itemDeadline,
       dueTime: parseDueTime(part),
       summary: part.replace(/(?:负责人|责任人|由谁负责|谁负责)[：:\s]*[^，,。；;]+/u, "").replace(/(?:今天|今日|明天|后天|周[一二三四五六日天]|星期[一二三四五六日天])(?:之前|前|做完|完成)?/u, "").replace(/[。；;]+$/u, "").trim() || titleFor(part, projectName),
@@ -194,7 +189,7 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
     projectMatchConfidence: projectConflict ? 0.65 : project ? 0.9 : projectMention ? 0.45 : 0,
     projectCandidates: projectMatches.map((item) => ({ id: item.id, name: item.name, projectNumber: item.projectNumber || item.code || "" })),
     assignees: people.map((person) => person.name),
-    assignee: people[0]?.name || inferredAssignee,
+    assignee: people[0]?.name || "",
     deadline,
     summary: trimmed || (attachmentUrl ? `来源附件：${attachmentUrl}` : ""),
     confidence: inputType === "text" ? (project || people.length || deadline ? 0.55 : 0.25) : 0.1,

@@ -370,7 +370,8 @@ function normalizeIntakeDraft(parsed, sourceText, projects, entities, glossary, 
       ...(Array.isArray(item.assignees) ? item.assignees : []),
       ...(item.assignee ? [item.assignee] : []),
     ];
-    const responsibleEntities = resolveResponsibleEntities(references, entities, { projectId: project?.id || item.projectId, projectName: project?.name || item.projectName });
+    const internalEntities = entities.filter((entity) => entity.entityType === "internal_person");
+    const responsibleEntities = resolveResponsibleEntities(references, internalEntities, { projectId: project?.id || item.projectId, projectName: project?.name || item.projectName }).filter((entity) => entity.entityType === "internal_person");
     const names = Array.from(new Set(responsibleEntities.filter((entity) => entity.matchType !== "ambiguous").map((entity) => entity.name)));
     const confidence = Math.max(0, Math.min(1, Number(item.confidence ?? 0.5)));
     const inferredDeadline = parseLocalDeadline(`${sourceText} ${item.summary || ""}`);
