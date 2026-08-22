@@ -51,6 +51,15 @@ function hasAssignedPerson(item: WorkMemoRecord, user: any) {
   return (item.assignees?.length ? item.assignees : [item.assignee]).some((person) => isSamePerson(person, user));
 }
 
+function looksLikeFollowUp(feedback: string) {
+  return /(下一步|后续|待整改|整改|复核|跟进|落实|安排|需要处理|待处理|遗留)/.test(feedback);
+}
+
+function followUpTitleFromFeedback(feedback: string) {
+  const cleaned = feedback.replace(/^(执行反馈|反馈|下一步安排|后续安排)\s*[:：]?/i, "").split(/[\n。；;]/)[0].trim();
+  return (cleaned || "根据执行反馈安排后续跟进").slice(0, 32);
+}
+
 export function WorkMemo() {
   const { user } = useAuth();
   const [projectBoardData] = useProjectBoardData();
@@ -125,8 +134,16 @@ export function WorkMemo() {
 
   const openFollowUp = (parent: WorkMemoRecord) => {
     if (!canCreateFollowUp(parent, user)) return;
+    const matchedProject = projects.find((project: any) => project.id === parent.projectId || project.name === parent.projectName);
     setFollowUpFor(parent);
-    setFollowUpForm({ title: "", detail: "", projectId: parent.projectId || "", projectName: parent.projectName || "", assignee: "", dueDate: today, priority: "normal" });
+    setFollowUpForm({ title: "", detail: "", projectId: parent.projectId || matchedProject?.id || "", projectName: parent.projectName || matchedProject?.name || "", assignee: "", dueDate: today, priority: "normal" });
+  };
+
+  const openFollowUpFromFeedback = (parent: WorkMemoRecord, feedbackText: string) => {
+    if (!canCreateFollowUp(parent, user)) return;
+    const matchedProject = projects.find((project: any) => project.id === parent.projectId || project.name === parent.projectName);
+    setFollowUpFor(parent);
+    setFollowUpForm({ title: followUpTitleFromFeedback(feedbackText), detail: feedbackText.trim(), projectId: parent.projectId || matchedProject?.id || "", projectName: parent.projectName || matchedProject?.name || "", assignee: "", dueDate: today, priority: "normal" });
   };
 
   const createFollowUp = async (event: FormEvent) => {
@@ -156,10 +173,15 @@ export function WorkMemo() {
   const submitFeedback = (event: FormEvent) => {
     event.preventDefault();
     if (!feedbackFor || !feedback.trim()) return;
-    updateMemo(feedbackFor.id, { status: "feedback", feedback: feedback.trim(), feedbackAt: new Date().toISOString() });
+    const parent = feedbackFor;
+    const feedbackText = feedback.trim();
+    updateMemo(parent.id, { status: "feedback", feedback: feedbackText, feedbackAt: new Date().toISOString() });
     setFeedbackFor(null);
     setFeedback("");
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "反馈已提交，等待安排人确认" }));
+    if (looksLikeFollowUp(feedbackText) && canCreateFollowUp(parent, user)) {
+      openFollowUpFromFeedback(parent, feedbackText);
+    }
   };
 
   const canOperate = (item: WorkMemoRecord) => hasAssignedPerson(item, user) || isSamePerson(item.creator, user) || user?.role === "admin" || user?.permissions?.includes("*");
