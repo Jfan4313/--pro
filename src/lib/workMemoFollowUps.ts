@@ -1,4 +1,5 @@
 export type FollowUpInfo = {
+  chainId?: string;
   parentMemoId?: string;
   rootMemoId?: string;
   followUpCount?: number;
@@ -14,6 +15,7 @@ export type FollowUpParent = {
   assignee?: string;
   assignees?: string[];
   rootMemoId?: string;
+  chainId?: string;
 };
 
 export function samePerson(value: string | undefined, user: any) {
@@ -33,6 +35,22 @@ export function canCreateFollowUp(item: FollowUpParent, user: any) {
 
 export function getRootMemoId(item: FollowUpParent) {
   return item.rootMemoId || item.id;
+}
+
+export function getTaskChainId(item: { rootMemoId?: string; chainId?: string; id: string }) {
+  return item.chainId || item.rootMemoId || item.id;
+}
+
+export function buildTaskChain<T extends { id: string; title: string; parentMemoId?: string; rootMemoId?: string; chainId?: string }>(records: T[], rootId: string) {
+  const root = records.find((item) => item.id === rootId);
+  const chainId = getTaskChainId(root || { id: rootId });
+  const chain = records.filter((item) => getTaskChainId(item) === chainId);
+  const byParent = new Map<string, typeof chain>();
+  chain.forEach((item) => {
+    const parentId = item.parentMemoId || "__root__";
+    byParent.set(parentId, [...(byParent.get(parentId) || []), item]);
+  });
+  return { chainId, root: root || chain.find((item) => !item.parentMemoId), byParent };
 }
 
 export function createFollowUpRecord(
@@ -69,6 +87,7 @@ export function createFollowUpRecord(
     feedback: "",
     parentMemoId: parent.id,
     rootMemoId: getRootMemoId(parent),
+    chainId: parent.chainId || getRootMemoId(parent),
     relationType: "follow-up" as const,
     createdAt: now,
   };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendFollowUpToSchedule, canCreateFollowUp, createFollowUpRecord } from "../src/lib/workMemoFollowUps";
+import { appendFollowUpToSchedule, buildTaskChain, canCreateFollowUp, createFollowUpRecord } from "../src/lib/workMemoFollowUps";
 
 const parent = {
   id: "memo-1",
@@ -31,4 +31,17 @@ test("follow-up is appended to the matching project schedule", () => {
   const schedule = appendFollowUpToSchedule([{ id: "project-1", name: "腰古好邻居", tasks: [] }], record);
   assert.equal(schedule[0].tasks[0].parentMemoId, "memo-1");
   assert.equal(schedule[0].tasks[0].relationType, "follow-up");
+});
+
+test("task chain keeps parallel follow-ups and nested follow-ups", () => {
+  const records = [
+    { id: "root", title: "完成并网" },
+    { id: "a", title: "整改接地", parentMemoId: "root", rootMemoId: "root", chainId: "root" },
+    { id: "b", title: "补充影像", parentMemoId: "root", rootMemoId: "root", chainId: "root" },
+    { id: "c", title: "复核整改", parentMemoId: "a", rootMemoId: "root", chainId: "root" },
+  ];
+  const chain = buildTaskChain(records, "root");
+  assert.equal(chain.chainId, "root");
+  assert.deepEqual(chain.byParent.get("root")?.map((item) => item.id), ["a", "b"]);
+  assert.equal(chain.byParent.get("a")?.[0].title, "复核整改");
 });
