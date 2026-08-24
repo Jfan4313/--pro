@@ -40,6 +40,7 @@ const MobileCollaboration = lazy(() => import("./components/MobileCollaboration"
 const MobileWorkspace = lazy(() => import("./components/MobileWorkspace").then((module) => ({ default: module.MobileWorkspace })));
 const AccountManagement = lazy(() => import("./components/AccountManagement").then((module) => ({ default: module.AccountManagement })));
 const WorkMemo = lazy(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
+const TaskChains = lazy(() => import("./components/TaskChains").then((module) => ({ default: module.TaskChains })));
 const MobileWorkMemo = lazy(() => import("./components/MobileWorkMemo").then((module) => ({ default: module.MobileWorkMemo })));
 const VersionManagement = lazy(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
 
@@ -79,6 +80,7 @@ const tabPermissions: Record<string, string> = {
   files: "files", contracts: "contracts", schedule: "schedule", acceptance: "acceptance", materials: "materials", supply: "supply", cost: "cost",
   chat: "collaboration", personnel: "personnel", partners: "partners", organization: "organization", settings: "settings", accounts: "accounts",
   "work-memo": "schedule",
+  "task-chains": "schedule",
   "version-management": "dashboard",
 };
 
@@ -231,7 +233,8 @@ export default function App() {
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
-          {activeTab === "work-memo" && (isMobileViewport ? <WorkMemoErrorBoundary><MobileWorkMemo /></WorkMemoErrorBoundary> : <WorkMemo />)}
+          {activeTab === "work-memo" && (isMobileViewport ? <WorkMemoErrorBoundary><MobileWorkMemo /></WorkMemoErrorBoundary> : <WorkMemo onOpenTaskChains={() => navigateToTab("task-chains")} />)}
+          {activeTab === "task-chains" && <div className="hidden md:block h-full"><TaskChains onOpenWorkMemo={() => navigateToTab("work-memo")} /></div>}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}
           {activeTab === "organization" && <><div className="md:hidden min-h-full"><MobileWorkspace module="organization" setActiveTab={setActiveTab} /></div><div className="hidden md:block h-full"><Organization /></div></>}
