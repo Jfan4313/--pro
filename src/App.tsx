@@ -39,6 +39,7 @@ const MobileCollaboration = lazy(() => import("./components/MobileCollaboration"
 const MobileWorkspace = lazy(() => import("./components/MobileWorkspace").then((module) => ({ default: module.MobileWorkspace })));
 const AccountManagement = lazy(() => import("./components/AccountManagement").then((module) => ({ default: module.AccountManagement })));
 const WorkMemo = lazy(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
+const TaskChains = lazy(() => import("./components/TaskChains").then((module) => ({ default: module.TaskChains })));
 const VersionManagement = lazy(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
 
 const tabPermissions: Record<string, string> = {
@@ -46,6 +47,7 @@ const tabPermissions: Record<string, string> = {
   files: "files", contracts: "contracts", schedule: "schedule", acceptance: "acceptance", materials: "materials", supply: "supply", cost: "cost",
   chat: "collaboration", personnel: "personnel", partners: "partners", organization: "organization", settings: "settings", accounts: "accounts",
   "work-memo": "schedule",
+  "task-chains": "schedule",
   "version-management": "dashboard",
 };
 
@@ -72,9 +74,9 @@ export default function App() {
     setActiveTab(tab);
     const params = new URLSearchParams(window.location.search);
     params.set("tab", tab);
-    if (tab !== "project-detail" && tab !== "site-survey") params.delete("project");
+    if (tab !== "project-detail" && tab !== "site-survey" && tab !== "task-chains") params.delete("project");
     if (tab !== "lifecycle") params.delete("stage");
-    if (tab !== "project-detail" && tab !== "site-survey") setSelectedProjectReference(null);
+    if (tab !== "project-detail" && tab !== "site-survey" && tab !== "task-chains") setSelectedProjectReference(null);
     if (tab !== "lifecycle") setSelectedStageId(null);
     window.history.pushState({ tab }, "", `${window.location.pathname}?${params.toString()}`);
   };
@@ -128,6 +130,17 @@ export default function App() {
     params.set("project", reference);
     params.delete("stage");
     window.history.pushState({ tab: "lifecycle", project: reference }, "", `${window.location.pathname}?${params.toString()}`);
+  }, [allProjects]);
+
+  const openTaskChains = useCallback((projectReference?: string) => {
+    const resolved = projectReference ? resolveProjectReference(allProjects, projectReference) : { project: null } as any;
+    const reference = resolved.project ? getProjectNumber(resolved.project) : projectReference;
+    setSelectedProjectReference(reference || null);
+    setActiveTab("work-memo");
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "work-memo");
+    params.delete("project");
+    window.history.pushState({ tab: "work-memo" }, "", `${window.location.pathname}?${params.toString()}`);
   }, [allProjects]);
 
   const syncLifecycleRoute = useCallback((project: any, stageId: string) => {
@@ -184,11 +197,12 @@ export default function App() {
           <Suspense fallback={<div className="flex min-h-full items-center justify-center text-sm text-slate-500">正在加载模块…</div>}>
           {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
           {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div></>}
-          {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
+          {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} onOpenTaskChains={openTaskChains} />}
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
           {activeTab === "work-memo" && <WorkMemo />}
+          {activeTab === "task-chains" && <TaskChains projectReference={selectedProjectReference || undefined} onOpenWorkMemo={() => navigateToTab("work-memo")} />}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}
           {activeTab === "organization" && <><div className="md:hidden min-h-full"><MobileWorkspace module="organization" setActiveTab={setActiveTab} /></div><div className="hidden md:block h-full"><Organization /></div></>}

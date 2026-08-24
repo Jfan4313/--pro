@@ -10,7 +10,7 @@ import { offlineDb } from "@/src/lib/offlineDb";
 import { resolveProjectReference } from "@/src/lib/projectNumbering";
 import { buildTaskChain } from "@/src/lib/workMemoFollowUps";
 
-export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle, onOpenSurvey }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenLifecycle?: (projectReference: string) => void; onOpenSurvey?: (projectId: string) => void }) {
+export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle, onOpenSurvey, onOpenTaskChains }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenLifecycle?: (projectReference: string) => void; onOpenSurvey?: (projectId: string) => void; onOpenTaskChains?: (projectReference?: string) => void }) {
   const [projectBoardData] = useProjectBoardData();
   const [scheduleData] = useSyncedAppData<any[]>("scheduleData", []);
   const [workMemos] = useSyncedAppData<any[]>("workMemos", []);
@@ -107,7 +107,7 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle
           ))}
           {tasks.length === 0 && <Empty text="暂无任务" />}
         </Panel>
-        <Panel title="项目任务链" action="查看工作备忘" onAction={() => setActiveTab("work-memo")} icon={GitBranch}>
+        <Panel title="项目任务链" action="打开完整任务链" onAction={() => onOpenTaskChains?.(project.id)} icon={GitBranch}>
           {taskChainRoots.slice(0, 5).map((root: any) => <ProjectTaskChain key={root.id} root={root} records={projectMemos} />)}
           {taskChainRoots.length === 0 && <Empty text="暂无任务链" />}
         </Panel>
