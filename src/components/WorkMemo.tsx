@@ -67,7 +67,7 @@ function TaskChainPanel({ chain, records }: { chain: any; records: WorkMemoRecor
   if (!root) return null;
   const children = chain.byParent.get(root.id) || [];
   return <div className="task-chain-reveal mt-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
-    <div className="flex items-center gap-2 text-xs font-bold text-violet-800"><GitBranch className="h-3.5 w-3.5" />任务链 · {records.filter((item) => (item.chainId || item.rootMemoId || item.id) === chain.chainId).length} 个节点</div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2 text-xs font-bold text-violet-800"><GitBranch className="h-3.5 w-3.5" />任务链 · {records.filter((item) => (item.chainId || item.rootMemoId || item.id) === chain.chainId).length} 个节点</div><button type="button" onClick={() => window.dispatchEvent(new CustomEvent("open-task-chains", { detail: { projectName: root.projectName } }))} className="rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-violet-700 shadow-sm hover:bg-violet-100">查看整个项目任务链</button></div>
     <div className="mt-2 space-y-2 border-l-2 border-violet-200 pl-3">
       <ChainNode item={root} label="起始任务" />
       {children.map((child) => <ChainBranch key={child.id} item={child} byParent={chain.byParent} depth={1} />)}
@@ -100,7 +100,7 @@ function followUpTitleFromFeedback(feedback: string) {
   return (cleaned || "根据执行反馈安排后续跟进").slice(0, 32);
 }
 
-export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: () => void }) {
+export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectReference?: string) => void }) {
   const { user } = useAuth();
   const [projectBoardData] = useProjectBoardData();
   const [personnelData] = useSyncedAppData<any[]>("personnelData", []);

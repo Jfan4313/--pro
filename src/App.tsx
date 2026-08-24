@@ -116,12 +116,28 @@ export default function App() {
     setActiveTab(tab);
     const params = new URLSearchParams(window.location.search);
     params.set("tab", tab);
-    if (tab !== "project-detail" && tab !== "site-survey") params.delete("project");
+    if (tab !== "project-detail" && tab !== "site-survey" && tab !== "task-chains") params.delete("project");
     if (tab !== "lifecycle") params.delete("stage");
     if (tab !== "project-detail" && tab !== "site-survey") setSelectedProjectReference(null);
     if (tab !== "lifecycle") setSelectedStageId(null);
     window.history.pushState({ tab }, "", `${window.location.pathname}?${params.toString()}`);
   };
+
+  const openTaskChains = (projectReference?: string) => {
+    const reference = String(projectReference || "").trim();
+    setSelectedProjectReference(reference || null);
+    setActiveTab("task-chains");
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "task-chains");
+    if (reference) params.set("project", reference); else params.delete("project");
+    window.history.pushState({ tab: "task-chains", project: reference || null }, "", `${window.location.pathname}?${params.toString()}`);
+  };
+
+  useEffect(() => {
+    const handleOpenTaskChains = (event: Event) => openTaskChains((event as CustomEvent<{ projectName?: string }>).detail?.projectName);
+    window.addEventListener("open-task-chains", handleOpenTaskChains);
+    return () => window.removeEventListener("open-task-chains", handleOpenTaskChains);
+  }, [openTaskChains]);
 
   const openProjectSurvey = (projectId: string, returnTab = "project-detail", recordId: string | null = null) => {
     setSelectedProjectReference(projectId);
@@ -233,8 +249,8 @@ export default function App() {
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
-          {activeTab === "work-memo" && (isMobileViewport ? <WorkMemoErrorBoundary><MobileWorkMemo /></WorkMemoErrorBoundary> : <WorkMemo onOpenTaskChains={() => navigateToTab("task-chains")} />)}
-          {activeTab === "task-chains" && <div className="hidden md:block h-full"><TaskChains onOpenWorkMemo={() => navigateToTab("work-memo")} /></div>}
+          {activeTab === "work-memo" && (isMobileViewport ? <WorkMemoErrorBoundary><MobileWorkMemo /></WorkMemoErrorBoundary> : <WorkMemo onOpenTaskChains={openTaskChains} />)}
+          {activeTab === "task-chains" && <div className="hidden md:block h-full"><TaskChains projectReference={selectedProjectReference || undefined} onOpenWorkMemo={() => navigateToTab("work-memo")} /></div>}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}
           {activeTab === "organization" && <><div className="md:hidden min-h-full"><MobileWorkspace module="organization" setActiveTab={setActiveTab} /></div><div className="hidden md:block h-full"><Organization /></div></>}
