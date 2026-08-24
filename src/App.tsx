@@ -12,6 +12,7 @@ import { FirstRunGuide } from "./components/FirstRunGuide";
 import { LoginScreen, PasswordChangeScreen } from "./components/LoginScreen";
 import { useAuth } from "./lib/auth";
 import { useProjectBoardData } from "./hooks/useProjectBoardData";
+import { useSyncedAppData } from "./hooks/useSyncedAppData";
 import { useWorkspaceMigrations } from "./hooks/useWorkspaceMigrations";
 import { flattenProjects, getProjectNumber } from "./lib/management";
 import { resolveProjectReference } from "./lib/projectNumbering";
@@ -44,6 +45,12 @@ const VersionManagement = lazy(() => import("./components/VersionManagement").th
 
 class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
+  private readonly childContent: ReactNode;
+
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.childContent = props.children;
+  }
 
   static getDerivedStateFromError() {
     return { hasError: true };
@@ -54,7 +61,7 @@ class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasErro
   }
 
   render() {
-    return this.state.hasError ? <MobileWorkMemoFallback /> : this.props.children;
+    return this.state.hasError ? <MobileWorkMemoFallback /> : this.childContent;
   }
 }
 
