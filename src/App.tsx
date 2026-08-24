@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react";
+import { Component, lazy, Suspense, useState, useEffect, useCallback, useMemo, type ErrorInfo, type ReactNode } from "react";
 import { Mic } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -41,6 +41,37 @@ const AccountManagement = lazy(() => import("./components/AccountManagement").th
 const WorkMemo = lazy(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
 const MobileWorkMemo = lazy(() => import("./components/MobileWorkMemo").then((module) => ({ default: module.MobileWorkMemo })));
 const VersionManagement = lazy(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
+
+class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("工作备忘渲染异常，已切换安全视图", error, info.componentStack);
+  }
+
+  render() {
+    return this.state.hasError ? <MobileWorkMemoFallback /> : this.props.children;
+  }
+}
+
+function MobileWorkMemoFallback() {
+  const [rawRecords] = useSyncedAppData<any[]>("workMemos", []);
+  const records = Array.isArray(rawRecords) ? rawRecords.filter((item: any) => item && typeof item === "object") : [];
+  const text = (value: unknown, fallback = "") => {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      return typeof record.title === "string" ? record.title : typeof record.name === "string" ? record.name : fallback;
+    }
+    return fallback;
+  };
+  const chainCount = new Set(records.map((item: any) => text(item.chainId || item.rootMemoId || item.id)).filter(Boolean)).size;
+  return <div className="min-h-full bg-slate-50 px-4 pb-6 pt-4"><header className="rounded-[28px] bg-slate-950 p-5 text-white"><p className="text-xs font-medium text-indigo-300">公司工作流</p><h2 className="mt-1 text-2xl font-bold">工作备忘</h2><p className="mt-2 text-sm text-slate-400">安全视图已启用，任务内容仍然保留。</p><div className="mt-4 rounded-2xl bg-white/10 p-3 text-sm">{records.length} 条安排 · {chainCount} 条任务链</div></header><div className="mt-4 space-y-3">{records.map((item: any, index: number) => <article key={text(item.id) || index} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm"><h3 className="text-sm font-bold text-slate-900">{text(item.title, "未命名工作安排")}</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{text(item.detail, "暂无任务详情")}</p><p className="mt-3 text-xs text-slate-500">负责人：{text(item.assignee, "待指派")} · 截止：{text(item.dueDate, "未设置")} · 状态：{text(item.status, "待开始")}</p>{text(item.feedback) && <p className="mt-2 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">执行反馈：{text(item.feedback)}</p>}</article>)}{records.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400">暂无工作备忘</div>}</div></div>;
+}
 
 const tabPermissions: Record<string, string> = {
   dashboard: "dashboard", board: "projects", "project-detail": "projects", lifecycle: "lifecycle", "site-survey": "survey",
@@ -199,7 +230,7 @@ export default function App() {
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
-          {activeTab === "work-memo" && (isMobileViewport ? <MobileWorkMemo /> : <WorkMemo />)}
+          {activeTab === "work-memo" && (isMobileViewport ? <WorkMemoErrorBoundary><MobileWorkMemo /></WorkMemoErrorBoundary> : <WorkMemo />)}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}
           {activeTab === "organization" && <><div className="md:hidden min-h-full"><MobileWorkspace module="organization" setActiveTab={setActiveTab} /></div><div className="hidden md:block h-full"><Organization /></div></>}
