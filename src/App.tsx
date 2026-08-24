@@ -216,9 +216,9 @@ export default function App() {
           </Suspense>
         </main>
 
-        <SmartIntake setActiveTab={setActiveTab} />
+        {activeTab !== "work-memo" && <SmartIntake setActiveTab={setActiveTab} />}
         <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="smart-intake-fab fixed bottom-20 right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 ring-4 ring-indigo-100 transition hover:scale-105 hover:bg-indigo-700 md:bottom-6 md:right-6" title="语音快速创建工作备忘" aria-label="语音快速创建工作备忘"><Mic className="h-6 w-6" /></button>
-        <FirstRunGuide setActiveTab={navigateToTab} />
+        {activeTab !== "work-memo" && <FirstRunGuide setActiveTab={navigateToTab} />}
 
         {/* Global Toast */}
         {toastMsg && (
