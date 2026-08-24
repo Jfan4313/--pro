@@ -34,7 +34,11 @@ export function MobileWorkMemo() {
   // Older caches and interrupted syncs can briefly return null or an object
   // instead of the current array shape. Keep that transient state renderable.
   const records = useMemo(() => Array.isArray(rawRecords)
-    ? rawRecords.filter((item: any) => item && typeof item === "object").map((item: any, index: number) => ({ ...item, id: getDisplayText(item.id) || `legacy-memo-${index}`, title: getDisplayText(item.title) || getDisplayText(item.name) || "未命名工作安排", detail: getDisplayText(item.detail), projectName: getDisplayText(item.projectName), creator: getDisplayText(item.creator), dueDate: getDisplayText(item.dueDate), feedback: getDisplayText(item.feedback), assignee: getDisplayText(item.assignee), status: getDisplayText(item.status), priority: getDisplayText(item.priority), targetType: getDisplayText(item.targetType), crewName: getDisplayText(item.crewName), crewContact: getDisplayText(item.crewContact), projectId: getDisplayText(item.projectId), parentMemoId: getDisplayText(item.parentMemoId), rootMemoId: getDisplayText(item.rootMemoId), chainId: getDisplayText(item.chainId), relationType: getDisplayText(item.relationType), dueTime: getDisplayText(item.dueTime), assignees: getAssignees(item) }))
+    ? rawRecords.filter((item: any) => item && typeof item === "object").map((item: any, index: number) => ({
+      id: getDisplayText(item.id) || `legacy-memo-${index}`,
+      title: getDisplayText(item.title) || getDisplayText(item.name) || "未命名工作安排",
+      detail: getDisplayText(item.detail), projectName: getDisplayText(item.projectName), creator: getDisplayText(item.creator), dueDate: getDisplayText(item.dueDate), dueTime: getDisplayText(item.dueTime), feedback: getDisplayText(item.feedback), assignee: getDisplayText(item.assignee), status: getDisplayText(item.status), priority: getDisplayText(item.priority), targetType: getDisplayText(item.targetType), crewName: getDisplayText(item.crewName), crewContact: getDisplayText(item.crewContact), projectId: getDisplayText(item.projectId), parentMemoId: getDisplayText(item.parentMemoId), rootMemoId: getDisplayText(item.rootMemoId), chainId: getDisplayText(item.chainId), relationType: getDisplayText(item.relationType), assignees: getAssignees(item),
+    }))
     : [], [rawRecords]);
   const [filter, setFilter] = useState<"all" | "mine" | "overdue">("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
