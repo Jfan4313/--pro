@@ -41,7 +41,7 @@ function normalizeMemoRecords(value: unknown): WorkMemoRecord[] {
   return Array.isArray(value)
     ? value
       .filter((item): item is WorkMemoRecord => Boolean(item && typeof item === "object" && typeof (item as any).id === "string" && typeof (item as any).title === "string"))
-      .map((item) => ({ ...item, detail: getDisplayText(item.detail), projectName: getDisplayText(item.projectName), creator: getDisplayText(item.creator), dueDate: getDisplayText(item.dueDate), feedback: getDisplayText(item.feedback), assignee: getDisplayText(item.assignee), assignees: getAssignees(item) }))
+      .map((item) => ({ ...item, detail: getDisplayText(item.detail), projectName: getDisplayText(item.projectName), creator: getDisplayText(item.creator), dueDate: getDisplayText(item.dueDate), feedback: getDisplayText(item.feedback), assignee: getDisplayText(item.assignee), status: getDisplayText(item.status), priority: getDisplayText(item.priority), targetType: getDisplayText(item.targetType), crewName: getDisplayText(item.crewName), crewContact: getDisplayText(item.crewContact), projectId: getDisplayText(item.projectId), parentMemoId: getDisplayText(item.parentMemoId), rootMemoId: getDisplayText(item.rootMemoId), chainId: getDisplayText(item.chainId), relationType: getDisplayText(item.relationType), assignees: getAssignees(item) }) as WorkMemoRecord)
     : [];
 }
 const statusLabels: Record<MemoStatus, string> = {
