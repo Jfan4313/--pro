@@ -5,7 +5,7 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { cn } from "@/src/lib/utils";
 import { formatLocalDate } from "@/src/lib/management";
-import { appendFollowUpToSchedule, buildTaskChain, canCreateFollowUp, createFollowUpRecord, getAssignees, getTaskChains } from "@/src/lib/workMemoFollowUps";
+import { appendFollowUpToSchedule, buildTaskChain, canCreateFollowUp, createFollowUpRecord, getAssignees, getDisplayText, getTaskChains } from "@/src/lib/workMemoFollowUps";
 import { resolveFollowUpProject } from "@/src/lib/followUpProject";
 
 type MemoStatus = "pending" | "in-progress" | "feedback" | "confirmed";
@@ -41,7 +41,7 @@ function normalizeMemoRecords(value: unknown): WorkMemoRecord[] {
   return Array.isArray(value)
     ? value
       .filter((item): item is WorkMemoRecord => Boolean(item && typeof item === "object" && typeof (item as any).id === "string" && typeof (item as any).title === "string"))
-      .map((item) => ({ ...item, assignees: getAssignees(item) }))
+      .map((item) => ({ ...item, detail: getDisplayText(item.detail), projectName: getDisplayText(item.projectName), creator: getDisplayText(item.creator), dueDate: getDisplayText(item.dueDate), feedback: getDisplayText(item.feedback), assignee: getDisplayText(item.assignee), assignees: getAssignees(item) }))
     : [];
 }
 const statusLabels: Record<MemoStatus, string> = {

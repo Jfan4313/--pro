@@ -3,7 +3,7 @@ import { CalendarDays, ChevronDown, Clock3, GitBranch, MessageSquareText, UserRo
 import { useAuth } from "@/src/lib/auth";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { formatLocalDate } from "@/src/lib/management";
-import { getAssignees, getTaskChains } from "@/src/lib/workMemoFollowUps";
+import { getAssignees, getDisplayText, getTaskChains } from "@/src/lib/workMemoFollowUps";
 import { cn } from "@/src/lib/utils";
 
 const statusLabels: Record<string, string> = {
@@ -34,7 +34,7 @@ export function MobileWorkMemo() {
   // Older caches and interrupted syncs can briefly return null or an object
   // instead of the current array shape. Keep that transient state renderable.
   const records = useMemo(() => Array.isArray(rawRecords)
-    ? rawRecords.filter((item: any) => item && typeof item === "object").map((item: any) => ({ ...item, assignees: getAssignees(item) }))
+    ? rawRecords.filter((item: any) => item && typeof item === "object").map((item: any) => ({ ...item, detail: getDisplayText(item.detail), projectName: getDisplayText(item.projectName), creator: getDisplayText(item.creator), dueDate: getDisplayText(item.dueDate), feedback: getDisplayText(item.feedback), assignee: getDisplayText(item.assignee), assignees: getAssignees(item) }))
     : [], [rawRecords]);
   const [filter, setFilter] = useState<"all" | "mine" | "overdue">("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});

@@ -25,6 +25,18 @@ export function getAssignees(item: { assignees?: unknown; assignee?: unknown }):
   return [];
 }
 
+export function getDisplayText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["name", "title", "label", "text", "value"]) {
+      if (typeof record[key] === "string") return record[key] as string;
+    }
+  }
+  return "";
+}
+
 export function samePerson(value: string | undefined, user: any) {
   const normalized = String(value || "").trim().toLowerCase();
   return Boolean(normalized) && [user?.name, user?.username]
