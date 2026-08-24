@@ -37,6 +37,11 @@ type WorkMemoRecord = {
 };
 
 const emptyMemo: WorkMemoRecord[] = [];
+function normalizeMemoRecords(value: unknown): WorkMemoRecord[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is WorkMemoRecord => Boolean(item && typeof item === "object" && typeof (item as any).id === "string" && typeof (item as any).title === "string"))
+    : [];
+}
 const statusLabels: Record<MemoStatus, string> = {
   pending: "待开始",
   "in-progress": "进行中",
@@ -92,7 +97,8 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: () => void }
   const [projectBoardData] = useProjectBoardData();
   const [personnelData] = useSyncedAppData<any[]>("personnelData", []);
   const [scheduleData, setScheduleData] = useSyncedAppData<any[]>("scheduleData", []);
-  const [records, setRecords] = useSyncedAppData<WorkMemoRecord[]>("workMemos", emptyMemo);
+  const [rawRecords, setRecords] = useSyncedAppData<WorkMemoRecord[]>("workMemos", emptyMemo);
+  const records = useMemo(() => normalizeMemoRecords(rawRecords), [rawRecords]);
   const [filter, setFilter] = useState<"all" | "mine" | "company" | "unconfirmed" | "overdue">("all");
   const [isOpen, setIsOpen] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState<WorkMemoRecord | null>(null);
@@ -157,13 +163,13 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: () => void }
       feedback: "",
       createdAt: new Date().toISOString(),
     };
-    setRecords(current => [record, ...current]);
+    setRecords(current => [record, ...normalizeMemoRecords(current)]);
     setForm({ title: "", detail: "", projectName: "", targetType: "internal", crewName: "", crewContact: "", assignee: "", dueDate: today, priority: "normal" });
     setIsOpen(false);
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "工作安排已发布，负责人可以开始执行" }));
   };
 
-  const updateMemo = (id: string, changes: Partial<WorkMemoRecord>) => setRecords(current => current.map(item => item.id === id ? { ...item, ...changes } : item));
+  const updateMemo = (id: string, changes: Partial<WorkMemoRecord>) => setRecords(current => normalizeMemoRecords(current).map(item => item.id === id ? { ...item, ...changes } : item));
 
   const openFollowUp = (parent: WorkMemoRecord) => {
     if (!canCreateFollowUp(parent, user)) return;
@@ -183,7 +189,7 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: () => void }
     event.preventDefault();
     if (!followUpFor || !followUpForm.title.trim() || !followUpForm.assignee || !followUpForm.dueDate) return;
     const record = createFollowUpRecord(followUpFor, followUpForm, user);
-    await setRecords((current) => [record, ...current]);
+    await setRecords((current) => [record, ...normalizeMemoRecords(current)]);
     if (record.projectId) await setScheduleData((current) => appendFollowUpToSchedule(current, record));
     setFollowUpFor(null);
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "后续跟进已发布，已加入工作备忘和项目排期" }));

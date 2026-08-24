@@ -54,8 +54,11 @@ export function buildTaskChain<T extends { id: string; title: string; parentMemo
 }
 
 export function getTaskChainRoots<T extends { id: string; parentMemoId?: string }>(records: T[] = []) {
-  const ids = new Set(records.map((item) => item.id));
-  return records.filter((item) => !item.parentMemoId || !ids.has(item.parentMemoId));
+  const safeRecords = Array.isArray(records)
+    ? records.filter((item) => Boolean(item && typeof item === "object" && item.id))
+    : [];
+  const ids = new Set(safeRecords.map((item) => item.id));
+  return safeRecords.filter((item) => !item.parentMemoId || !ids.has(item.parentMemoId));
 }
 
 export function getTaskChains<T extends { id: string; title: string; parentMemoId?: string; rootMemoId?: string; chainId?: string }>(records: T[] = []) {

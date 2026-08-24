@@ -16,7 +16,10 @@ const statusTone: Record<string, string> = { pending: "bg-slate-100 text-slate-6
 export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps) {
   const { user } = useAuth();
   const [projectBoardData] = useProjectBoardData();
-  const [records, setRecords] = useSyncedAppData<any[]>("workMemos", []);
+  const [rawRecords, setRecords] = useSyncedAppData<any[]>("workMemos", []);
+  const records = useMemo(() => Array.isArray(rawRecords)
+    ? rawRecords.filter((item: any) => item && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string")
+    : [], [rawRecords]);
   const [personnel] = useSyncedAppData<any[]>("personnelData", []);
   const [scheduleData, setScheduleData] = useSyncedAppData<any[]>("scheduleData", []);
   const projects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
@@ -71,7 +74,7 @@ export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps
     event.preventDefault();
     if (!followUpFor || !form.title.trim() || !form.assignee || !form.dueDate) return;
     const task = createFollowUpRecord(followUpFor, form, user);
-    await setRecords((current) => [...current, task]);
+    await setRecords((current) => [...(Array.isArray(current) ? current : []), task]);
     await setScheduleData((current) => appendFollowUpToSchedule(current, task));
     setFollowUpFor(null);
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "后续跟进已发布，并已加入任务链" }));
