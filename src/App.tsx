@@ -57,11 +57,20 @@ export default function App() {
   const [projectBoardData] = useProjectBoardData();
   const allProjects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
   const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || "dashboard");
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [selectedProjectReference, setSelectedProjectReference] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("stage") || null);
   const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices" | "procurement">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
   const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; recordId: string | null; returnTab: string }>({ projectId: null, recordId: null, returnTab: "dashboard" });
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const handleChange = () => setIsMobileViewport(media.matches);
+    handleChange();
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
+  }, []);
 
   const navigateToTab = (tab: string) => {
     const permission = tabPermissions[tab];
@@ -190,7 +199,7 @@ export default function App() {
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
-          {activeTab === "work-memo" && <><div className="md:hidden min-h-full"><MobileWorkMemo /></div><div className="hidden md:block"><WorkMemo /></div></>}
+          {activeTab === "work-memo" && (isMobileViewport ? <MobileWorkMemo /> : <WorkMemo />)}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}
           {activeTab === "organization" && <><div className="md:hidden min-h-full"><MobileWorkspace module="organization" setActiveTab={setActiveTab} /></div><div className="hidden md:block h-full"><Organization /></div></>}
