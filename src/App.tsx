@@ -39,6 +39,7 @@ const MobileCollaboration = lazy(() => import("./components/MobileCollaboration"
 const MobileWorkspace = lazy(() => import("./components/MobileWorkspace").then((module) => ({ default: module.MobileWorkspace })));
 const AccountManagement = lazy(() => import("./components/AccountManagement").then((module) => ({ default: module.AccountManagement })));
 const WorkMemo = lazy(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
+const MobileWorkMemo = lazy(() => import("./components/MobileWorkMemo").then((module) => ({ default: module.MobileWorkMemo })));
 const TaskChains = lazy(() => import("./components/TaskChains").then((module) => ({ default: module.TaskChains })));
 const VersionManagement = lazy(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
 
@@ -201,7 +202,7 @@ export default function App() {
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
           {activeTab === "site-survey" && <SiteSurvey initialProjectId={surveyContext.projectId} initialRecordId={surveyContext.recordId} onBack={() => { if (surveyContext.returnTab === "lifecycle" && surveyContext.projectId) openProjectLifecycle(surveyContext.projectId); else navigateToTab(surveyContext.returnTab); setSurveyContext({ projectId: null, recordId: null, returnTab: "dashboard" }); }} />}
           {activeTab === "schedule" && <><div className="md:hidden min-h-full"><MobileWorkspace module="schedule" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><Schedule /></div></>}
-          {activeTab === "work-memo" && <WorkMemo />}
+          {activeTab === "work-memo" && <><div className="md:hidden min-h-full"><MobileWorkMemo /></div><div className="hidden md:block"><WorkMemo /></div></>}
           {activeTab === "task-chains" && <TaskChains projectReference={selectedProjectReference || undefined} onOpenWorkMemo={() => navigateToTab("work-memo")} />}
           {activeTab === "acceptance" && <><div className="md:hidden min-h-full"><MobileWorkspace module="acceptance" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><ProjectAcceptance /></div></>}
           {activeTab === "cost" && <><div className="md:hidden min-h-full"><MobileWorkspace module="cost" setActiveTab={setActiveTab} /></div><div className="hidden md:block"><CostDashboard /></div></>}

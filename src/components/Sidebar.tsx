@@ -16,6 +16,7 @@ const navGroups = [
     items: [
       { id: "dashboard", label: "项目汇总", icon: LayoutDashboard, permission: "dashboard" },
       { id: "work-memo", label: "工作备忘", icon: ClipboardList, permission: "schedule" },
+      { id: "task-chains", label: "任务链", icon: ClipboardList, permission: "schedule" },
       { id: "board", label: "多项目看板", icon: KanbanSquare, permission: "projects" },
       { id: "schedule", label: "施工日程", icon: CalendarDays, permission: "schedule" },
     ],
@@ -64,7 +65,7 @@ const navGroups = [
 const mobileNavItems = [
   { id: "dashboard", label: "汇总", icon: LayoutDashboard },
   { id: "board", label: "项目", icon: KanbanSquare },
-  { id: "schedule", label: "待办", icon: CalendarDays },
+  { id: "work-memo", label: "待办", icon: ClipboardList },
   { id: "chat", label: "协作", icon: MessageSquare },
 ];
 
