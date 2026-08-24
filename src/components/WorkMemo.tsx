@@ -5,7 +5,7 @@ import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { cn } from "@/src/lib/utils";
 import { formatLocalDate } from "@/src/lib/management";
-import { appendFollowUpToSchedule, buildTaskChain, canCreateFollowUp, createFollowUpRecord, getTaskChains } from "@/src/lib/workMemoFollowUps";
+import { appendFollowUpToSchedule, buildTaskChain, canCreateFollowUp, createFollowUpRecord, getAssignees, getTaskChains } from "@/src/lib/workMemoFollowUps";
 import { resolveFollowUpProject } from "@/src/lib/followUpProject";
 
 type MemoStatus = "pending" | "in-progress" | "feedback" | "confirmed";
@@ -39,7 +39,9 @@ type WorkMemoRecord = {
 const emptyMemo: WorkMemoRecord[] = [];
 function normalizeMemoRecords(value: unknown): WorkMemoRecord[] {
   return Array.isArray(value)
-    ? value.filter((item): item is WorkMemoRecord => Boolean(item && typeof item === "object" && typeof (item as any).id === "string" && typeof (item as any).title === "string"))
+    ? value
+      .filter((item): item is WorkMemoRecord => Boolean(item && typeof item === "object" && typeof (item as any).id === "string" && typeof (item as any).title === "string"))
+      .map((item) => ({ ...item, assignees: getAssignees(item) }))
     : [];
 }
 const statusLabels: Record<MemoStatus, string> = {
@@ -75,12 +77,12 @@ function ChainBranch({ item, byParent, depth }: { key?: string; item: WorkMemoRe
 }
 
 function ChainNode({ item, label }: { item: WorkMemoRecord; label: string }) {
-  const assignees = item.assignees?.length ? item.assignees.join("、") : item.assignee || "待指派";
+  const assignees = getAssignees(item).join("、") || "待指派";
   return <div className="rounded-lg border border-white bg-white px-3 py-2 shadow-sm"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold text-violet-500">{label}</span><span className="text-[10px] text-slate-400">{statusLabels[item.status]}</span></div><p className="mt-1 text-sm font-semibold text-slate-800">{item.title}</p><p className="mt-1 text-xs text-slate-500">{assignees} · {item.dueDate || "未设置日期"}</p></div>;
 }
 
 function hasAssignedPerson(item: WorkMemoRecord, user: any) {
-  return (item.assignees?.length ? item.assignees : [item.assignee]).some((person) => isSamePerson(person, user));
+  return getAssignees(item).some((person) => isSamePerson(person, user));
 }
 
 function looksLikeFollowUp(feedback: string) {
@@ -198,7 +200,7 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: () => void }
   const openEditMemo = (item: WorkMemoRecord) => {
     if (item.status !== "confirmed" || !canOperate(item)) return;
     setEditingMemo(item);
-    setEditForm({ title: item.title, detail: item.detail || "", projectName: item.projectName || "", assignee: item.assignee || item.assignees?.[0] || "", dueDate: item.dueDate, priority: item.priority });
+    setEditForm({ title: item.title, detail: item.detail || "", projectName: item.projectName || "", assignee: getAssignees(item)[0] || "", dueDate: item.dueDate, priority: item.priority });
   };
 
   const saveEditedMemo = (event: FormEvent) => {

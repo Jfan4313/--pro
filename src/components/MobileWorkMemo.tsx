@@ -3,7 +3,7 @@ import { CalendarDays, ChevronDown, Clock3, GitBranch, MessageSquareText, UserRo
 import { useAuth } from "@/src/lib/auth";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { formatLocalDate } from "@/src/lib/management";
-import { getTaskChains } from "@/src/lib/workMemoFollowUps";
+import { getAssignees, getTaskChains } from "@/src/lib/workMemoFollowUps";
 import { cn } from "@/src/lib/utils";
 
 const statusLabels: Record<string, string> = {
@@ -34,7 +34,7 @@ export function MobileWorkMemo() {
   // Older caches and interrupted syncs can briefly return null or an object
   // instead of the current array shape. Keep that transient state renderable.
   const records = useMemo(() => Array.isArray(rawRecords)
-    ? rawRecords.filter((item: any) => item && typeof item === "object")
+    ? rawRecords.filter((item: any) => item && typeof item === "object").map((item: any) => ({ ...item, assignees: getAssignees(item) }))
     : [], [rawRecords]);
   const [filter, setFilter] = useState<"all" | "mine" | "overdue">("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -42,7 +42,7 @@ export function MobileWorkMemo() {
   const chains = useMemo(() => getTaskChains(records), [records]);
   const visible = useMemo(() => records.filter((item: any) => {
     if (filter === "mine") {
-      const people = item.assignees?.length ? item.assignees : [item.assignee];
+      const people = getAssignees(item);
       return people.some((person: string) => samePerson(person, user));
     }
     if (filter === "overdue") return item.status !== "confirmed" && item.dueDate < today;
@@ -57,7 +57,7 @@ export function MobileWorkMemo() {
       </div>
       <div className="mt-5 grid grid-cols-3 gap-2">
         <Metric label="未完成" value={records.filter((item: any) => item.status !== "confirmed").length} />
-        <Metric label="我的待办" value={records.filter((item: any) => (item.assignees?.length ? item.assignees : [item.assignee]).some((person: string) => samePerson(person, user)) && item.status !== "confirmed")} />
+        <Metric label="我的待办" value={records.filter((item: any) => getAssignees(item).some((person: string) => samePerson(person, user)) && item.status !== "confirmed")} />
         <Metric label="任务链" value={chains.length} />
       </div>
     </header>
@@ -68,7 +68,7 @@ export function MobileWorkMemo() {
       {visible.map((item: any) => {
         const isExpanded = Boolean(expanded[item.id]);
         const overdue = item.status !== "confirmed" && item.dueDate < today;
-        const assignees = item.assignees?.length ? item.assignees.join("、") : item.assignee || "待指派";
+        const assignees = getAssignees(item).join("、") || "待指派";
         const chain = chains.find((candidate: any) => candidate.chainId === (item.chainId || item.rootMemoId || item.id));
         return <article key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
           <button type="button" onClick={() => setExpanded(current => ({ ...current, [item.id]: !isExpanded }))} className="w-full text-left">

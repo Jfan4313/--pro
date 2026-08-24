@@ -18,6 +18,13 @@ export type FollowUpParent = {
   chainId?: string;
 };
 
+export function getAssignees(item: { assignees?: unknown; assignee?: unknown }): string[] {
+  if (Array.isArray(item.assignees)) return item.assignees.map((name) => String(name || "").trim()).filter(Boolean);
+  if (typeof item.assignees === "string" && item.assignees.trim()) return [item.assignees.trim()];
+  if (typeof item.assignee === "string" && item.assignee.trim()) return [item.assignee.trim()];
+  return [];
+}
+
 export function samePerson(value: string | undefined, user: any) {
   const normalized = String(value || "").trim().toLowerCase();
   return Boolean(normalized) && [user?.name, user?.username]
@@ -28,7 +35,7 @@ export function samePerson(value: string | undefined, user: any) {
 
 export function canCreateFollowUp(item: FollowUpParent, user: any) {
   return Boolean(samePerson(item.creator, user)
-    || (item.assignees?.length ? item.assignees : [item.assignee]).some((name) => samePerson(name, user))
+    || getAssignees(item).some((name) => samePerson(name, user))
     || user?.role === "admin"
     || user?.permissions?.includes("*"));
 }
