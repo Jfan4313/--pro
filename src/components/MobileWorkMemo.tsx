@@ -30,7 +30,12 @@ function statusTone(status: string) {
 
 export function MobileWorkMemo() {
   const { user } = useAuth();
-  const [records] = useSyncedAppData<any[]>("workMemos", []);
+  const [rawRecords] = useSyncedAppData<any[]>("workMemos", []);
+  // Older caches and interrupted syncs can briefly return null or an object
+  // instead of the current array shape. Keep that transient state renderable.
+  const records = useMemo(() => Array.isArray(rawRecords)
+    ? rawRecords.filter((item: any) => item && typeof item === "object")
+    : [], [rawRecords]);
   const [filter, setFilter] = useState<"all" | "mine" | "overdue">("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const today = formatLocalDate();

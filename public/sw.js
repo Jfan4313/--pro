@@ -1,4 +1,6 @@
-const CACHE_NAME = "zhijian-pro-v5";
+// Bump this when deploying a new frontend so phones do not reuse an old
+// index/chunk combination from a previous release.
+const CACHE_NAME = "zhijian-pro-v6";
 const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
