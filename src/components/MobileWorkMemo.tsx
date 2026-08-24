@@ -72,7 +72,7 @@ export function MobileWorkMemo() {
       {visible.map((item: any) => {
         const isExpanded = Boolean(expanded[item.id]);
         const overdue = item.status !== "confirmed" && item.dueDate < today;
-        const assignees = getAssignees(item).join("、") || "待指派";
+        const assignees = String(getAssignees(item).join("、") || "待指派");
         const chain = chains.find((candidate: any) => candidate.chainId === (item.chainId || item.rootMemoId || item.id));
         return <article key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
           <button type="button" onClick={() => setExpanded(current => ({ ...current, [item.id]: !isExpanded }))} className="w-full text-left">
