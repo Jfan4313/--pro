@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, CalendarDays, Camera, DollarSign, FileText, GitBranch, Handshake, Package, Truck, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarDays, Camera, DollarSign, FileText, Handshake, Package, Truck, Users } from "lucide-react";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { deriveRisks, flattenProjects, flattenTasks, getProjectNumber } from "@/src/lib/management";
@@ -8,12 +8,10 @@ import { getMissingDocs } from "./ExternalPartners";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { offlineDb } from "@/src/lib/offlineDb";
 import { resolveProjectReference } from "@/src/lib/projectNumbering";
-import { buildTaskChain } from "@/src/lib/workMemoFollowUps";
 
-export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle, onOpenSurvey, onOpenTaskChains }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenLifecycle?: (projectReference: string) => void; onOpenSurvey?: (projectId: string) => void; onOpenTaskChains?: (projectReference?: string) => void }) {
+export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle, onOpenSurvey }: { projectId: string | null; onBack: () => void; setActiveTab: (tab: string) => void; onOpenLifecycle?: (projectReference: string) => void; onOpenSurvey?: (projectId: string) => void }) {
   const [projectBoardData] = useProjectBoardData();
   const [scheduleData] = useSyncedAppData<any[]>("scheduleData", []);
-  const [workMemos] = useSyncedAppData<any[]>("workMemos", []);
   const [contracts] = useSyncedAppData<any[]>("project_contracts", []);
   const [supplyOrders] = useSyncedAppData<any[]>("supplyOrders", []);
   const [materials] = useSyncedAppData<any[]>("materialsData", []);
@@ -28,9 +26,6 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle
   const resolvedProject = resolveProjectReference(projects, projectId);
   const project = resolvedProject.project || (!projectId ? projects[0] : null);
   const tasks = flattenTasks(scheduleData).filter((task: any) => task.projectId === project?.id || task.projectName === project?.name);
-  const projectMemos = workMemos.filter((memo: any) => memo.projectId === project?.id || memo.projectName === project?.name);
-  const projectMemoIds = new Set(projectMemos.map((memo: any) => memo.id));
-  const taskChainRoots = projectMemos.filter((memo: any) => !memo.parentMemoId || !projectMemoIds.has(memo.parentMemoId));
   const projectContracts = contracts.filter((contract: any) => contract.projectId === project?.id || String(contract.name || "").includes(project?.name || ""));
   const projectOrders = supplyOrders.filter((order: any) => order.projectId === project?.id || order.projectName === project?.name);
   const projectMaterials = materials.filter((item: any) => item.project === project?.name || item.projectId === project?.id);
@@ -107,10 +102,6 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle
           ))}
           {tasks.length === 0 && <Empty text="暂无任务" />}
         </Panel>
-        <Panel title="项目任务链" action="打开完整任务链" onAction={() => onOpenTaskChains?.(project.id)} icon={GitBranch}>
-          {taskChainRoots.slice(0, 5).map((root: any) => <ProjectTaskChain key={root.id} root={root} records={projectMemos} />)}
-          {taskChainRoots.length === 0 && <Empty text="暂无任务链" />}
-        </Panel>
         <Panel title="合同与成本" action="查看成本" onAction={() => setActiveTab("cost")} icon={DollarSign}>
           <Row title="合同数量" meta={`${projectContracts.length} 份`} />
           <Row title="预算/实际" meta={`${budgetTotal || 0} 万 / ${actualTotal} 万`} />
@@ -140,16 +131,6 @@ export function ProjectDetail({ projectId, onBack, setActiveTab, onOpenLifecycle
       </div>
     </div>
   );
-}
-
-function ProjectTaskChain({ root, records }: { key?: string; root: any; records: any[] }) {
-  const chain = buildTaskChain(records, root.id);
-  const children = chain.byParent.get(root.id) || [];
-  return <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
-    <div className="flex items-center gap-2"><GitBranch className="h-4 w-4 text-violet-600" /><span className="text-sm font-bold text-slate-800">{root.title}</span><span className="ml-auto text-[10px] text-slate-500">{root.status === "confirmed" ? "已完成" : "进行中"}</span></div>
-    <p className="mt-1 text-xs text-slate-500">{root.assignees?.join("、") || root.assignee || "待指派"} · {root.dueDate || "未设置日期"}</p>
-    {children.length > 0 && <div className="mt-2 space-y-1 border-l-2 border-violet-200 pl-3">{children.map((child: any) => <div key={child.id} className="rounded-lg border border-white bg-white px-2.5 py-2"><div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-slate-700">{child.title}</span><span className="text-[10px] text-slate-400">{child.assignees?.join("、") || child.assignee || "待指派"}</span></div><p className="mt-1 text-[10px] text-slate-400">后续任务 · {child.dueDate || "未设置日期"}</p></div>)}</div>}
-  </div>;
 }
 
 function Metric({ icon: Icon, label, value }: any) {
