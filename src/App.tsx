@@ -46,23 +46,10 @@ const VersionManagement = lazy(() => import("./components/VersionManagement").th
 class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
   private readonly childContent: ReactNode;
-
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.childContent = props.children;
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("工作备忘渲染异常，已切换安全视图", error, info.componentStack);
-  }
-
-  render() {
-    return this.state.hasError ? <MobileWorkMemoFallback /> : this.childContent;
-  }
+  constructor(props: { children: ReactNode }) { super(props); this.childContent = props.children; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error("工作备忘渲染异常，已切换安全视图", error, info.componentStack); }
+  render() { return this.state.hasError ? <MobileWorkMemoFallback /> : this.childContent; }
 }
 
 function MobileWorkMemoFallback() {
@@ -84,7 +71,7 @@ function MobileWorkMemoFallback() {
   }));
   const chainCount = new Set(records.map((item) => item.chainId).filter(Boolean)).size;
   const visible = records.filter((item) => filter === "mine" ? [item.assignee, ...item.assignees].some((name) => name === user?.name || name === user?.username) : filter === "overdue" ? item.status !== "confirmed" && item.dueDate < today : true);
-  return <div className="min-h-full bg-slate-50 px-4 pb-6 pt-4"><header className="rounded-[28px] bg-slate-950 p-5 text-white"><p className="text-xs font-medium text-indigo-300">公司工作流</p><h2 className="mt-1 text-2xl font-bold">工作备忘</h2><p className="mt-2 text-sm text-slate-400">安全视图已启用，任务内容仍然保留。</p><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-2xl bg-white/10 p-3 text-center"><b className="text-xl">{records.length}</b><p className="mt-1 text-[10px] text-slate-300">工作安排</p></div><div className="rounded-2xl bg-white/10 p-3 text-center"><b className="text-xl">{chainCount}</b><p className="mt-1 text-[10px] text-slate-300">任务链</p></div></div></header><div className="mt-4 flex gap-2">{([["all", "全部"], ["mine", "我的待办"], ["overdue", "已逾期"]] as const).map(([id, label]) => <button key={id} onClick={() => setFilter(id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-500"}`}>{label}</button>)}</div><div className="mt-4 space-y-3">{visible.map((item) => { const isExpanded = Boolean(expanded[item.id]); const assignees = item.assignees.length ? item.assignees.join("、") : item.assignee; return <article key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm"><button type="button" className="w-full text-left" onClick={() => setExpanded((current) => ({ ...current, [item.id]: !isExpanded }))}><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-slate-900">{item.title}</h3><p className="mt-2 text-xs text-slate-500">{item.projectName} · {assignees}</p></div><span className="text-xs text-slate-400">{isExpanded ? "收起" : "展开"}</span></div><p className="mt-3 text-[11px] text-slate-400">截止：{item.dueDate}{item.dueTime ? ` ${item.dueTime}` : ""} · 状态：{item.status}</p></button>{isExpanded && <div className="mt-3 border-t border-slate-100 pt-3"><p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.detail}</p>{item.feedback && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">执行反馈：{item.feedback}</p>}<p className="mt-2 text-xs text-violet-700">任务链：{item.chainId || "当前任务"}{item.parentMemoId ? ` · 来源任务 ${item.parentMemoId}` : ""}</p></div>}</article>; })}{visible.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400">当前筛选没有工作备忘</div>}</div></div>;
+  return <div className="min-h-full bg-slate-50 px-4 pb-6 pt-4"><header className="rounded-[28px] bg-slate-950 p-5 text-white"><p className="text-xs font-medium text-indigo-300">公司工作流</p><h2 className="mt-1 text-2xl font-bold">工作备忘</h2><p className="mt-2 text-sm text-slate-400">查看安排、任务详情、执行反馈和任务链。</p><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-2xl bg-white/10 p-3 text-center"><b className="text-xl">{records.length}</b><p className="mt-1 text-[10px] text-slate-300">工作安排</p></div><div className="rounded-2xl bg-white/10 p-3 text-center"><b className="text-xl">{chainCount}</b><p className="mt-1 text-[10px] text-slate-300">任务链</p></div></div></header><div className="mt-4 flex gap-2">{([["all", "全部"], ["mine", "我的待办"], ["overdue", "已逾期"]] as const).map(([id, label]) => <button key={id} onClick={() => setFilter(id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-500"}`}>{label}</button>)}</div><div className="mt-4 space-y-3">{visible.map((item) => { const isExpanded = Boolean(expanded[item.id]); const assignees = item.assignees.length ? item.assignees.join("、") : item.assignee; const chainNodes = records.filter((candidate) => candidate.chainId === item.chainId).map((candidate) => candidate.title); return <article key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm"><button type="button" className="w-full text-left" onClick={() => setExpanded((current) => ({ ...current, [item.id]: !isExpanded }))}><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-slate-900">{item.title}</h3><p className="mt-2 text-xs text-slate-500">{item.projectName} · {assignees}</p></div><span className="text-xs text-slate-400">{isExpanded ? "收起" : "展开"}</span></div><p className="mt-3 text-[11px] text-slate-400">截止：{item.dueDate}{item.dueTime ? ` ${item.dueTime}` : ""} · 状态：{item.status}</p></button>{isExpanded && <div className="mt-3 border-t border-slate-100 pt-3"><p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.detail}</p>{item.feedback && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">执行反馈：{item.feedback}</p>}<p className="mt-2 text-xs text-violet-700">任务链节点：{chainNodes.join(" → ") || item.title}</p>{item.parentMemoId && <p className="mt-1 text-xs text-violet-700">来源任务：{item.parentMemoId}</p>}</div>}</article>; })}{visible.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400">当前筛选没有工作备忘</div>}</div></div>;
 }
 
 const tabPermissions: Record<string, string> = {
