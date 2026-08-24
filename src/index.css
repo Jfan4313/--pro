@@ -42,6 +42,29 @@
   }
 }
 
+@keyframes task-chain-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.task-chain-reveal {
+  animation: task-chain-reveal 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  transform-origin: top center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-chain-reveal {
+    animation-duration: 100ms;
+  }
+}
+
 @media (max-width: 767px) {
   .app-shell {
     height: 100dvh;
