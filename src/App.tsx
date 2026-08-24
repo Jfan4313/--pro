@@ -14,7 +14,7 @@ import { useAuth } from "./lib/auth";
 import { useProjectBoardData } from "./hooks/useProjectBoardData";
 import { useSyncedAppData } from "./hooks/useSyncedAppData";
 import { useWorkspaceMigrations } from "./hooks/useWorkspaceMigrations";
-import { flattenProjects, getProjectNumber } from "./lib/management";
+import { flattenProjects, formatLocalDate, getProjectNumber } from "./lib/management";
 import { resolveProjectReference } from "./lib/projectNumbering";
 import { useArchiveReconciler } from "./hooks/useArchiveReconciler";
 
@@ -67,7 +67,10 @@ class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasErro
 
 function MobileWorkMemoFallback() {
   const [rawRecords] = useSyncedAppData<any[]>("workMemos", []);
-  const records = Array.isArray(rawRecords) ? rawRecords.filter((item: any) => item && typeof item === "object") : [];
+  const [filter, setFilter] = useState<"all" | "mine" | "overdue">("all");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const { user } = useAuth();
+  const today = formatLocalDate();
   const text = (value: unknown, fallback = "") => {
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
     if (value && typeof value === "object") {
@@ -76,8 +79,12 @@ function MobileWorkMemoFallback() {
     }
     return fallback;
   };
-  const chainCount = new Set(records.map((item: any) => text(item.chainId || item.rootMemoId || item.id)).filter(Boolean)).size;
-  return <div className="min-h-full bg-slate-50 px-4 pb-6 pt-4"><header className="rounded-[28px] bg-slate-950 p-5 text-white"><p className="text-xs font-medium text-indigo-300">公司工作流</p><h2 className="mt-1 text-2xl font-bold">工作备忘</h2><p className="mt-2 text-sm text-slate-400">安全视图已启用，任务内容仍然保留。</p><div className="mt-4 rounded-2xl bg-white/10 p-3 text-sm">{records.length} 条安排 · {chainCount} 条任务链</div></header><div className="mt-4 space-y-3">{records.map((item: any, index: number) => <article key={text(item.id) || index} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm"><h3 className="text-sm font-bold text-slate-900">{text(item.title, "未命名工作安排")}</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{text(item.detail, "暂无任务详情")}</p><p className="mt-3 text-xs text-slate-500">负责人：{text(item.assignee, "待指派")} · 截止：{text(item.dueDate, "未设置")} · 状态：{text(item.status, "待开始")}</p>{text(item.feedback) && <p className="mt-2 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">执行反馈：{text(item.feedback)}</p>}</article>)}{records.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400">暂无工作备忘</div>}</div></div>;
+  const records = (Array.isArray(rawRecords) ? rawRecords : []).filter((item: any) => item && typeof item === "object").map((item: any, index: number) => ({
+    id: text(item.id, `legacy-memo-${index}`), title: text(item.title || item.name, "未命名工作安排"), detail: text(item.detail, "暂无任务详情"), projectName: text(item.projectName, "未关联项目"), creator: text(item.creator, "未填写"), dueDate: text(item.dueDate, "未设置"), dueTime: text(item.dueTime), feedback: text(item.feedback), status: text(item.status, "pending"), assignee: text(item.assignee, "待指派"), assignees: Array.isArray(item.assignees) ? item.assignees.map((name: unknown) => text(name)).filter(Boolean) : [], chainId: text(item.chainId || item.rootMemoId || item.id), parentMemoId: text(item.parentMemoId),
+  }));
+  const chainCount = new Set(records.map((item) => item.chainId).filter(Boolean)).size;
+  const visible = records.filter((item) => filter === "mine" ? [item.assignee, ...item.assignees].some((name) => name === user?.name || name === user?.username) : filter === "overdue" ? item.status !== "confirmed" && item.dueDate < today : true);
+  return <div className="min-h-full bg-slate-50 px-4 pb-6 pt-4"><header className="rounded-[28px] bg-slate-950 p-5 text-white"><p className="text-xs font-medium text-indigo-300">公司工作流</p><h2 className="mt-1 text-2xl font-bold">工作备忘</h2><p className="mt-2 text-sm text-slate-400">安全视图已启用，任务内容仍然保留。</p><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-2xl bg-white/10 p-3 text-center"><b className="text-xl">{records.length}</b><p className="mt-1 text-[10px] text-slate-300">工作安排</p></div><div className="rounded-2xl bg-white/10 p-3 text-center"><b className="text-xl">{chainCount}</b><p className="mt-1 text-[10px] text-slate-300">任务链</p></div></div></header><div className="mt-4 flex gap-2">{([["all", "全部"], ["mine", "我的待办"], ["overdue", "已逾期"]] as const).map(([id, label]) => <button key={id} onClick={() => setFilter(id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-500"}`}>{label}</button>)}</div><div className="mt-4 space-y-3">{visible.map((item) => { const isExpanded = Boolean(expanded[item.id]); const assignees = item.assignees.length ? item.assignees.join("、") : item.assignee; return <article key={item.id} className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm"><button type="button" className="w-full text-left" onClick={() => setExpanded((current) => ({ ...current, [item.id]: !isExpanded }))}><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-slate-900">{item.title}</h3><p className="mt-2 text-xs text-slate-500">{item.projectName} · {assignees}</p></div><span className="text-xs text-slate-400">{isExpanded ? "收起" : "展开"}</span></div><p className="mt-3 text-[11px] text-slate-400">截止：{item.dueDate}{item.dueTime ? ` ${item.dueTime}` : ""} · 状态：{item.status}</p></button>{isExpanded && <div className="mt-3 border-t border-slate-100 pt-3"><p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.detail}</p>{item.feedback && <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900">执行反馈：{item.feedback}</p>}<p className="mt-2 text-xs text-violet-700">任务链：{item.chainId || "当前任务"}{item.parentMemoId ? ` · 来源任务 ${item.parentMemoId}` : ""}</p></div>}</article>; })}{visible.length === 0 && <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400">当前筛选没有工作备忘</div>}</div></div>;
 }
 
 const tabPermissions: Record<string, string> = {
