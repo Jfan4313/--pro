@@ -5,7 +5,7 @@ import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useAuth } from "@/src/lib/auth";
 import { cn } from "@/src/lib/utils";
 import { flattenProjects, formatLocalDate } from "@/src/lib/management";
-import { appendFollowUpToSchedule, canCreateFollowUp, createFollowUpRecord, getTaskChains } from "@/src/lib/workMemoFollowUps";
+import { appendFollowUpToSchedule, canCreateFollowUp, createFollowUpRecord, getTaskChains, groupTaskChainsByProject, UNASSIGNED_PROJECT_KEY } from "@/src/lib/workMemoFollowUps";
 
 type TaskChainsProps = { projectReference?: string; onOpenWorkMemo?: () => void };
 type Scope = "focus" | "all" | "recent";
@@ -32,6 +32,7 @@ export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps
   const [query, setQuery] = useState("");
   const [selectedChainId, setSelectedChainId] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expandedProjectKey, setExpandedProjectKey] = useState("");
   const [followUpFor, setFollowUpFor] = useState<any | null>(null);
   const [form, setForm] = useState({ title: "", detail: "", projectId: "", projectName: "", assignee: "", dueDate: formatLocalDate(), priority: "normal" as "normal" | "high" });
   const today = formatLocalDate();
@@ -51,10 +52,17 @@ export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps
     const haystack = nodes.map((n) => `${n.title} ${n.detail} ${n.projectName}`).join(" ").toLowerCase();
     return matchesScope && matchesProject && matchesStatus && matchesAssignee && (!query || haystack.includes(query.toLowerCase()));
   }), [chains, scope, projectFilter, statusFilter, assigneeFilter, query]);
+  const projectGroups = useMemo(() => groupTaskChainsByProject(visibleChains), [visibleChains]);
   const selectedChain = visibleChains.find((chain: any) => chain.chainId === selectedChainId) || visibleChains[0];
   const visibleNodes = useMemo(() => visibleChains.flatMap((chain: any) => Array.from(chain.byParent.values()).flat() as any[]), [visibleChains]);
   const stats = useMemo(() => ({ total: visibleNodes.length, done: visibleNodes.filter((n) => n.status === "confirmed" || n.status === "completed").length, active: visibleNodes.filter((n) => n.status === "in_progress").length, feedback: visibleNodes.filter((n) => n.status === "feedback").length, overdue: visibleNodes.filter((n) => n.status !== "confirmed" && n.status !== "completed" && n.dueDate && n.dueDate < today).length }), [visibleNodes, today]);
   const assignees = useMemo(() => Array.from(new Set(records.flatMap((item: any) => item.assignees || [item.assignee]).filter(Boolean))), [records]);
+
+  useEffect(() => {
+    if (!projectFilter) return;
+    const group = projectGroups.find((item) => item.projectId === projectFilter || item.projectName === projectFilter || item.key === projectFilter);
+    if (group) setExpandedProjectKey(group.key);
+  }, [projectFilter, projectGroups]);
 
   useEffect(() => {
     if (!selectedChain && visibleChains[0]) setSelectedChainId(visibleChains[0].chainId);
@@ -89,7 +97,7 @@ export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><div className="grid grid-cols-1 gap-3 md:grid-cols-5"><select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"><option value="">全部项目</option>{projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"><option value="all">全部状态</option>{Object.entries(statusText).filter(([key]) => key !== "completed").map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"><option value="all">全部负责人</option>{assignees.map((name) => <option key={name}>{name}</option>)}</select><label className="relative md:col-span-2"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索任务链名称、项目或详情" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" /></label></div><div className="mt-3 flex flex-wrap gap-2"><ScopeButton active={scope === "focus"} onClick={() => setScope("focus")}>未完成任务链</ScopeButton><ScopeButton active={scope === "recent"} onClick={() => setScope("recent")}>最近30天已完成</ScopeButton><ScopeButton active={scope === "all"} onClick={() => setScope("all")}>全部任务链</ScopeButton></div></section>
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[["总任务", stats.total, "text-indigo-600"], ["已完成", stats.done, "text-emerald-600"], ["进行中", stats.active, "text-amber-600"], ["待反馈", stats.feedback, "text-orange-600"], ["已逾期", stats.overdue, "text-rose-600"]].map(([label, value, tone]) => <div key={String(label)} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className={cn("text-2xl font-bold", tone)}>{value}</div><div className="mt-1 text-xs font-semibold text-slate-500">{label}</div></div>)}</section>
       <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0 space-y-4">{visibleChains.length === 0 ? <EmptyState /> : visibleChains.map((chain: any) => <ChainCard key={chain.chainId} chain={chain} selected={selectedChain?.chainId === chain.chainId} expanded={expanded} setExpanded={setExpanded} onSelect={() => setSelectedChainId(chain.chainId)} onFollowUp={openFollowUp} user={user} />)}</div>
+        <div className="min-w-0 space-y-4">{visibleChains.length === 0 ? <EmptyState /> : projectGroups.map((group) => <ProjectGroup key={group.key} group={group} expanded={expandedProjectKey === group.key} onToggle={() => setExpandedProjectKey((current) => current === group.key ? "" : group.key)} selectedChain={selectedChain} expandedNodes={expanded} setExpandedNodes={setExpanded} onSelectChain={setSelectedChainId} onFollowUp={openFollowUp} user={user} projects={projects} />)}</div>
         <aside className="hidden h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:block">{selectedChain ? <ChainDetails chain={selectedChain} onOpenWorkMemo={onOpenWorkMemo} /> : <p className="text-sm text-slate-400">选择一条任务链查看详情</p>}</aside>
       </section>
     </main>
@@ -99,6 +107,26 @@ export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps
 
 function ScopeButton({ active, onClick, children }: any) { return <button onClick={onClick} className={cn("rounded-lg px-3 py-2 text-xs font-semibold", active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}>{children}</button>; }
 function EmptyState() { return <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-16 text-center"><GitBranch className="mx-auto h-8 w-8 text-slate-300" /><h3 className="mt-3 font-semibold text-slate-700">没有符合条件的任务链</h3><p className="mt-1 text-sm text-slate-400">可以切换到“全部任务链”查看历史记录。</p></div>; }
+
+function ProjectGroup({ group, expanded, onToggle, selectedChain, expandedNodes, setExpandedNodes, onSelectChain, onFollowUp, user, projects }: any) {
+  const nodes = group.chains.flatMap((chain: any) => Array.from(chain.byParent.values()).flat() as any[]);
+  const done = nodes.filter((node: any) => node.status === "confirmed" || node.status === "completed").length;
+  const active = nodes.filter((node: any) => node.status === "in_progress").length;
+  const feedback = nodes.filter((node: any) => node.status === "feedback").length;
+  const overdue = nodes.filter((node: any) => node.status !== "confirmed" && node.status !== "completed" && node.dueDate && node.dueDate < formatLocalDate()).length;
+  const project = projects.find((item: any) => item.id === group.projectId || item.name === group.projectName);
+  const projectName = group.key === UNASSIGNED_PROJECT_KEY ? "未关联项目" : group.projectName || project?.name || "未命名项目";
+  const projectNumber = project?.projectNumber || project?.code || "";
+  return <section className={cn("overflow-hidden rounded-2xl border bg-white shadow-sm transition", expanded ? "border-indigo-300 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200")}>
+    <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">{expanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}</span>
+      <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="truncate text-base font-bold text-slate-950">{projectName}</span>{projectNumber && <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">{projectNumber}</span>}</span><span className="mt-1 block text-xs text-slate-500">{group.chains.length} 条任务链 · {nodes.length} 个任务 · 已完成 {done}/{nodes.length}</span></span>
+      <span className="hidden shrink-0 items-center gap-2 text-xs font-semibold sm:flex"><span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">进行中 {active}</span><span className="rounded-full bg-orange-50 px-2.5 py-1 text-orange-700">待反馈 {feedback}</span>{overdue > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-700">逾期 {overdue}</span>}</span>
+      <span className="h-2 w-20 shrink-0 overflow-hidden rounded-full bg-slate-200"><span className="block h-full rounded-full bg-indigo-600" style={{ width: `${nodes.length ? Math.round(done / nodes.length * 100) : 0}%` }} /></span>
+    </button>
+    {expanded && <div className="space-y-4 border-t border-slate-100 bg-slate-50/50 p-4 md:p-5">{group.chains.map((chain: any) => <ChainCard key={chain.chainId} chain={chain} selected={selectedChain?.chainId === chain.chainId} expanded={expandedNodes} setExpanded={setExpandedNodes} onSelect={() => onSelectChain(chain.chainId)} onFollowUp={onFollowUp} user={user} />)}</div>}
+  </section>;
+}
 
 function ChainCard({ chain, selected, expanded, setExpanded, onSelect, onFollowUp, user }: any) {
   const root = chain.root; const nodes = Array.from(chain.byParent.values()).flat() as any[]; const done = nodes.filter((n) => n.status === "confirmed" || n.status === "completed").length;

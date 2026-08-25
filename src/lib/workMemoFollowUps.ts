@@ -84,6 +84,31 @@ export function getTaskChains<T extends { id: string; title: string; parentMemoI
   return getTaskChainRoots(records).map((root) => buildTaskChain(records, root.id));
 }
 
+export const UNASSIGNED_PROJECT_KEY = "__unassigned__";
+
+export function getTaskChainProject(chain: any) {
+  const nodes = Array.from(chain?.byParent?.values?.() || []).flat() as any[];
+  const root = chain?.root || {};
+  const projectId = String(root.projectId || nodes.find((node) => node?.projectId)?.projectId || "").trim();
+  const projectName = String(root.projectName || nodes.find((node) => node?.projectName)?.projectName || "").trim();
+  return {
+    key: projectId || projectName || UNASSIGNED_PROJECT_KEY,
+    projectId,
+    projectName,
+  };
+}
+
+export function groupTaskChainsByProject<T = any>(chains: T[] = []) {
+  const groups = new Map<string, { key: string; projectId: string; projectName: string; chains: T[] }>();
+  chains.forEach((chain) => {
+    const project = getTaskChainProject(chain);
+    const existing = groups.get(project.key);
+    if (existing) existing.chains.push(chain);
+    else groups.set(project.key, { ...project, chains: [chain] });
+  });
+  return Array.from(groups.values());
+}
+
 export function createFollowUpRecord(
   parent: FollowUpParent,
   input: {

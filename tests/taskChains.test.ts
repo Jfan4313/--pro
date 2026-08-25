@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getTaskChains, getTaskChainRoots } from "../src/lib/workMemoFollowUps";
+import { getTaskChains, getTaskChainRoots, groupTaskChainsByProject, UNASSIGNED_PROJECT_KEY } from "../src/lib/workMemoFollowUps";
 
 const records = [
   { id: "root", title: "完成并网作业", status: "confirmed" },
@@ -22,4 +22,17 @@ test("没有链路字段的历史记录仍作为单节点任务链", () => {
   const chain = getTaskChains(records).find((item) => item.root?.id === "legacy")!;
   assert.equal(chain.chainId, "legacy");
   assert.equal(chain.byParent.get("__root__")?.length, 1);
+});
+
+test("任务链按项目分组，项目编号优先且保留未关联项目", () => {
+  const chains = getTaskChains([
+    { id: "a", title: "项目A任务", projectId: "p1", projectName: "项目A" },
+    { id: "b", title: "项目A后续", parentMemoId: "a", rootMemoId: "a", chainId: "a", projectId: "p1", projectName: "项目A" },
+    { id: "c", title: "项目B任务", projectName: "项目B" },
+    { id: "d", title: "未关联任务" },
+  ]);
+  const groups = groupTaskChainsByProject(chains);
+  assert.deepEqual(groups.map((group) => group.key), ["p1", "项目B", UNASSIGNED_PROJECT_KEY]);
+  assert.equal(groups[0].chains.length, 1);
+  assert.equal(groups[0].projectName, "项目A");
 });
