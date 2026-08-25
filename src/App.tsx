@@ -69,12 +69,10 @@ class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasErro
 
 class PageErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
-  private readonly childContent: ReactNode;
-  constructor(props: { children: ReactNode }) { super(props); this.childContent = props.children; }
   static getDerivedStateFromError() { return { hasError: true }; }
   componentDidCatch(error: Error) { console.error("页面模块加载失败", error); }
   render() {
-    if (!this.state.hasError) return this.childContent;
+    if (!this.state.hasError) return (this as any).props.children;
     return <div className="flex min-h-full items-center justify-center bg-slate-50 p-6"><div className="max-w-md rounded-2xl border border-amber-200 bg-white p-6 text-center shadow-sm"><h2 className="text-lg font-bold text-slate-900">页面暂时无法加载</h2><p className="mt-2 text-sm text-slate-500">页面资源可能刚刚更新，请点击重试。</p><button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">重新加载</button></div></div>;
   }
 }
