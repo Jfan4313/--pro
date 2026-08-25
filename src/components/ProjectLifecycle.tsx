@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye, SkipForward, RotateCcw } from "lucide-react";
+import { Folder, FileText, CheckCircle2, ChevronRight, ChevronDown, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye, SkipForward, RotateCcw } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
@@ -40,6 +40,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
 
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState("all");
+  const [showStageFilters, setShowStageFilters] = useState(false);
   const [activeStage, setActiveStage] = useState(STAGES[0].id);
   const requestedProject = useMemo(() => resolveProjectReference(allProjects, initialProjectReference), [allProjects, initialProjectReference]);
 
@@ -299,11 +300,14 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
           <button type="button" onClick={onBack} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="返回多项目看板"><ArrowLeft className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">项目列表筛选（当前工作阶段）</div>
-          <div className="flex flex-wrap gap-1.5 mb-3 px-1">
+          <button type="button" onClick={() => setShowStageFilters((value) => !value)} className="flex w-full items-center justify-between rounded-xl px-2 py-2 text-left hover:bg-slate-50">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">项目列表筛选</span>
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500"><span>{stageFilter === "all" ? "全部项目" : STAGES.find((stage) => stage.id === stageFilter)?.name.split(" ")[1]?.split("(")[0]}</span><ChevronDown className={cn("h-4 w-4 transition-transform", showStageFilters && "rotate-180")} /></span>
+          </button>
+          {showStageFilters && <div className="flex flex-wrap gap-1.5 px-1 pb-2">
             <button onClick={() => setStageFilter("all")} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === "all" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>全部项目</button>
             {STAGES.map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("px-2.5 py-1 rounded-full text-[11px] border", stageFilter === stage.id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
-          </div>
+          </div>}
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">进行中的项目 ({visibleProjects.length})</div>
           {visibleProjects.map((p: any) => (
             <button
