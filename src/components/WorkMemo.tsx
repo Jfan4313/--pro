@@ -130,17 +130,18 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectRefe
   };
 
   const stats = useMemo(() => ({
-    total: records.filter(item => item.status !== "confirmed").length,
-    mine: records.filter(item => hasAssignedPerson(item, user) && item.status !== "confirmed").length,
+    total: records.filter(item => item.status !== "confirmed" && (item.status as string) !== "completed").length,
+    mine: records.filter(item => hasAssignedPerson(item, user) && item.status !== "confirmed" && (item.status as string) !== "completed").length,
     unconfirmed: records.filter(item => item.status === "feedback").length,
-    overdue: records.filter(item => item.status !== "confirmed" && item.dueDate < today).length,
+    overdue: records.filter(item => item.status !== "confirmed" && (item.status as string) !== "completed" && item.dueDate < today).length,
   }), [records, today, user]);
 
   const visible = useMemo(() => records.filter(item => {
+    if (item.status === "confirmed" || (item.status as string) === "completed") return false;
     if (filter === "mine") return hasAssignedPerson(item, user);
     if (filter === "company") return item.targetType === "internal";
     if (filter === "unconfirmed") return item.status === "feedback";
-    if (filter === "overdue") return item.status !== "confirmed" && item.dueDate < today;
+    if (filter === "overdue") return item.dueDate < today;
     return true;
   }), [filter, records, today, user]);
   const calendarDays = useMemo(() => {

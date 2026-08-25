@@ -44,7 +44,8 @@ export function useProjectNumbering() {
 
   return {
     allProjects,
-    conflicts: getProjectNumberConflicts(allProjects),
+    // 已归档项目不再阻塞当前项目的编号跳转；只有仍在项目看板中的项目才参与冲突提示。
+    conflicts: getProjectNumberConflicts(activeProjects),
     loading: boardLoading || archiveLoading || sequenceLoading || migrationLoading,
     reserveProjectNumber,
   };

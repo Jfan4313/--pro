@@ -103,24 +103,16 @@ export function Schedule() {
   const [scheduleTrash, setScheduleTrash] = useSyncedAppData<any[]>("scheduleTrash", []);
   const canManageSchedule = Boolean(user?.role === "admin" || user?.role === "project_manager" || can("accounts"));
   
-  // 动态获取项目列表，合并 scheduleData 和 boardData 中的项目名称，以便新建项目能够显示
+  const eligibleProjects = React.useMemo(() => boardData.flatMap((column: any) => (column.projects || []).filter((project: any) => getProjectCurrentStageInfo(project.id, lifecycleStates).index >= 3)), [boardData, lifecycleStates]);
+  const eligibleProjectIds = React.useMemo(() => new Set(eligibleProjects.map((project: any) => project.id)), [eligibleProjects]);
+  const eligibleProjectNames = React.useMemo(() => new Set(eligibleProjects.map((project: any) => String(project.name || "").trim())), [eligibleProjects]);
+
+  // 只有已签合同（或更后阶段）的项目才进入施工日程。
   const projects = React.useMemo(() => {
     const list = new Set<string>();
-    if (Array.isArray(data)) {
-        data.forEach((p: any) => p.name && !schedulePhasePattern.test(p.name) && list.add(p.name));
-    }
-    if (Array.isArray(boardData)) {
-        boardData.forEach((col: any) => {
-            if (Array.isArray(col.projects)) {
-                col.projects.forEach((p: any) => p.name && !schedulePhasePattern.test(p.name) && list.add(p.name));
-            }
-        });
-    }
+    eligibleProjects.forEach((p: any) => p.name && !schedulePhasePattern.test(p.name) && list.add(p.name));
     return ["全部项目", ...Array.from(list)];
-  }, [data, boardData]);
-
-  const eligibleProjectIds = React.useMemo(() => new Set(boardData.flatMap((column: any) => (column.projects || []).filter((project: any) => getProjectCurrentStageInfo(project.id, lifecycleStates).index >= 6).map((project: any) => project.id))), [boardData, lifecycleStates]);
-  const allProjectsForSchedule = React.useMemo(() => boardData.flatMap((column: any) => column.projects || []), [boardData]);
+  }, [eligibleProjects]);
   
   const [selectedProject, setSelectedProject] = useState("全部项目");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -409,9 +401,9 @@ export function Schedule() {
     void setScheduleTrash((current: any[]) => current.filter((item: any) => item.id !== schedule.id));
   };
 
-  const filteredData = selectedProject === "全部项目" 
-    ? data.filter((p: any) => !schedulePhasePattern.test(p.name || "") && (eligibleProjectIds.has(p.id) || !boardData.flatMap((column: any) => column.projects || []).some((project: any) => project.id === p.id)))
-    : data.filter((p: any) => p.name === selectedProject && !schedulePhasePattern.test(p.name || "") && (eligibleProjectIds.has(p.id) || !boardData.flatMap((column: any) => column.projects || []).some((project: any) => project.id === p.id)));
+  const filteredData = selectedProject === "全部项目"
+    ? data.filter((p: any) => !schedulePhasePattern.test(p.name || "") && (eligibleProjectIds.has(p.id) || eligibleProjectNames.has(String(p.name || "").trim())))
+    : data.filter((p: any) => p.name === selectedProject && !schedulePhasePattern.test(p.name || "") && (eligibleProjectIds.has(p.id) || eligibleProjectNames.has(String(p.name || "").trim())));
 
   const allFlatTasks = React.useMemo(() => flattenTasks(data), [data]);
   const todayStr = formatLocalDate();
@@ -780,8 +772,7 @@ export function Schedule() {
             保存为模板
           </button>
           <button onClick={() => {
-            const selected = allProjectsForSchedule.find((project: any) => project.name === selectedProject);
-            if (selected && !eligibleProjectIds.has(selected.id)) { window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目需进入“项目交底”阶段后才能创建施工日程" })); return; }
+            if (selectedProject !== "全部项目" && !eligibleProjectNames.has(selectedProject)) { window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目签订合同后才能进入施工日程" })); return; }
             setIsModalOpen(true);
           }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 flex items-center">
             <Plus className="w-4 h-4 mr-2" />
