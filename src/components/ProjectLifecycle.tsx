@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye } from "lucide-react";
+import { Folder, FileText, CheckCircle2, ChevronRight, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye, SkipForward, RotateCcw } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
+import { useAuth } from "@/src/lib/auth";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
@@ -26,6 +27,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   onSelectionChange?: (project: any, stageId: string) => void;
   onOpenSiteSurvey?: (projectId: string, recordId?: string) => void;
 }) {
+  const { user } = useAuth();
   const [boardData] = useProjectBoardData();
   const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
@@ -84,6 +86,12 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   const projState = activeProj ? (lifecycleStates[activeProj.id] || {}) : {};
   const stageState = projState[activeStage] || { checklist: {}, fields: {} };
   const stageFiles = Array.isArray(stageState.files) ? stageState.files : [];
+  const currentStageId = activeProj ? getProjectCurrentStageInfo(activeProj.id, lifecycleStates).stage.id : STAGES[0].id;
+  const activeStageIndex = STAGES.findIndex((stage) => stage.id === activeStage);
+  const currentStageIndex = STAGES.findIndex((stage) => stage.id === currentStageId);
+  const isStageSkipped = stageState.status === "skipped";
+  const canManageStage = Boolean(user && (["admin", "company_admin", "project_manager"].includes(user.role) || user.permissions?.includes("*")));
+  const defaultSkipReason = "历史项目，前期资料未移交";
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -221,6 +229,64 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
     }));
   };
 
+  const setProjectStage = (targetStageId: string, skipThroughIndex: number, reason = defaultSkipReason) => {
+    if (!activeProj || !canManageStage) return;
+    const targetIndex = STAGES.findIndex((stage) => stage.id === targetStageId);
+    if (targetIndex < 0) return;
+    setLifecycleStates((prev) => {
+      const projectState = { ...(prev[activeProj.id] || {}) };
+      for (let index = 0; index <= skipThroughIndex; index += 1) {
+        const stageId = STAGES[index].id;
+        if (stageId === targetStageId) continue;
+        projectState[stageId] = {
+          ...(projectState[stageId] || { checklist: {}, fields: {} }),
+          status: "skipped",
+          skipReason: reason,
+          skippedAt: new Date().toISOString(),
+          skippedBy: user?.name || user?.username || "项目经理",
+        };
+      }
+      projectState.currentStageId = targetStageId;
+      return { ...prev, [activeProj.id]: projectState };
+    });
+    setActiveStage(targetStageId);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `项目已定位到${STAGES[targetIndex].name.split(" ")[1]}，前置阶段标记为资料欠缺` }));
+  };
+
+  const skipActiveStage = () => {
+    if (!activeProj || !canManageStage) return;
+    const nextStage = STAGES[activeStageIndex + 1];
+    if (!nextStage) {
+      setLifecycleStates((prev) => ({
+        ...prev,
+        [activeProj.id]: {
+          ...(prev[activeProj.id] || {}),
+          [activeStage]: { ...((prev[activeProj.id] || {})[activeStage] || { checklist: {}, fields: {} }), status: "skipped", skipReason: defaultSkipReason, skippedAt: new Date().toISOString(), skippedBy: user?.name || user?.username || "项目经理" },
+          currentStageId: activeStage,
+        },
+      }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前阶段已标记为资料欠缺" }));
+      return;
+    }
+    setProjectStage(nextStage.id, activeStageIndex);
+  };
+
+  const restoreActiveStage = () => {
+    if (!activeProj || !canManageStage) return;
+    setLifecycleStates((prev) => {
+      const projectState = { ...(prev[activeProj.id] || {}) };
+      const restored = { ...(projectState[activeStage] || {}) };
+      delete restored.status;
+      delete restored.skipReason;
+      delete restored.skippedAt;
+      delete restored.skippedBy;
+      projectState[activeStage] = restored;
+      projectState.currentStageId = activeStage;
+      return { ...prev, [activeProj.id]: projectState };
+    });
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "阶段已恢复，可继续补充资料" }));
+  };
+
   return (
     <div className="flex min-h-full md:h-full bg-[#f8fafc] animate-in fade-in duration-300">
       {/* Sidebar: Projects List */}
@@ -292,7 +358,9 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                 <div className="hidden md:block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2 pt-2">项目流程进度（归档清单）</div>
                 {STAGES.map((stage, idx) => {
                   const isActive = activeStage === stage.id;
-                  const isCompleted = STAGES.findIndex(s => s.id === activeStage) > idx;
+                  const timelineStageState = projState[stage.id] || {};
+                  const isSkipped = timelineStageState.status === "skipped";
+                  const isCompleted = !isSkipped && currentStageIndex > idx;
                   return (
                     <button
                       key={stage.id}
@@ -303,7 +371,9 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                       )}
                     >
                       <div className="shrink-0 pt-0.5 relative z-10 bg-inherit">
-                        {isCompleted ? (
+                        {isSkipped ? (
+                          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700"><SkipForward className="h-3.5 w-3.5" /></div>
+                        ) : isCompleted ? (
                           <CheckCircle2 className="w-5 h-5 text-emerald-500 bg-white rounded-full" />
                         ) : isActive ? (
                           <div className="w-5 h-5 rounded-full border-2 border-indigo-600 flex items-center justify-center bg-white">
@@ -320,6 +390,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                         )}>
                           {stage.name.split(' ')[1]}
                         </div>
+                        {isSkipped && <div className="mt-1 text-[10px] font-semibold text-amber-700">资料欠缺 · 已跳过</div>}
                         {stage.requiresAuth && (
                           <div className="text-[10px] mt-1 text-rose-500 flex items-center gap-1 font-medium bg-rose-50 w-max px-1.5 py-0.5 rounded border border-rose-100">
                             <Shield className="w-3 h-3" /> 高权限要求
@@ -350,8 +421,12 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                         <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
                         <div className="flex flex-wrap gap-2">
                           {stage.id === "1_initiation" && <button onClick={() => onOpenSiteSurvey?.(activeProj.id, latestProjectSurvey?.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm"><Camera className="h-4 w-4" />{latestProjectSurvey ? "查看现场勘察报告" : "现场勘察"}{activeProjectSurveys.length > 0 ? `（${activeProjectSurveys.length}）` : ""}</button>}
+                          {canManageStage && isStageSkipped && <button type="button" onClick={restoreActiveStage} className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"><RotateCcw className="h-4 w-4" />恢复此阶段</button>}
+                          {canManageStage && !isStageSkipped && activeStageIndex === currentStageIndex && <button type="button" onClick={skipActiveStage} className="flex items-center gap-2 rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50"><SkipForward className="h-4 w-4" />跳过此阶段</button>}
+                          {canManageStage && !isStageSkipped && activeStageIndex > currentStageIndex && <button type="button" onClick={() => setProjectStage(activeStage, activeStageIndex - 1)} className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"><ArrowRight className="h-4 w-4" />将项目定位到本阶段</button>}
                           <button 
                             onClick={handleUploadClick}
+                            disabled={isStageSkipped}
                             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 shadow-sm transition-colors"
                           >
                             <Upload className="w-4 h-4" />
@@ -359,6 +434,8 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                           </button>
                         </div>
                       </div>
+
+                      {isStageSkipped && <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"><div className="flex items-center gap-2 font-bold"><SkipForward className="h-4 w-4" />本阶段已跳过 · 资料欠缺</div><p className="mt-1 text-xs">原因：{stageState.skipReason || defaultSkipReason}。恢复阶段后即可继续上传资料和填写表单。</p></div>}
 
                       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm mb-6">
                         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
@@ -385,7 +462,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                           className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
                                           checked={item.id === "site-survey" ? activeProjectSurveys.length > 0 : (stageState.checklist?.[item.id] || false)}
                                           onChange={(e) => updateChecklist(item.id, e.target.checked)}
-                                          disabled={item.id === "site-survey" && activeProjectSurveys.length > 0}
+                                          disabled={isStageSkipped || (item.id === "site-survey" && activeProjectSurveys.length > 0)}
                                         />
                                         <span className={cn("text-sm transition-colors", (item.id === "site-survey" ? activeProjectSurveys.length > 0 : stageState.checklist?.[item.id]) ? "text-slate-400 line-through" : "text-slate-700 font-medium")}>{item.label}{item.id === "site-survey" && activeProjectSurveys.length > 0 ? `（已归档 ${activeProjectSurveys.length} 次）` : ""}</span>
                                       </label>
@@ -409,6 +486,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                             value={stageState.fields?.[field.id] || ''}
                                             onChange={(e) => updateField(field.id, e.target.value)}
                                             onBlur={handleSaveData}
+                                            disabled={isStageSkipped}
                                           >
                                             <option value="">{field.placeholder || "请选择"}</option>
                                             {(field.options || []).map((option: string) => <option key={option} value={option}>{option}</option>)}
@@ -421,6 +499,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                             value={stageState.fields?.[field.id] || ''}
                                             onChange={(e) => updateField(field.id, e.target.value)}
                                             onBlur={handleSaveData}
+                                            disabled={isStageSkipped}
                                           />
                                         ) : (
                                           <input 
@@ -430,6 +509,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                             value={stageState.fields?.[field.id] || ''}
                                             onChange={(e) => updateField(field.id, e.target.value)}
                                             onBlur={handleSaveData}
+                                            disabled={isStageSkipped}
                                           />
                                         )}
                                       </div>
