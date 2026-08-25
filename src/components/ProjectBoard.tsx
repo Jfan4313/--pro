@@ -38,7 +38,7 @@ const businessModels = ["EPC", "EMC"];
 
 export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenProject?: (projectId: string) => void; onOpenProjectDetail?: (projectId: string) => void }) {
   const { user } = useAuth();
-  const [data, setData, , boardSeed] = useProjectBoardData();
+  const [data, setData, boardLoading, boardSeed] = useProjectBoardData();
   const [supplyOrders] = useSyncedAppData("supplyOrders", []);
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [scheduleData] = useSyncedAppData("scheduleData", []);
@@ -205,7 +205,9 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
 
   // Sync board columns with lifecycle stages automatically
   React.useEffect(() => {
-    if (!data || !Array.isArray(data) || data.length === 0) return;
+    // The hook starts with empty structural columns while it loads the remote
+    // company board. Never persist those placeholders over real project data.
+    if (boardLoading || !data || !Array.isArray(data) || data.length === 0) return;
 
     let hasChanges = false;
     const allProj = data.flatMap(c => c.projects || []);
@@ -261,7 +263,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     if (hasChanges || !columnsMatch) {
        setData(alignedData);
     }
-  }, [data, lifecycleStates, setData]);
+  }, [boardLoading, data, lifecycleStates, setData]);
 
   const handleEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
