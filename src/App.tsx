@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Component, lazy, Suspense, useState, useEffect, useCallback, useMemo, type ErrorInfo, type ReactNode } from "react";
+import { Component, lazy, Suspense, useState, useEffect, useCallback, useMemo, type ErrorInfo, type ReactNode, type ComponentType } from "react";
 import { Mic } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -18,31 +18,45 @@ import { flattenProjects, formatLocalDate, getProjectNumber } from "./lib/manage
 import { resolveProjectReference } from "./lib/projectNumbering";
 import { useArchiveReconciler } from "./hooks/useArchiveReconciler";
 
-const Dashboard = lazy(() => import("./components/Dashboard").then((module) => ({ default: module.Dashboard })));
-const ProjectBoard = lazy(() => import("./components/ProjectBoard").then((module) => ({ default: module.ProjectBoard })));
-const Schedule = lazy(() => import("./components/Schedule").then((module) => ({ default: module.Schedule })));
-const CostDashboard = lazy(() => import("./components/CostDashboard").then((module) => ({ default: module.CostDashboard })));
-const Personnel = lazy(() => import("./components/Personnel").then((module) => ({ default: module.Personnel })));
-const Materials = lazy(() => import("./components/Materials").then((module) => ({ default: module.Materials })));
-const SupplyChain = lazy(() => import("./components/SupplyChain").then((module) => ({ default: module.SupplyChain })));
-const Chat = lazy(() => import("./components/Chat").then((module) => ({ default: module.Chat })));
-const Contracts = lazy(() => import("./components/Contracts").then((module) => ({ default: module.Contracts })));
-const Settings = lazy(() => import("./components/Settings").then((module) => ({ default: module.Settings })));
-const Organization = lazy(() => import("./components/Organization").then((module) => ({ default: module.Organization })));
-const ProjectLifecycle = lazy(() => import("./components/ProjectLifecycle").then((module) => ({ default: module.ProjectLifecycle })));
-const ProjectDetail = lazy(() => import("./components/ProjectDetail").then((module) => ({ default: module.ProjectDetail })));
-const ExternalPartners = lazy(() => import("./components/ExternalPartners").then((module) => ({ default: module.ExternalPartners })));
-const ProjectFiles = lazy(() => import("./components/ProjectFiles").then((module) => ({ default: module.ProjectFiles })));
-const SiteSurvey = lazy(() => import("./components/SiteSurvey").then((module) => ({ default: module.SiteSurvey })));
-const ProjectAcceptance = lazy(() => import("./components/ProjectAcceptance").then((module) => ({ default: module.ProjectAcceptance })));
-const MobileProjects = lazy(() => import("./components/MobileProjects").then((module) => ({ default: module.MobileProjects })));
-const MobileCollaboration = lazy(() => import("./components/MobileCollaboration").then((module) => ({ default: module.MobileCollaboration })));
-const MobileWorkspace = lazy(() => import("./components/MobileWorkspace").then((module) => ({ default: module.MobileWorkspace })));
-const AccountManagement = lazy(() => import("./components/AccountManagement").then((module) => ({ default: module.AccountManagement })));
-const WorkMemo = lazy(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
-const TaskChains = lazy(() => import("./components/TaskChains").then((module) => ({ default: module.TaskChains })));
-const MobileWorkMemo = lazy(() => import("./components/MobileWorkMemo").then((module) => ({ default: module.MobileWorkMemo })));
-const VersionManagement = lazy(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
+function lazyWithRecovery<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
+  return lazy(() => loader().catch((error) => {
+    const message = String(error?.message || error || "");
+    const isChunkError = /dynamically imported module|failed to fetch|loading chunk|module script/i.test(message);
+    const key = "zhijian-chunk-recovery-at";
+    const previous = Number(sessionStorage.getItem(key) || 0);
+    if (isChunkError && Date.now() - previous > 10000) {
+      sessionStorage.setItem(key, String(Date.now()));
+      window.location.reload();
+    }
+    throw error;
+  }));
+}
+
+const Dashboard = lazyWithRecovery(() => import("./components/Dashboard").then((module) => ({ default: module.Dashboard })));
+const ProjectBoard = lazyWithRecovery(() => import("./components/ProjectBoard").then((module) => ({ default: module.ProjectBoard })));
+const Schedule = lazyWithRecovery(() => import("./components/Schedule").then((module) => ({ default: module.Schedule })));
+const CostDashboard = lazyWithRecovery(() => import("./components/CostDashboard").then((module) => ({ default: module.CostDashboard })));
+const Personnel = lazyWithRecovery(() => import("./components/Personnel").then((module) => ({ default: module.Personnel })));
+const Materials = lazyWithRecovery(() => import("./components/Materials").then((module) => ({ default: module.Materials })));
+const SupplyChain = lazyWithRecovery(() => import("./components/SupplyChain").then((module) => ({ default: module.SupplyChain })));
+const Chat = lazyWithRecovery(() => import("./components/Chat").then((module) => ({ default: module.Chat })));
+const Contracts = lazyWithRecovery(() => import("./components/Contracts").then((module) => ({ default: module.Contracts })));
+const Settings = lazyWithRecovery(() => import("./components/Settings").then((module) => ({ default: module.Settings })));
+const Organization = lazyWithRecovery(() => import("./components/Organization").then((module) => ({ default: module.Organization })));
+const ProjectLifecycle = lazyWithRecovery(() => import("./components/ProjectLifecycle").then((module) => ({ default: module.ProjectLifecycle })));
+const ProjectDetail = lazyWithRecovery(() => import("./components/ProjectDetail").then((module) => ({ default: module.ProjectDetail })));
+const ExternalPartners = lazyWithRecovery(() => import("./components/ExternalPartners").then((module) => ({ default: module.ExternalPartners })));
+const ProjectFiles = lazyWithRecovery(() => import("./components/ProjectFiles").then((module) => ({ default: module.ProjectFiles })));
+const SiteSurvey = lazyWithRecovery(() => import("./components/SiteSurvey").then((module) => ({ default: module.SiteSurvey })));
+const ProjectAcceptance = lazyWithRecovery(() => import("./components/ProjectAcceptance").then((module) => ({ default: module.ProjectAcceptance })));
+const MobileProjects = lazyWithRecovery(() => import("./components/MobileProjects").then((module) => ({ default: module.MobileProjects })));
+const MobileCollaboration = lazyWithRecovery(() => import("./components/MobileCollaboration").then((module) => ({ default: module.MobileCollaboration })));
+const MobileWorkspace = lazyWithRecovery(() => import("./components/MobileWorkspace").then((module) => ({ default: module.MobileWorkspace })));
+const AccountManagement = lazyWithRecovery(() => import("./components/AccountManagement").then((module) => ({ default: module.AccountManagement })));
+const WorkMemo = lazyWithRecovery(() => import("./components/WorkMemo").then((module) => ({ default: module.WorkMemo })));
+const TaskChains = lazyWithRecovery(() => import("./components/TaskChains").then((module) => ({ default: module.TaskChains })));
+const MobileWorkMemo = lazyWithRecovery(() => import("./components/MobileWorkMemo").then((module) => ({ default: module.MobileWorkMemo })));
+const VersionManagement = lazyWithRecovery(() => import("./components/VersionManagement").then((module) => ({ default: module.VersionManagement })));
 
 class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
@@ -51,6 +65,18 @@ class WorkMemoErrorBoundary extends Component<{ children: ReactNode }, { hasErro
   static getDerivedStateFromError() { return { hasError: true }; }
   componentDidCatch(error: Error, info: ErrorInfo) { console.error("工作备忘渲染异常，已切换安全视图", error, info.componentStack); }
   render() { return this.state.hasError ? <MobileWorkMemoFallback /> : this.childContent; }
+}
+
+class PageErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  private readonly childContent: ReactNode;
+  constructor(props: { children: ReactNode }) { super(props); this.childContent = props.children; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error) { console.error("页面模块加载失败", error); }
+  render() {
+    if (!this.state.hasError) return this.childContent;
+    return <div className="flex min-h-full items-center justify-center bg-slate-50 p-6"><div className="max-w-md rounded-2xl border border-amber-200 bg-white p-6 text-center shadow-sm"><h2 className="text-lg font-bold text-slate-900">页面暂时无法加载</h2><p className="mt-2 text-sm text-slate-500">页面资源可能刚刚更新，请点击重试。</p><button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">重新加载</button></div></div>;
+  }
 }
 
 function MobileWorkMemoFallback() {
@@ -251,7 +277,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
         <Header setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />
         <main className="app-main flex-1 overflow-y-auto flex flex-col">
-          <Suspense fallback={<div className="flex min-h-full items-center justify-center text-sm text-slate-500">正在加载模块…</div>}>
+          <PageErrorBoundary><Suspense fallback={<div className="flex min-h-full items-center justify-center text-sm text-slate-500">正在加载模块…</div>}>
           {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
           {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div></>}
           {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
@@ -273,7 +299,7 @@ export default function App() {
           {activeTab === "settings" && <Settings />}
           {activeTab === "accounts" && <AccountManagement />}
           {activeTab === "version-management" && <VersionManagement />}
-          </Suspense>
+          </Suspense></PageErrorBoundary>
         </main>
 
         {activeTab !== "work-memo" && <SmartIntake setActiveTab={setActiveTab} />}
