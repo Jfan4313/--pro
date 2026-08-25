@@ -4,7 +4,17 @@ import { offlineDb } from "@/src/lib/offlineDb";
 import { onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
 import { emptyWorkspaceValue } from "@/src/lib/workspaceDefaults";
 
-export function useSyncedAppData<T>(key: string, initialValue: T, legacyKeys: string[] = []) {
+export type LegacyDataMigration<T> = {
+  keys: string[];
+  shouldMigrate?: (currentValue: T, remote: { exists: boolean; version: number }) => boolean;
+  mergeValues?: (currentValue: T, legacyValues: T[]) => T;
+};
+
+export function useSyncedAppData<T>(
+  key: string,
+  initialValue: T,
+  legacyMigration: string[] | LegacyDataMigration<T> = [],
+) {
   const [data, setData] = useState<T>(initialValue);
   const [loading, setLoading] = useState(true);
   const dataRef = useRef(data);
@@ -22,26 +32,39 @@ export function useSyncedAppData<T>(key: string, initialValue: T, legacyKeys: st
 
       try {
         const remote = await apiClient.getAppData<T>(key);
+        const migration = Array.isArray(legacyMigration)
+          ? { keys: legacyMigration }
+          : legacyMigration;
+        const remoteExists = remote.exists !== false;
+        const currentValue = remoteExists ? remote.value : emptyWorkspaceValue(key, initialValue);
         let migratedValue: T | undefined;
-        if (remote.exists === false && legacyKeys.length > 0) {
-          for (const legacyKey of legacyKeys) {
+        const shouldCheckLegacy = migration.keys.length > 0
+          && (!remoteExists || Boolean(migration.shouldMigrate?.(currentValue, { exists: remoteExists, version: remote.version })));
+        if (shouldCheckLegacy) {
+          const legacyValues: T[] = [];
+          for (const legacyKey of migration.keys) {
             if (!legacyKey || legacyKey === key) continue;
             const legacy = await apiClient.getAppData<T>(legacyKey);
             if (legacy.exists !== false) {
-              migratedValue = legacy.value;
-              break;
+              legacyValues.push(legacy.value);
             }
           }
+          if (legacyValues.length > 0) {
+            migratedValue = migration.mergeValues
+              ? migration.mergeValues(currentValue, legacyValues)
+              : legacyValues[0];
+          }
         }
-        const value = remote.exists === false
-          ? (migratedValue === undefined ? emptyWorkspaceValue(key, initialValue) : migratedValue)
-          : remote.value;
-        if (remote.exists !== false) {
-          await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
-        } else if (migratedValue !== undefined) {
-          // Move old per-account board data into the shared company key once.
+        const value = migratedValue === undefined ? currentValue : migratedValue;
+        const migrationChangedValue = migratedValue !== undefined
+          && (!remoteExists || JSON.stringify(migratedValue) !== JSON.stringify(remote.value));
+        if (migrationChangedValue) {
+          // Write the recovered value to the current key once. Subsequent loads
+          // see a non-empty current value and no longer consult legacy keys.
           await offlineDb.putAppData(key, value, { pending: true });
           await queueAppDataUpdate(key, value);
+        } else if (remoteExists) {
+          await offlineDb.putAppData(key, value, { version: remote.version, pending: false });
         } else {
           // A key removed from the server must not keep reappearing from an old
           // IndexedDB cache on the next page load. Offline requests still keep

@@ -1,5 +1,6 @@
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useAuth } from "@/src/lib/auth";
+import { hasProjectBoardProjects, mergeProjectBoardData } from "@/src/lib/projectBoardMigration";
 import { createEmptyBoardColumns } from "@/src/lib/workspaceDefaults";
 
 export function useProjectBoardData() {
@@ -10,8 +11,12 @@ export function useProjectBoardData() {
     : `projectBoardData:${user?.companyId || "company-default"}`;
   // Stage columns are structure, not demo business data. A new workspace has nine empty columns.
   const seed = createEmptyBoardColumns();
-  const legacyKeys = isDemoAccount || !user?.id ? [] : [`projectBoardData:${user.id}`];
-  const syncedData = useSyncedAppData<any[]>(dataKey, seed, legacyKeys);
+  const legacyKeys = isDemoAccount || !user?.id ? [] : [`projectBoardData:${user.id}`, "projectBoardData"];
+  const syncedData = useSyncedAppData<any[]>(dataKey, seed, {
+    keys: legacyKeys,
+    shouldMigrate: (currentValue) => !hasProjectBoardProjects(currentValue),
+    mergeValues: (currentValue, legacyValues) => mergeProjectBoardData(currentValue, legacyValues, seed),
+  });
 
   return [...syncedData, seed] as const;
 }
