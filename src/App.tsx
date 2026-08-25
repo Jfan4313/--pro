@@ -96,7 +96,10 @@ export default function App() {
   const [selectedProjectReference, setSelectedProjectReference] = useState<string | null>(() => new URLSearchParams(window.location.search).get("project") || null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("stage") || null);
   const [supplyChainTab, setSupplyChainTab] = useState<"orders" | "reconciliation" | "prices" | "procurement">(() => (new URLSearchParams(window.location.search).get("supplyTab") as "orders" | "reconciliation" | "prices" | "procurement") || "orders");
-  const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; recordId: string | null; returnTab: string }>({ projectId: null, recordId: null, returnTab: "dashboard" });
+  const [surveyContext, setSurveyContext] = useState<{ projectId: string | null; recordId: string | null; returnTab: string }>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return { projectId: params.get("tab") === "site-survey" ? params.get("project") : null, recordId: params.get("tab") === "site-survey" ? params.get("surveyRecord") : null, returnTab: "dashboard" };
+  });
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -140,15 +143,21 @@ export default function App() {
   }, [openTaskChains]);
 
   const openProjectSurvey = (projectId: string, returnTab = "project-detail", recordId: string | null = null) => {
-    setSelectedProjectReference(projectId);
-    setSurveyContext({ projectId, recordId, returnTab });
+    const resolved = resolveProjectReference(allProjects, projectId);
+    if (resolved.conflict) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `项目编号 ${projectId} 存在重复，请先处理编号冲突` }));
+      return;
+    }
+    const resolvedProjectId = resolved.project?.id || projectId;
+    setSelectedProjectReference(resolvedProjectId);
+    setSurveyContext({ projectId: resolvedProjectId, recordId, returnTab });
     setActiveTab("site-survey");
     const params = new URLSearchParams(window.location.search);
     params.set("tab", "site-survey");
-    params.set("project", projectId);
+    params.set("project", resolvedProjectId);
     if (recordId) params.set("surveyRecord", recordId);
     else params.delete("surveyRecord");
-    window.history.pushState({ tab: "site-survey", projectId, surveyRecord: recordId }, "", `${window.location.pathname}?${params.toString()}`);
+    window.history.pushState({ tab: "site-survey", projectId: resolvedProjectId, surveyRecord: recordId }, "", `${window.location.pathname}?${params.toString()}`);
   };
 
   const handleMaterialsNavigate = (tab: string, subTab?: string) => {
