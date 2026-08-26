@@ -4,6 +4,7 @@ import { offlineDb } from "./offlineDb";
 import { AUTH_TOKEN_KEY } from "./clientIdentity";
 
 const SYNC_EVENT = "zhijian-sync-event";
+const CACHE_ONLY = String((import.meta as any).env?.VITE_SYNC_MODE || "sync").toLowerCase() === "cache";
 
 export type SyncState = "idle" | "saving" | "syncing" | "offline" | "error" | "conflict";
 export interface SyncStatus {
@@ -69,6 +70,12 @@ export function onSyncEvent(listener: (detail: any) => void) {
 }
 
 export async function queueAppDataUpdate<T>(key: string, value: T) {
+  if (CACHE_ONLY) {
+    await offlineDb.putAppData(key, value, { pending: false, localOnly: true });
+    emitSyncEvent({ type: "app_data_changed", key, value });
+    updateSyncStatus({ state: "idle", pending: 0, error: null, lastSyncedAt: new Date().toISOString() });
+    return;
+  }
   updateSyncStatus({ state: navigator.onLine ? "saving" : "offline", error: null });
   await offlineDb.putAppData(key, value, { pending: true });
   // App data is last-write-wins. Coalesce older pending writes for the same
@@ -91,6 +98,15 @@ export async function queueAppDataUpdate<T>(key: string, value: T) {
 }
 
 export async function queueEntityOperation(resource: string, type: "upsert" | "delete", payload: any) {
+  if (CACHE_ONLY) {
+    const recordId = payload.id || crypto.randomUUID();
+    const localRecord = { ...payload, id: recordId };
+    if (type === "delete") await offlineDb.deleteEntity(resource, recordId);
+    else await offlineDb.putEntity(resource, localRecord);
+    emitSyncEvent({ type: "entity_changed", resource, record: type === "delete" ? { ...localRecord, deletedAt: new Date().toISOString() } : localRecord });
+    updateSyncStatus({ state: "idle", pending: 0, error: null, lastSyncedAt: new Date().toISOString() });
+    return localRecord;
+  }
   updateSyncStatus({ state: navigator.onLine ? "saving" : "offline", error: null });
   const recordId = payload.id || crypto.randomUUID();
   const operation = {
@@ -115,6 +131,10 @@ export async function queueEntityOperation(resource: string, type: "upsert" | "d
 }
 
 export async function flushOutbox() {
+  if (CACHE_ONLY) {
+    updateSyncStatus({ state: "idle", pending: 0, error: null });
+    return;
+  }
   if (activeFlush) return activeFlush;
   activeFlush = flushOutboxInternal();
   try { await activeFlush; } finally { activeFlush = null; }
@@ -181,12 +201,12 @@ export async function pullLatest() {
 }
 
 export function startRealtimeSync() {
-  void flushOutbox();
+  if (!CACHE_ONLY) void flushOutbox();
   void pullLatest();
   window.addEventListener("offline", () => updateSyncStatus({ state: "offline", error: null }));
   window.addEventListener("online", () => {
     updateSyncStatus({ state: "syncing", error: null });
-    void flushOutbox();
+    if (!CACHE_ONLY) void flushOutbox();
     void pullLatest();
   });
 
@@ -212,7 +232,7 @@ export function startRealtimeSync() {
   window.addEventListener("zhijian-auth-changed", connectRealtime);
 
   window.setInterval(() => {
-    void flushOutbox();
+    if (!CACHE_ONLY) void flushOutbox();
     void pullLatest();
   }, 15000);
 }
