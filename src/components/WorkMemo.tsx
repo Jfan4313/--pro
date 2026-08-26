@@ -7,6 +7,7 @@ import { cn } from "@/src/lib/utils";
 import { formatLocalDate } from "@/src/lib/management";
 import { appendFollowUpToSchedule, buildTaskChain, canCreateFollowUp, createFollowUpRecord, getAssignees, getDisplayText, getTaskChains } from "@/src/lib/workMemoFollowUps";
 import { resolveFollowUpProject } from "@/src/lib/followUpProject";
+import { apiClient } from "@/src/lib/apiClient";
 
 type MemoStatus = "pending" | "in-progress" | "feedback" | "confirmed";
 type WorkMemoRecord = {
@@ -100,6 +101,48 @@ function followUpTitleFromFeedback(feedback: string) {
   return (cleaned || "根据执行反馈安排后续跟进").slice(0, 32);
 }
 
+type BatchDraft = { id: string; title: string; detail: string; projectId: string; projectName: string; assignee: string; dueDate: string; priority: "normal" | "high"; reviewReasons: string[] };
+
+function normalizeBatchDrafts(result: any): BatchDraft[] {
+  const items = Array.isArray(result?.items) && result.items.length ? result.items : [result];
+  return items.filter(Boolean).map((item: any, index: number) => ({
+    id: String(item.id || `batch-draft-${index + 1}`),
+    title: String(item.title || ""),
+    detail: String(item.summary || item.detail || ""),
+    projectId: String(item.projectId || ""),
+    projectName: String(item.projectName || ""),
+    assignee: String(item.assignee || item.assignees?.[0] || ""),
+    dueDate: String(item.deadline || ""),
+    priority: "normal",
+    reviewReasons: Array.isArray(item.reviewReasons) ? item.reviewReasons.map(String) : [],
+  }));
+}
+
+function BatchWorkMemoModal({ projects, personnel, user, onClose, onPublish }: { projects: any[]; personnel: any[]; user: any; onClose: () => void; onPublish: (drafts: BatchDraft[]) => void }) {
+  const [text, setText] = useState("");
+  const [drafts, setDrafts] = useState<BatchDraft[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [error, setError] = useState("");
+  const analyze = async () => {
+    if (!text.trim()) return setError("请先输入至少一条工作安排。");
+    setIsAnalyzing(true); setError("");
+    try {
+      const result = await apiClient.analyzeIntake({ inputType: "text", text: text.trim(), projects, personnel });
+      const next = normalizeBatchDrafts(result);
+      if (!next.length) throw new Error("没有识别出任务");
+      setDrafts(next);
+    } catch (caught: any) {
+      setError(`AI 识别失败：${String(caught?.message || "请检查后台服务")}`);
+      setDrafts([]);
+    } finally { setIsAnalyzing(false); }
+  };
+  const update = (index: number, patch: Partial<BatchDraft>) => setDrafts(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  const valid = drafts.length > 0 && drafts.every((item) => item.title.trim() && item.assignee.trim() && item.dueDate);
+  return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"><div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl md:p-6"><div className="mb-5 flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">批量智能新建工作安排</h3><p className="mt-1 text-xs text-slate-500">一次输入多条任务，AI 拆分后逐条确认项目、负责人和日期。</p></div><button type="button" onClick={onClose} className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
+    {!drafts.length ? <div className="space-y-4"><textarea value={text} onChange={(event) => setText(event.target.value)} className="min-h-40 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" placeholder="例如：今天整理 A 项目竣工资料；明天去 B 项目现场复核设备；周五让张强跟进 C 项目报价。" />{error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>}<button type="button" onClick={() => void analyze()} disabled={isAnalyzing} className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white disabled:opacity-50">{isAnalyzing ? "AI 正在拆分和识别…" : "生成任务预览"}</button><button type="button" onClick={onClose} className="w-full rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">返回单条填写</button></div> : <div className="space-y-4"><div className="rounded-xl bg-indigo-50 px-4 py-3 text-sm text-indigo-800">已识别 {drafts.length} 条任务，请逐条确认后批量发布。</div>{drafts.map((item, index) => <div key={item.id} className="space-y-3 rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between"><span className="text-xs font-bold text-indigo-600">任务 {index + 1}</span><button type="button" onClick={() => setDrafts(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-xs text-rose-500">删除</button></div><input value={item.title} onChange={(event) => update(index, { title: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium" placeholder="任务标题" /><textarea value={item.detail} onChange={(event) => update(index, { detail: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={2} placeholder="任务说明" /><div className="grid grid-cols-1 gap-3 md:grid-cols-3"><label className="text-xs text-slate-500">项目<select value={item.projectId} onChange={(event) => { const project = projects.find((candidate: any) => String(candidate.id) === event.target.value); update(index, { projectId: project?.id || "", projectName: project?.name || "" }); }} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"><option value="">{item.projectName ? `AI 识别：${item.projectName}` : "未关联项目"}</option>{projects.map((project: any) => <option key={project.id || project.name} value={project.id}>{project.name}{project.projectNumber ? `（${project.projectNumber}）` : ""}</option>)}</select></label><label className="text-xs text-slate-500">负责人<select value={item.assignee} onChange={(event) => update(index, { assignee: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"><option value="">选择负责人</option>{personnel.filter((person: any) => person?.name && person?.status !== "inactive").map((person: any) => <option key={person.id || person.name} value={person.name}>{person.name}</option>)}</select></label><label className="text-xs text-slate-500">截止日期<input type="date" value={item.dueDate} onChange={(event) => update(index, { dueDate: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800" /></label></div>{item.reviewReasons.length > 0 && <p className="text-xs text-amber-700">AI 提示：{item.reviewReasons.join("；")}</p>}</div>)}{error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>}<div className="flex gap-3"><button type="button" onClick={() => setDrafts([])} className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-600">重新输入</button><button type="button" disabled={!valid} onClick={() => onPublish(drafts)} className="flex-1 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white disabled:opacity-50">批量发布 {drafts.length} 条</button></div></div>}
+  </div></div>;
+}
+
 export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectReference?: string) => void }) {
   const { user } = useAuth();
   const [projectBoardData] = useProjectBoardData();
@@ -109,6 +152,7 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectRefe
   const records = useMemo(() => normalizeMemoRecords(rawRecords), [rawRecords]);
   const [filter, setFilter] = useState<"all" | "mine" | "company" | "unconfirmed" | "overdue">("all");
   const [isOpen, setIsOpen] = useState(false);
+  const [isBatchOpen, setIsBatchOpen] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState<WorkMemoRecord | null>(null);
   const [followUpFor, setFollowUpFor] = useState<WorkMemoRecord | null>(null);
   const [editingMemo, setEditingMemo] = useState<WorkMemoRecord | null>(null);
@@ -178,6 +222,19 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectRefe
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "工作安排已发布，负责人可以开始执行" }));
   };
 
+  const publishBatchMemos = (drafts: BatchDraft[]) => {
+    const now = new Date().toISOString();
+    const next = drafts.map((draft, index) => ({
+      id: `memo-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+      title: draft.title.trim(), detail: draft.detail.trim(), projectId: draft.projectId, projectName: draft.projectName.trim(),
+      targetType: "internal" as const, crewName: "", crewContact: "", progress: 0, assignee: draft.assignee.trim(), assignees: [draft.assignee.trim()],
+      creator: user?.name || user?.username || "系统用户", dueDate: draft.dueDate, priority: draft.priority, status: "pending" as const, feedback: "", createdAt: now,
+    }));
+    setRecords(current => [...next, ...normalizeMemoRecords(current)]);
+    setIsBatchOpen(false);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `已批量发布 ${next.length} 条工作安排` }));
+  };
+
   const updateMemo = (id: string, changes: Partial<WorkMemoRecord>) => setRecords(current => normalizeMemoRecords(current).map(item => item.id === id ? { ...item, ...changes } : item));
 
   const openFollowUp = (parent: WorkMemoRecord) => {
@@ -243,7 +300,7 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectRefe
   return <div className="w-full max-w-none space-y-6 p-4 md:p-8 xl:px-10">
     <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
       <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Company workflow</p><h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">工作备忘</h2><p className="mt-1 text-sm text-slate-500">每日安排、执行反馈和完成确认，所有成员都能看到进度。</p></div>
-      <div className="flex flex-wrap gap-2"><button onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 hover:bg-indigo-700"><Mic className="h-4 w-4" />语音快速创建</button><button onClick={() => setIsOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"><Plus className="h-4 w-4" />新建工作安排</button></div>
+      <div className="flex flex-wrap gap-2"><button onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 hover:bg-indigo-700"><Mic className="h-4 w-4" />语音快速创建</button><button onClick={() => setIsBatchOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">批量智能录入</button><button onClick={() => setIsOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"><Plus className="h-4 w-4" />新建工作安排</button></div>
     </div>
 
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
@@ -259,6 +316,7 @@ export function WorkMemo({ onOpenTaskChains }: { onOpenTaskChains?: (projectRefe
     </div>
 
     {isOpen && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"><form onSubmit={createMemo} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl md:p-6"><div className="mb-5 flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">新建工作安排</h3><p className="mt-1 text-xs text-slate-500">发布后所有成员可见，负责人需要提交反馈。</p></div><button type="button" onClick={() => setIsOpen(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><div className="space-y-4"><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">安排事项 *</span><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" placeholder="例如：跟进客户合同盖章" required /></label><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">具体要求/备注</span><textarea value={form.detail} onChange={e => setForm({ ...form, detail: e.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" rows={3} placeholder="填写目标、交付物或需要注意的事项" /></label><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">负责人 *</span><input value={form.assignee} onChange={e => setForm({ ...form, assignee: e.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" placeholder="填写姓名或帐号" required /></label><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">截止日期 *</span><input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" required /></label></div><div className="flex gap-2"><button type="button" onClick={() => setForm({ ...form, priority: "normal" })} className={cn("rounded-lg px-3 py-2 text-xs font-semibold", form.priority === "normal" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>普通</button><button type="button" onClick={() => setForm({ ...form, priority: "high" })} className={cn("rounded-lg px-3 py-2 text-xs font-semibold", form.priority === "high" ? "bg-rose-600 text-white" : "bg-slate-100 text-slate-500")}><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />重要</button></div><button type="submit" className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white hover:bg-indigo-700">发布工作安排</button></div></form></div>}
+    {isBatchOpen && <BatchWorkMemoModal projects={projects} personnel={personnelData} user={user} onClose={() => setIsBatchOpen(false)} onPublish={publishBatchMemos} />}
 
     {editingMemo && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"><form onSubmit={saveEditedMemo} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl md:p-6"><div className="mb-5 flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">修改已完成工作备忘</h3><p className="mt-1 text-xs text-slate-500">修改后仍保留“已完成”状态。</p></div><button type="button" onClick={() => setEditingMemo(null)} className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><div className="space-y-4"><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">任务标题 *</span><input value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" required /></label><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">任务详情</span><textarea value={editForm.detail} onChange={(event) => setEditForm({ ...editForm, detail: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" rows={4} /></label><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">归属项目</span><input value={editForm.projectName} onChange={(event) => setEditForm({ ...editForm, projectName: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" /></label><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">负责人 *</span><input value={editForm.assignee} onChange={(event) => setEditForm({ ...editForm, assignee: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" required /></label><label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">截止日期 *</span><input type="date" value={editForm.dueDate} onChange={(event) => setEditForm({ ...editForm, dueDate: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-500" required /></label></div><div className="flex gap-2"><button type="button" onClick={() => setEditForm({ ...editForm, priority: "normal" })} className={cn("rounded-lg px-3 py-2 text-xs font-semibold", editForm.priority === "normal" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>普通</button><button type="button" onClick={() => setEditForm({ ...editForm, priority: "high" })} className={cn("rounded-lg px-3 py-2 text-xs font-semibold", editForm.priority === "high" ? "bg-rose-600 text-white" : "bg-slate-100 text-slate-500")}><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />重要</button></div><button type="submit" className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white hover:bg-indigo-700">保存修改</button></div></form></div>}
 
