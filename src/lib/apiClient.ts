@@ -52,6 +52,17 @@ export type ProjectFileManifest = {
   canViewContent: boolean;
 };
 
+export type ProjectTemplateFile = {
+  id: string;
+  originalName: string;
+  contentType: string;
+  size: number;
+  uploadedBy: string;
+  uploadedByName: string;
+  createdAt: string;
+  canDelete: boolean;
+};
+
 export function getProjectFileDownloadUrl(relativePath: string) {
   return `${API_BASE_URL}/api/project-files/download?relativePath=${encodeURIComponent(relativePath)}`;
 }
@@ -66,6 +77,21 @@ export async function downloadProjectManifestContent(fileId: string, filename: s
   if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
   const response = await fetch(getProjectManifestContentUrl(fileId), { headers });
   if (!response.ok) throw new Error("file_content_forbidden");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a"); link.href = url; link.download = filename; link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function getProjectTemplateFileContentUrl(fileId: string) {
+  return `${API_BASE_URL}/api/project-template-files/${encodeURIComponent(fileId)}/content`;
+}
+
+export async function downloadProjectTemplateFileContent(fileId: string, filename: string) {
+  const headers = new Headers({ "X-Client-Id": getClientId(), "X-User-Id": getUserId() });
+  const authToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
+  const response = await fetch(getProjectTemplateFileContentUrl(fileId), { headers });
+  if (!response.ok) throw new Error("template_file_content_forbidden");
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a"); link.href = url; link.download = filename; link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -169,6 +195,15 @@ export const apiClient = {
       method: "POST",
       body: { filename, contentBase64 },
     });
+  },
+  listProjectTemplateFiles() {
+    return request<{ templates: ProjectTemplateFile[] }>("/api/project-template-files");
+  },
+  uploadProjectTemplateFile(filename: string, contentBase64: string, contentType: string) {
+    return request<ProjectTemplateFile>("/api/project-template-files", { method: "POST", body: { filename, contentBase64, contentType } });
+  },
+  deleteProjectTemplateFile(id: string) {
+    return request<{ ok: boolean }>(`/api/project-template-files/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
   uploadIntakeAudio(filename: string, contentBase64: string, mimeType: string, durationMs: number) {
     return request<{ audioId: string; filename: string; createdAt: string }>("/api/intake/audio", {
@@ -343,6 +378,9 @@ export const apiClient = {
   },
   debugAI(payload?: { endpoint?: string; model?: string; apiKey?: string; timeoutMs?: number }) {
     return request<{ ok: boolean; stage: string; model: string; endpoint: string; configured: boolean; durationMs?: number; message?: string; result?: { title: string; deadline: string } }>("/api/ai-debug", { method: "POST", body: payload || {} });
+  },
+  askAIGuide(payload: { question: string; page?: string; project?: string; url?: string }) {
+    return request<{ answer: string; model: string }>("/api/ai-guide", { method: "POST", body: payload });
   },
   getAIConfig() {
     return request<{ endpoint: string; model: string; hasKey: boolean; configured: boolean; timeoutMs: number; updatedAt?: string | null }>("/api/ai-config");
