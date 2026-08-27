@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeIntake } from "../server/domain/intakeAnalysis.js";
+import { analyzeIntake, splitExplicitTaskList } from "../server/domain/intakeAnalysis.js";
+
+test("splits explicitly numbered work arrangements into independent task lines", () => {
+  const input = "1 惠州 600 千瓦制定合同，龙玲和公司签订施工合同\n2 新厂除锈，污水池，洗板运维和重新安装拆卸下来的组件\n3 强港红冲补开发票";
+  assert.equal(splitExplicitTaskList(input).length, 3);
+  assert.match(splitExplicitTaskList(input)[0], /惠州 600 千瓦/);
+});
+
+test("keeps the six-line work arrangement list as six fallback tasks", () => {
+  const input = "1 惠州 600 千瓦制定合同，龙玲和公司签订施工合同。同步陈翔搞电网接入。向公司请款施工。\n2 新厂除锈，污水池，洗板运维和重新安装拆卸下来的组件，在节后进行，现在安排老曹把污水池的造价报给公司核价同意后推进。\n3 强港红冲补开发票，嫂子跟进一下，搞掂以后告诉我，需要把尾款收回了\n4 腰古好邻居把四可和电表时间安排好，小苏跟进这事。\n5，tgt 和威成坤我跟进。\n6 万力要等到陈仕斌确定时间再开工，提前落实好一些细节，一次搞掂不要留收尾，同时钻石需要收款加固费用的就收羊羽，现在并网了，加固钱还不给。";
+  const result = analyzeIntake({ inputType: "text", text: input, projects: [], personnel: [] });
+  assert.equal(result.items.length, 6);
+});
 
 test("quick intake recognizes an existing project and splits multiple assignees/tasks", () => {
   const result = analyzeIntake({

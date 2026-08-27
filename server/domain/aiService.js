@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeIntake, parseLocalDeadline } from "./intakeAnalysis.js";
+import { analyzeIntake, parseLocalDeadline, splitExplicitTaskList } from "./intakeAnalysis.js";
 import { getCompanyKnowledge, resolveResponsibleEntities } from "./companyEntities.js";
 
 export const INTAKE_SKILL_VERSION = "work-instruction-v1";
@@ -213,6 +213,7 @@ const INTAKE_SYSTEM_PROMPT = `你是“公司现场工作指令理解与任务�
 4. 先判断一段话是否描述同一个行动，再拆任务。一个行动可以包含多个对象、步骤和产出；只有目标、负责人或截止时间明显不同，才拆成多条任务。
 
 【任务合并与拆分】
+- 用户明确使用“1 …、2 …、3 …”或逐行编号列出内容时，每个编号代表一条独立任务，必须逐条生成 items，不能把整张清单合并成一条；编号可以是半角/全角数字和标点。
 - “今天去某项目/到现场/去某地”只是时间、项目、地点上下文，必须和后面的动作合并，不能单独生成“去项目”任务。
 - “去万力轮胎拍无人机、飞无人机拍照片”应合并为一条现场影像采集任务，而不是把“去万力轮胎”或“拍无人机”拆成无意义的行程任务。
 - “完成处罚清单和事故分析报告”在同一项目、同一负责人、同一截止时间下是一条任务，标题应概括为“完成处罚与事故报告”，summary 再写清两个交付物。
@@ -457,6 +458,11 @@ export async function analyzeIntakeWithAI(payload, actor = {}, db = null, aiOver
         draft = normalizeIntakeDraft(reviewed.parsed, sourceText, projects, entities, glossary, true);
         usage = { inputTokens: (usage.inputTokens ?? 0) + (reviewed.usage.inputTokens ?? 0), outputTokens: (usage.outputTokens ?? 0) + (reviewed.usage.outputTokens ?? 0), totalTokens: (usage.totalTokens ?? 0) + (reviewed.usage.totalTokens ?? 0) };
       } catch (error) { console.warn("Intake review pass unavailable, keeping first result:", error.message); }
+    }
+    const explicitTaskCount = splitExplicitTaskList(sourceText).length;
+    if (explicitTaskCount > 1 && draft.items.length < explicitTaskCount) {
+      console.warn(`Intake returned ${draft.items.length} items for ${explicitTaskCount} explicit task lines; using deterministic split fallback.`);
+      return analyzeIntake({ ...payload, projects, entities });
     }
     recordUsage(db, { companyId, userId, feature: "intake_analysis", model: config.model, ...usage, status: "success", durationMs: Date.now() - startedAt });
     return draft;

@@ -54,6 +54,15 @@ function cleanSpokenText(text = "") {
   return String(text).replace(/(^|[，,。；;\s])(嗯|呃|啊|那个|就是|然后呢)(?=$|[，,。；;\s])/gu, "$1").replace(/([，,。；;])\1+/g, "$1").replace(/\s+/g, " ").trim();
 }
 
+export function splitExplicitTaskList(text = "") {
+  const lines = String(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [String(text).trim()].filter(Boolean);
+  const numbered = lines.map((line) => line.match(/^(?:第\s*)?\d+\s*[、.．,，:：)]?\s*(.+)$/u));
+  return numbered.filter(Boolean).length >= 2
+    ? numbered.filter(Boolean).map((match) => match[1].trim()).filter(Boolean)
+    : [String(text).trim()].filter(Boolean);
+}
+
 function parseDueTime(text = "") {
   const match = String(text).match(/(?:上午|早上|下午|晚上|傍晚)?\s*(\d{1,2})(?:点|[:：])(半|\d{1,2})?/u);
   if (!match) return "";
@@ -152,7 +161,11 @@ export function analyzeIntake({ inputType, text = "", attachmentUrl = "", projec
   const deadline = parseLocalDeadline(trimmed);
   const titleSource = cleanedTranscript || (attachmentUrl ? "根据附件补充待办事项" : "");
   const title = titleSource.length > 40 ? `${titleSource.slice(0, 40)}...` : titleSource;
-  const clauses = mergeContextClauses(cleanedTranscript.split(/[。；;\n]+|(?:然后|另外|还有)|[，,](?=[^，,]{0,10}(?:让|由|安排|落实|确认|检查|提交|完成|处理|跟进|准备|编制|整理|修改))/u).map((part) => part.trim()).filter(Boolean), projects);
+  const explicitTaskLines = splitExplicitTaskList(trimmed).map((line) => cleanSpokenText(line));
+  const clauseSource = explicitTaskLines.length > 1
+    ? explicitTaskLines
+    : cleanedTranscript.split(/[。；;\n]+|(?:然后|另外|还有)|[，,](?=[^，,]{0,10}(?:让|由|安排|落实|确认|检查|提交|完成|处理|跟进|准备|编制|整理|修改))/u).map((part) => part.trim()).filter(Boolean);
+  const clauses = explicitTaskLines.length > 1 ? clauseSource : mergeContextClauses(clauseSource, projects);
   const backgroundNotes = clauses.filter((part) => /(已经?完成|完成了|已办结|无需再做)/u.test(part));
   const parts = clauses.filter((part) => !backgroundNotes.includes(part));
   const items = parts.map((part, index) => {
