@@ -84,11 +84,11 @@ export function numberArchiveFolderPath(stageId: string, folderPath: string) {
   const configured = archiveFolderLabels(stageId).map((path) => path.split("/").filter(Boolean));
   const orders = parts.map((part, index) => {
     const clean = part.replace(/^\d+[_-]/, "");
-    const candidates = configured
+    const candidates = [...new Set(configured
       .filter((path) => path.slice(0, index).every((value, parentIndex) => value.replace(/^\d+[_-]/, "") === parts[parentIndex].replace(/^\d+[_-]/, "")))
       .map((path) => path[index])
       .filter(Boolean)
-      .map((value) => value.replace(/^\d+[_-]/, ""));
+      .map((value) => value.replace(/^\d+[_-]/, "")))];
     const position = candidates.findIndex((value) => value === clean);
     return position >= 0 ? position + 1 : 0;
   });

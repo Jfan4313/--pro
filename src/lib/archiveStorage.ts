@@ -195,6 +195,31 @@ async function getExistingDirectoryByParts(root: any, parts: string[]) {
   }
 }
 
+function withoutFolderNumber(name: string) {
+  return String(name || "").replace(/^\d+[_-]/, "");
+}
+
+async function getExistingDirectoryByLabels(root: any, labels: string[]) {
+  let directory = root;
+  for (const label of labels) {
+    const exact = await getExistingDirectoryByParts(directory, [label]);
+    if (exact) {
+      directory = exact;
+      continue;
+    }
+    let match: any = null;
+    for await (const entry of directory.values()) {
+      if (entry.kind === "directory" && withoutFolderNumber(entry.name) === withoutFolderNumber(label)) {
+        match = entry;
+        break;
+      }
+    }
+    if (!match) return null;
+    directory = match;
+  }
+  return directory;
+}
+
 async function ensureNestedFolders(root: any, stageId: string, paths: string[]) {
   for (const path of paths) {
     const numberedPath = numberArchiveFolderPath(stageId, path);
@@ -383,8 +408,9 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
         const oldParts = folderPath.split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
         const newParts = numberArchiveFolderPath(stage.id, folderPath).split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
         if (oldParts.join("/") === newParts.join("/")) continue;
-        const source = await getExistingDirectoryByParts(stageDirectory, oldParts);
+        const source = await getExistingDirectoryByLabels(stageDirectory, oldParts);
         if (!source) continue;
+        if (source.name === newParts.at(-1)) continue;
         const target = await getDirectoryByParts(stageDirectory, newParts, true);
         await copyDirectoryContents(source, target);
         await stageDirectory.removeEntry(oldParts[0], { recursive: true });

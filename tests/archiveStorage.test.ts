@@ -237,7 +237,7 @@ test("旧平铺归档先重建并校验后才能删除旧副本", async () => {
 
   const preview = await provider.previewGeneratedArchiveFiles();
   assert.equal(preview.length, 1);
-  assert.match(preview[0].targetStorageKey, /已归档\/09_招投标资料\/02_技术标/);
+  assert.match(preview[0].targetStorageKey, /已归档\/06_招投标资料\/02_技术标/);
   const rebuilt = await provider.rebuildGeneratedArchiveFiles(preview);
   assert.equal(rebuilt.verified.length, 1);
   assert.ok(archived.entries.has(oldName));
