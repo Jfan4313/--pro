@@ -8,7 +8,7 @@ import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { getProjectNumber } from "@/src/lib/management";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
 import { getProjectNameConflicts, hasProjectIdentityConflict, isValidProjectNumber, normalizeProjectNumber, sortProjectsNaturally } from "@/src/lib/projectNumbering";
-import { ArchiveFolderState, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
+import { ArchiveFolderState, getArchiveProjectFolder, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
 import { useAuth } from "@/src/lib/auth";
 import { apiClient } from "@/src/lib/apiClient";
 
@@ -42,11 +42,11 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
   const [supplyOrders] = useSyncedAppData("supplyOrders", []);
   const [personnelData] = useSyncedAppData("personnelData", []);
   const [scheduleData] = useSyncedAppData("scheduleData", []);
-  const [lifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
+  const [lifecycleStates, setLifecycleStates] = useSyncedAppData("projectLifecycleStates", {});
   const [appSettings] = useUserSettings<any>({});
   const [archivedProjects, setArchivedProjects] = useSyncedAppData<any[]>("projectArchive", []);
-  const [, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
-  const { allProjects, conflicts: projectNumberConflicts, reserveProjectNumber } = useProjectNumbering();
+  const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
+  const { allProjects, conflicts: projectNumberConflicts, reserveProjectNumber, resetProjectNumbering } = useProjectNumbering();
   const projectNameConflicts = useMemo(() => getProjectNameConflicts(allProjects), [allProjects]);
 
   const getConstructProgress = (project: any) => {
@@ -117,6 +117,18 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     window.dispatchEvent(new CustomEvent("show-toast", { detail: `已归档 ${selected.length} 个项目` }));
   };
 
+  const clearAllProjects = async () => {
+    const count = allProjects.length;
+    if (!count || !window.confirm(`确认清空全部 ${count} 个项目记录吗？\n\n只删除系统中的项目记录、项目阶段状态和归档状态；本地资料根目录中的文件和文件夹不会删除。`)) return;
+    await setData(boardSeed);
+    await setArchivedProjects([]);
+    await setLifecycleStates({});
+    await setArchiveFolderStates({});
+    await resetProjectNumbering();
+    setSelectedProjectIds([]);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "已清空项目记录，本地资料文件未删除" }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
@@ -139,7 +151,6 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
       businessModel: formData.get('businessModel') as string,
       manager: selectedManager?.name || "",
       managerId,
-      dueDate: formData.get('dueDate') as string,
       constructProgress: 0,
       supplyProgress: 0,
       status: "normal"
@@ -265,7 +276,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     }
   }, [boardLoading, data, lifecycleStates, setData]);
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProject) return;
     
@@ -281,6 +292,24 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
       return;
     }
     const isArchived = archivedProjects.some((project: any) => project.id === normalizedProject.id);
+    const oldFolder = archiveFolderStates[normalizedProject.id]?.projectFolder;
+    const nextFolder = getArchiveProjectFolder(normalizedProject);
+    if (oldFolder && oldFolder !== nextFolder) {
+      const provider = await getLocalArchiveProvider();
+      const availability = await provider?.checkAvailability();
+      if (!provider || !availability?.available) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: '归档目录未授权，暂不能同步修改资料文件夹编号' }));
+        return;
+      }
+      try {
+        await provider.renameProjectFolder(oldFolder, nextFolder);
+        await setArchiveFolderStates((current) => ({ ...current, [normalizedProject.id]: { ...current[normalizedProject.id], projectFolder: nextFolder, updatedAt: new Date().toISOString() } }));
+        await setLifecycleStates((current: any) => Object.fromEntries(Object.entries(current || {}).map(([projectId, projectState]: [string, any]) => [projectId, projectId === normalizedProject.id ? Object.fromEntries(Object.entries(projectState || {}).map(([stageId, stageState]: [string, any]) => [stageId, { ...stageState, files: Array.isArray(stageState?.files) ? stageState.files.map((file: any) => ({ ...file, storageKey: String(file.storageKey || '').replace(`${oldFolder}/`, `${nextFolder}/`) })) : stageState?.files }])) : projectState])));
+      } catch (error: any) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.code === 'archive_target_exists' ? '新编号对应的资料文件夹已存在，请先处理重复文件夹' : '资料文件夹编号同步失败，项目编号未修改' }));
+        return;
+      }
+    }
     setData((prevData: any) => {
       const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;
       return currentData.map((col: any) => ({
@@ -308,17 +337,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
           </select>
           <button type="button" onClick={() => setShowArchive((value) => !value)} className={cn("px-3 py-2 rounded-lg text-xs font-semibold border", showArchive ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600")}>项目归档 ({archivedProjects.length})</button>
           {selectedProjectIds.length > 0 && <button type="button" onClick={archiveSelectedProjects} className="px-3 py-2 rounded-lg bg-amber-500 text-white text-xs font-bold">归档选中 ({selectedProjectIds.length})</button>}
-          <button 
-            onClick={() => {
-              if (window.confirm('确定要重置看板数据吗？所有自定义项目将被清除。')) {
-                setData(boardSeed);
-                window.dispatchEvent(new CustomEvent('show-toast', { detail: '看板已重置' }));
-              }
-            }}
-            className="px-3 py-2 text-slate-400 hover:text-slate-600 text-xs font-medium transition-colors hidden md:block"
-          >
-            重置数据
-          </button>
+          <button type="button" onClick={() => void clearAllProjects()} className="px-3 py-2 text-rose-500 hover:text-rose-700 text-xs font-medium transition-colors hidden md:block">清空项目记录</button>
           <button 
             onClick={() => setIsModalOpen(true)}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-600/20 w-full md:w-auto text-center flex items-center justify-center gap-2"
@@ -461,7 +480,6 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                             }
                             return null;
                           })()}
-                          {project.dueDate && <span className="text-[10px] text-slate-400 font-mono bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{project.dueDate}</span>}
                         </div>
                       </div>
                     </div>
@@ -497,7 +515,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                 <label className="block text-sm font-medium text-slate-700 mb-1">合作模式</label>
                 <select name="businessModel" className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white"><option value="EPC">EPC</option><option value="EMC">EMC</option></select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">项目经理</label>
                     <select name="managerId" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" defaultValue="">
@@ -505,10 +523,6 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                       {projectManagers.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}（{manager.username}）</option>)}
                     </select>
                     <input type="hidden" name="manager" value="" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">预计竣工日期</label>
-                    <input name="dueDate" type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
                 </div>
               </div>
               <div className="pt-4 flex justify-end gap-3">
@@ -577,23 +591,13 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
                     {businessModels.map((model) => <option key={model} value={model}>{model}</option>)}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">项目经理</label>
                     <select value={editingProject.managerId || ""} onChange={(e) => { const manager = projectManagers.find((item) => item.id === e.target.value); setEditingProject({...editingProject, managerId: manager?.id || "", manager: manager?.name || ""}); }} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                       <option value="">暂不指定</option>
                       {projectManagers.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}（{manager.username}）</option>)}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">预计竣工日期</label>
-                    <input 
-                      type="date" 
-                      required 
-                      value={editingProject.dueDate}
-                      onChange={(e) => setEditingProject({...editingProject, dueDate: e.target.value})}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" 
-                    />
                   </div>
                 </div>
 

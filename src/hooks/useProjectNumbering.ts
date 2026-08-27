@@ -42,11 +42,17 @@ export function useProjectNumbering() {
     return formatProjectNumber(next);
   }, [allProjects, reservedSequence, setReservedSequence]);
 
+  const resetProjectNumbering = useCallback(async () => {
+    sequenceRef.current = 0;
+    await setReservedSequence(0);
+  }, [setReservedSequence]);
+
   return {
     allProjects,
     // 已归档项目不再阻塞当前项目的编号跳转；只有仍在项目看板中的项目才参与冲突提示。
     conflicts: getProjectNumberConflicts(activeProjects),
     loading: boardLoading || archiveLoading || sequenceLoading || migrationLoading,
     reserveProjectNumber,
+    resetProjectNumbering,
   };
 }

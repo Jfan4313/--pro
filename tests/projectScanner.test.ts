@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scanProjectDirectories } from "../src/lib/projectScanner";
+import { getScannedProjectIdentity, scanProjectDirectories } from "../src/lib/projectScanner";
 
 function fileEntry(name: string, content: string, lastModified = 1700000000000) {
   const file = new File([content], name, { type: "text/plain", lastModified });
@@ -46,6 +46,11 @@ test("从多项目第一层目录和阶段目录生成项目与阶段汇总", as
   assert.equal(report.files.find((file) => file.name === "现场勘察记录.txt")?.pathStageEvidence, "01_项目立项");
 });
 
+test("保留资料目录中的项目编号并去掉编号前缀作为项目名称", () => {
+  assert.deepEqual(getScannedProjectIdentity("PRJ-0004_流花中心"), { projectNumber: "PRJ-0004", projectName: "流花中心" });
+  assert.deepEqual(getScannedProjectIdentity("PRJ_0021-广东能嘉科技企业孵化器有限公司"), { projectNumber: "PRJ_0021", projectName: "广东能嘉科技企业孵化器有限公司" });
+});
+
 test("最近的招投标目录锁定商务阶段，正文施工日期不能覆盖", async () => {
   const root = { name: "项目", async *values() {
     yield directory("测试项目", [directory("施工资料", [directory("历史招投标", [fileEntry("技术标书.txt", "计划施工日期 2026年9月，开工后进场")])])]);
@@ -65,6 +70,23 @@ test("按真实业务子目录生成分类，不把子目录压进文件名", as
   } };
   const report = await scanProjectDirectories([root]);
   assert.equal(report.files[0].category, "项目模型/PVsyst模型");
+});
+
+test("开工前申报目录锁定整包资料，不按文件正文拆分阶段", async () => {
+  const root = { name: "项目", async *values() {
+    yield directory("流花中心", [directory("开工资料整理（20260620）", [
+      fileEntry("合同及中标通知书.pdf", "施工日期 2026年9月，并网柜设备参数"),
+      fileEntry("施工组织设计报审表.docx", "施工组织设计和进场安排"),
+    ])]);
+  } };
+  const report = await scanProjectDirectories([root]);
+  assert.equal(report.files.length, 2);
+  for (const file of report.files) {
+    assert.equal(file.stageId, "8_construction");
+    assert.equal(file.classificationSource, "folder");
+    assert.equal(file.category, "开工前申报");
+    assert.equal(file.folderEvidence, "开工资料整理（20260620）");
+  }
 });
 
 test("生命周期包含运营维护，光伏备案不强制环评消防规划", async () => {

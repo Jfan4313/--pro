@@ -1,20 +1,21 @@
 import React from "react";
-import { AlertTriangle, Download, FileDown, FileText, FolderOpen, FolderSearch, RefreshCw, SearchCheck, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, Eye, FileDown, FileText, FolderOpen, FolderSearch, History, RefreshCw, SearchCheck, Trash2, UploadCloud, X } from "lucide-react";
 import { apiClient, downloadProjectManifestContent, getProjectFileDownloadUrl, ProjectFileManifest } from "@/src/lib/apiClient";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
-import { sortProjectsNaturally } from "@/src/lib/projectNumbering";
+import { normalizeProjectName, normalizeProjectNumber, parseProjectSequence, sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
-import { ArchiveCleanupCandidate, ArchiveFolderState, chooseLocalArchiveProvider, downloadLocalArchiveFile, getCurrentAndNextStages, getLocalArchiveProvider, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
-import { downloadScanReport, getScannedFileHandle, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
+import { ArchiveCleanupCandidate, ArchiveFolderState, buildArchiveVersionView, chooseLocalArchiveProvider, getArchiveDisplayName, getCurrentAndNextStages, getLocalArchiveHandle, getLocalArchiveProvider, openLocalArchiveFile, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
+import { downloadScanReport, getScannedFileHandle, getScannedProjectIdentity, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
+import { createMaterialOrganizationPlan, summarizeOrganizationPlan, MaterialOrganizationPlan } from "@/src/lib/projectMaterialOrganizationSkill";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData, setBoardData] = useProjectBoardData();
   const { allProjects, reserveProjectNumber } = useProjectNumbering();
-  const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
+  const [lifecycleStates, setLifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const projects = React.useMemo(() => flattenProjects(boardData), [boardData]);
   const [stageFilter, setStageFilter] = React.useState("all");
@@ -46,6 +47,8 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [manifestSyncing, setManifestSyncing] = React.useState(false);
   const [uploadingManifestId, setUploadingManifestId] = React.useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = React.useState(0);
+  const [deletingStorageKey, setDeletingStorageKey] = React.useState<string | null>(null);
+  const [activeSection, setActiveSection] = React.useState<"directory" | "organize" | "remote" | "migration">("directory");
   const scanAbortRef = React.useRef<AbortController | null>(null);
 
   const selectedProject = projects.find((project: any) => project.id === selectedProjectId) || projects[0];
@@ -67,6 +70,11 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     return (projectFiles?.stages || []).reduce((sum: number, stage: any) => sum + (stage.files || []).length, 0);
   }, [projectFiles]);
   const expectedFiles = STAGES.reduce((sum, stage) => sum + stage.files.length, 0);
+  const organizationPlan = React.useMemo<MaterialOrganizationPlan | null>(() => {
+    if (!scanReport) return null;
+    const project = scanReport.projects.find((item) => selectedImportProjects.includes(item.projectKey)) || scanReport.projects[0];
+    return project ? createMaterialOrganizationPlan(scanReport, project.projectKey, projectNameOverrides[project.projectKey] || project.projectName, undefined, fileClassificationOverrides) : null;
+  }, [scanReport, selectedImportProjects, projectNameOverrides, fileClassificationOverrides]);
 
   React.useEffect(() => {
     if (!visibleProjects.some((project: any) => project.id === selectedProjectId)) setSelectedProjectId(visibleProjects[0]?.id || "");
@@ -90,6 +98,10 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
           folder?.files.push({
             name: file.storedName,
             storedName: file.storedName,
+            originalName: file.originalName,
+            category: file.category,
+            version: file.version,
+            checksum: file.checksum,
             bucket: file.bucket,
             size: file.size,
             updatedAt: file.createdAt,
@@ -175,6 +187,68 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     }
   };
 
+  const restoreProjectsFromScan = async (report: ProjectScanReport) => {
+    const candidatesByName = new Map<string, typeof report.projects[number]>();
+    for (const project of report.projects.filter((item) => item.projectName !== "未分组资料")) {
+      const key = normalizeProjectName(project.projectName);
+      const current = candidatesByName.get(key);
+      const currentIsNumbered = Boolean(current?.projectNumber || getScannedProjectIdentity(current?.projectKey || "").projectNumber);
+      const nextIsNumbered = Boolean(project.projectNumber || getScannedProjectIdentity(project.projectKey).projectNumber);
+      if (!current || (nextIsNumbered && !currentIsNumbered)) candidatesByName.set(key, project);
+    }
+    const candidates = [...candidatesByName.values()];
+    if (!candidates.length) return 0;
+    const usedNumbers = new Set(allProjects.map((project: any) => normalizeProjectNumber(project.projectNumber || project.code)).filter(Boolean));
+    const restored: any[] = [];
+    for (const project of candidates) {
+      const identity = getScannedProjectIdentity(project.projectKey);
+      const projectName = project.projectName.trim();
+      const existing = projects.find((candidate: any) => String(candidate.name || "").trim() === projectName || candidate.importedProjectKey === project.projectKey);
+      if (existing) {
+        if (existing.importedProjectKey !== project.projectKey) restored.push({ ...existing, importedProjectKey: project.projectKey });
+        continue;
+      }
+      const explicitNumber = normalizeProjectNumber(project.projectNumber || identity.projectNumber);
+      const projectNumber = explicitNumber && !usedNumbers.has(explicitNumber) ? explicitNumber : await reserveProjectNumber();
+      usedNumbers.add(projectNumber);
+      restored.push({ id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${restored.length}`, projectNumber, name: projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: report.id, importedProjectKey: project.projectKey, importedFileCount: project.fileCount, importedStageId: STAGES[0].id });
+    }
+    if (!restored.length) return 0;
+    setBoardData((current: any[]) => {
+      const source = Array.isArray(current) && current.length ? current : STAGES.map((stage) => ({ id: stage.id, title: stage.name, count: 0, projects: [] }));
+      const next = source.map((column: any) => ({ ...column, projects: [...(column.projects || [])] }));
+      for (const project of restored) {
+        let placed = false;
+        for (const column of next) column.projects = column.projects.map((candidate: any) => candidate.id === project.id ? { ...candidate, ...project } : candidate);
+        if (!projects.some((candidate: any) => candidate.id === project.id)) {
+          const target = next.find((column: any) => column.id === project.importedStageId) || next[0];
+          target.projects = sortProjectsNaturally([project, ...target.projects]);
+          placed = true;
+        }
+        if (placed) for (const column of next) column.count = column.projects.length;
+      }
+      const preferredByName = new Map<string, any>();
+      for (const column of next) for (const project of column.projects) {
+        const key = normalizeProjectName(project.name);
+        const previous = preferredByName.get(key);
+        if (!previous) preferredByName.set(key, project);
+        else {
+          const previousScanNumber = Boolean(String(previous.importedProjectKey || "").match(/^PRJ[-_ ]?\d+/i));
+          const currentScanNumber = Boolean(String(project.importedProjectKey || "").match(/^PRJ[-_ ]?\d+/i));
+          const previousSequence = parseProjectSequence(normalizeProjectNumber(previous.projectNumber || previous.code));
+          const currentSequence = parseProjectSequence(normalizeProjectNumber(project.projectNumber || project.code));
+          if ((currentScanNumber && !previousScanNumber) || (currentScanNumber === previousScanNumber && currentSequence > 0 && (previousSequence === 0 || currentSequence < previousSequence))) preferredByName.set(key, project);
+        }
+      }
+      for (const column of next) {
+        column.projects = column.projects.filter((project: any) => preferredByName.get(normalizeProjectName(project.name))?.id === project.id);
+        column.count = column.projects.length;
+      }
+      return next;
+    });
+    return restored.length;
+  };
+
   const chooseLocalFolder = async () => {
     try {
       const provider = await chooseLocalArchiveProvider();
@@ -183,7 +257,13 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       setLocalFolderName(availability.rootName || "已授权文件夹");
       setFileRoot(availability.rootName || "已授权本地文件夹");
       setIsLocationPanelOpen(false);
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已授权访问“${availability.rootName}”，正在补建项目目录` }));
+      const rootHandle = await getLocalArchiveHandle();
+      const report = await scanProjectDirectories(rootHandle ? [rootHandle] : []);
+      setScanRoots(rootHandle ? [rootHandle] : []);
+      setScanReport(report);
+      const restoredCount = await restoreProjectsFromScan(report);
+      setSelectedImportProjects(report.projects.filter((project) => project.projectName !== "未分组资料").map((project) => project.projectKey));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已授权访问“${availability.rootName}”，识别到 ${report.projects.filter((project) => project.projectName !== "未分组资料").length} 个资料项目${restoredCount ? `，恢复 ${restoredCount} 个项目` : ""}` }));
       await loadFiles();
     } catch (error: any) {
       if (error?.name !== "AbortError") window.dispatchEvent(new CustomEvent("show-toast", { detail: "文件夹授权失败，请重新选择并允许浏览器访问" }));
@@ -244,6 +324,10 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     setAiArchiveReviewing(true);
     try {
       const selected = scanReport.projects.filter((project) => selectedImportProjects.includes(project.projectKey));
+      const selectedFiles = scanReport.files.filter((file) => selectedImportProjects.includes(file.projectKey || ""));
+      const reviewCount = selectedFiles.filter((file) => file.needsReview || !file.stageId).length;
+      const confirmed = window.confirm(`整理预览已生成：${selected.length} 个项目、${selectedFiles.length} 个文件。\n\n文件将复制到“整理预览_日期/阶段/资料类别/子文件夹”，原始文件不会移动、重命名或删除。${reviewCount ? `\n\n其中 ${reviewCount} 个文件需要人工复核，将进入“未确定”。` : ""}\n\n确认继续复制整理吗？`);
+      if (!confirmed) { setAiArchiveReviewing(false); setImportingProjects(false); return; }
       type AiFileDecision = { id: string; stageId: string; category: string; confidence: number; reason: string };
       type AiProjectDecision = { projectKey: string; currentStageId: string; confidence: number; reason: string; files: AiFileDecision[] };
       const aiReview: { aiApplied: boolean; projects: AiProjectDecision[] } = await apiClient.analyzeProjectArchive({ projects: selected.map((project) => {
@@ -271,7 +355,9 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         const existing = projects.find((candidate: any) => candidate.id === globalMatches[0]?.id);
         if (globalMatches.length === 1 && !existing) { duplicateNames.push(`${projectName}（已归档）`); continue; }
         const currentStageId = existing ? getProjectCurrentStageInfo(existing.id, lifecycleStates).stage.id : (aiDecision?.currentStageId || localStageId);
-        const projectRecord = existing ? { ...existing, name: projectName, importedProjectKey: project.projectKey } : { id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: await reserveProjectNumber(), name: projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedProjectKey: project.projectKey, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } };
+        const identity = getScannedProjectIdentity(project.projectKey);
+        const explicitProjectNumber = normalizeProjectNumber(project.projectNumber || identity.projectNumber);
+        const projectRecord = existing ? { ...existing, name: projectName, importedProjectKey: project.projectKey } : { id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}-${imported.length}`, projectNumber: explicitProjectNumber || await reserveProjectNumber(), name: projectName, type: "光伏项目", manager: "待确定", dueDate: "", constructProgress: 0, supplyProgress: 0, status: "normal", importedFromScanId: scanReport.id, importedProjectKey: project.projectKey, importedFileCount: project.fileCount, importedStageId: currentStageId, archiveReview: aiDecision ? { provider: "DeepSeek", confidence: aiDecision.confidence, reason: aiDecision.reason, reviewedAt: new Date().toISOString() } : { provider: "local-rules", confidence: project.confidence, reason: "使用目录和阶段规则", reviewedAt: new Date().toISOString() } };
         if (!existing) imported.push(projectRecord);
         else if (existing.name !== projectName) renamedExisting.push(projectRecord);
         archiveTargets.push({ project: { ...projectRecord, importedProjectKey: project.projectKey }, source: project, currentStageId });
@@ -440,16 +526,45 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     finally { setUploadingManifestId(null); setUploadProgress(0); }
   };
 
-  const downloadFile = async (file: any) => {
+  const openFile = async (file: any) => {
     if (file.storageProvider === "local-folder" && file.storageKey) {
       try {
-        await downloadLocalArchiveFile(file.storageKey, file.storedName || file.name);
+        await openLocalArchiveFile(file.storageKey);
       } catch {
-        window.dispatchEvent(new CustomEvent("show-toast", { detail: "原文件仅能在已授权的归档电脑下载" }));
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "无法打开本机文件，请确认归档目录仍有访问权限" }));
       }
       return;
     }
     if (file.relativePath || file.storageKey) window.open(getProjectFileDownloadUrl(file.relativePath || file.storageKey), "_blank");
+  };
+
+  const deleteLocalFile = async (file: any) => {
+    if (!selectedProject || file.storageProvider !== "local-folder" || !file.storageKey) return;
+    const displayName = getArchiveDisplayName(file);
+    const duplicateNote = file.isDuplicate || file.duplicateRecordCount > 1 ? "；相关重复索引也会一并清理" : "";
+    if (!window.confirm(`确认从本机永久删除“${displayName}”这个版本吗？此操作不可恢复${duplicateNote}。`)) return;
+    setDeletingStorageKey(file.storageKey);
+    try {
+      const provider = await getLocalArchiveProvider();
+      if (!provider) throw new Error("archive_permission_required");
+      await provider.deleteFile(file.storageKey);
+      await setLifecycleStates((current) => {
+        const projectState = current[selectedProject.id] || {};
+        const nextProjectState = { ...projectState };
+        for (const stage of STAGES) {
+          const state = projectState[stage.id];
+          if (!Array.isArray(state?.files)) continue;
+          nextProjectState[stage.id] = { ...state, files: state.files.filter((item: any) => item.storageKey !== file.storageKey) };
+        }
+        return { ...current, [selectedProject.id]: nextProjectState };
+      });
+      setProjectFiles((current: any) => ({ ...current, stages: (current?.stages || []).map((stage: any) => ({ ...stage, files: (stage.files || []).filter((item: any) => item.storageKey !== file.storageKey) })) }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已删除 ${displayName}，其他版本不受影响` }));
+    } catch {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "文件删除失败，请检查本机归档目录权限" }));
+    } finally {
+      setDeletingStorageKey(null);
+    }
   };
 
   return (
@@ -464,22 +579,16 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
             <RefreshCw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
             刷新
           </button>
-          <button onClick={initFolders} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm flex items-center">
-            <FolderOpen className="w-4 h-4 mr-2" />
-            生成当前及下一阶段
-          </button>
           <button onClick={() => void openLocationPanel()} className="px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors shadow-sm flex items-center">
             <FolderSearch className="w-4 h-4 mr-2" />
             设置归档位置
           </button>
-          <button onClick={() => void addScanRoot()} className="px-4 py-2 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors shadow-sm flex items-center">
-            <SearchCheck className="w-4 h-4 mr-2" />
-            添加扫描文件夹
-          </button>
-          <button onClick={() => void syncLocalManifest()} disabled={manifestSyncing || !selectedProject} className="px-4 py-2 bg-violet-50 border border-violet-100 text-violet-700 rounded-lg text-sm font-medium hover:bg-violet-100 transition-colors shadow-sm flex items-center disabled:opacity-50">
-            <FileDown className={cn("w-4 h-4 mr-2", manifestSyncing && "animate-pulse")} />
-            {manifestSyncing ? "同步中…" : "同步文件清单"}
-          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="grid gap-2 sm:grid-cols-4">
+          {([ ["directory", "项目目录", "查看阶段文件"], ["organize", "智能整理", "扫描与归档预览"], ["remote", "远程清单", "同步与按需上传"], ["migration", "历史迁移", "重建旧归档"] ] as const).map(([key, label, description]) => <button key={key} type="button" onClick={() => setActiveSection(key)} className={cn("rounded-xl px-3 py-3 text-left transition", activeSection === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50")}><div className="text-sm font-bold">{label}</div><div className={cn("mt-1 text-[11px]", activeSection === key ? "text-slate-300" : "text-slate-400")}>{description}</div></button>)}
         </div>
       </div>
 
@@ -514,6 +623,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
 
       {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">本机项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">文件内容只写入当前电脑；项目和文件索引可同步到其他设备。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{localFolderName || "尚未选择本机文件夹"}{localFolderName && <span className={cn("ml-2 text-xs", localPermission === "granted" ? "text-emerald-600" : "text-amber-600")}>{localPermission === "granted" ? "可读写" : "需要恢复权限"}</span>}</div><button onClick={() => void chooseLocalFolder()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white">{localFolderName ? "重新选择" : "选择本机文件夹"}</button>{localFolderName && localPermission !== "granted" && <button onClick={() => void restoreLocalPermission()} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700">恢复授权</button>}</div></div>}
 
+      {activeSection === "organize" && <div className="space-y-6">
       <ScanPanel
         roots={scanRoots}
         report={scanReport}
@@ -531,13 +641,14 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
         onFilter={setScanFilter}
       />
 
-      <ProjectStructureSummary report={scanReport} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={allProjects} nameOverrides={projectNameOverrides} onNameChange={(projectKey, name) => setProjectNameOverrides((current) => ({ ...current, [projectKey]: name }))} onToggle={toggleImportProject} onImport={importScannedProjects} />
+      <ProjectStructureSummary report={scanReport} organizationPlan={organizationPlan} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={allProjects} nameOverrides={projectNameOverrides} onNameChange={(projectKey, name) => setProjectNameOverrides((current) => ({ ...current, [projectKey]: name }))} onToggle={toggleImportProject} onImport={importScannedProjects} />
+      </div>}
 
-      <ArchiveCleanupPanel candidates={cleanupCandidates} scanning={cleanupScanning} rebuilding={cleanupRebuilding} deleting={cleanupDeleting} onPreview={() => void previewArchiveCleanup()} onRebuild={() => void rebuildOldArchives()} onDelete={() => void deleteOldArchives()} />
+      {activeSection === "migration" && <ArchiveCleanupPanel candidates={cleanupCandidates} scanning={cleanupScanning} rebuilding={cleanupRebuilding} deleting={cleanupDeleting} onPreview={() => void previewArchiveCleanup()} onRebuild={() => void rebuildOldArchives()} onDelete={() => void deleteOldArchives()} />}
 
-      <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />
+      {activeSection === "remote" && <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />}
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      {activeSection === "directory" && <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div>
             <h3 className="font-bold text-slate-900">{selectedProject ? `${getProjectNumber(selectedProject)} · ${selectedProject.name}` : "暂无项目"}</h3>
@@ -548,7 +659,9 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
 
         <div className="divide-y divide-slate-100">
           {archivedStages.map(({ stage, folder }) => {
-            const files = folder?.files || [];
+            const files = buildArchiveVersionView(folder?.files || []);
+            const localFiles = files.filter((file: any) => file.storageProvider === "local-folder");
+            const nonLocalFiles = files.filter((file: any) => file.storageProvider !== "local-folder");
             return (
               <div key={stage.id} className="p-5">
                 <div className="flex items-start justify-between gap-4">
@@ -557,33 +670,50 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
                     <p className="text-xs text-slate-500 mt-1">应归档：{stage.files.join("、") || "无"}</p>
                   </div>
                   <span className={cn("shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border", files.length > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-slate-100 text-slate-500 border-slate-200")}>
-                    {files.length} 份
+                    本机 {localFiles.length} · 非本机 {nonLocalFiles.length}
                   </span>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    {files.map((file: any) => (
-                      <div key={file.storageKey || file.relativePath || file.name} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-slate-900 truncate" title={file.name}>{file.name}</div>
-                          <div className="text-xs text-slate-400 mt-1">{file.bucket} · {formatSize(file.size)} · {formatTime(file.updatedAt)} · {file.storageProvider === "local-folder" ? "本机" : "服务器历史"}</div>
-                        </div>
-                        <button
-                          onClick={() => void downloadFile(file)}
-                          className="shrink-0 p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"
-                          title="下载"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
+                <div className="mt-4 space-y-4">
+                  {([{"label":"本机文件","files":localFiles,"local":true},{"label":"非本机文件","files":nonLocalFiles,"local":false}] as const).map((section) => section.files.length > 0 && (
+                    <div key={section.label}>
+                      <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-600">
+                        <span className={cn("h-2 w-2 rounded-full", section.local ? "bg-emerald-500" : "bg-slate-400")} />
+                        {section.label}<span className="font-normal text-slate-400">{section.files.length} 份</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                        {section.files.map((file: any) => {
+                          const displayName = getArchiveDisplayName(file);
+                          return (
+                            <div key={file.storageKey || file.relativePath || file.name} className={cn("rounded-xl border p-3 flex items-center justify-between gap-3", section.local ? "border-emerald-100 bg-emerald-50/40" : "border-slate-100 bg-slate-50")}>
+                              <button type="button" onClick={() => void openFile(file)} className="min-w-0 flex-1 text-left" title={`打开：${file.name}`}>
+                                <div className="truncate text-sm font-semibold text-slate-900">{displayName}</div>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                                  <span className={cn("rounded-full px-2 py-0.5 font-bold", section.local ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600")}>{section.local ? "本机可打开" : "非本机文件"}</span>
+                                  <span>{formatSize(file.size)}</span><span>·</span><span>{formatTime(file.updatedAt)}</span>
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 font-bold text-indigo-600"><History className="h-3 w-3" />V{file.versionNumber}{file.versionCount > 1 ? ` / 共${file.versionCount}版` : ""}</span>
+                                  <span className={cn("rounded-full px-2 py-0.5 font-bold", file.isLatestVersion ? "bg-indigo-100 text-indigo-700" : "bg-amber-100 text-amber-700")}>{file.isLatestVersion ? "最新版本" : "历史版本"}</span>
+                                  {file.isDuplicate && <span className="rounded-full bg-rose-100 px-2 py-0.5 font-bold text-rose-700">重复文件</span>}
+                                </div>
+                              </button>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <button type="button" onClick={() => void openFile(file)} className="rounded-lg p-2 text-indigo-600 hover:bg-white" title={section.local ? "调用电脑打开" : "查看或下载"}><Eye className="h-4 w-4" /></button>
+                                {section.local && <button type="button" onClick={() => void deleteLocalFile(file)} disabled={deletingStorageKey === file.storageKey} className="rounded-lg p-2 text-rose-500 hover:bg-white disabled:opacity-40" title="删除这个版本"><Trash2 className="h-4 w-4" /></button>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {files.length === 0 && <div className="rounded-xl bg-slate-50 p-5 text-center text-xs text-slate-400">该阶段目录已创建，暂无文件</div>}
+                </div>
               </div>
             );
           })}
           {archivedStages.length === 0 && <div className="p-10 text-center text-sm text-slate-400">该项目暂无真实归档文件</div>}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -619,7 +749,7 @@ function Metric({ icon: Icon, label, value, compact }: any) {
   );
 }
 
-function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing, existingProjects, nameOverrides, onNameChange, onToggle, onImport }: { report: ProjectScanReport | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; nameOverrides: Record<string, string>; onNameChange: (projectKey: string, name: string) => void; onToggle: (projectKey: string) => void; onImport: () => void }) {
+function ProjectStructureSummary({ report, organizationPlan, selectedKeys, importing, aiReviewing, existingProjects, nameOverrides, onNameChange, onToggle, onImport }: { report: ProjectScanReport | null; organizationPlan: MaterialOrganizationPlan | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; nameOverrides: Record<string, string>; onNameChange: (projectKey: string, name: string) => void; onToggle: (projectKey: string) => void; onImport: () => void }) {
   if (!report) return null;
   const existingNameCounts = existingProjects.reduce<Map<string, number>>((counts, project: any) => {
     const name = String(project.name || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -629,6 +759,7 @@ function ProjectStructureSummary({ report, selectedKeys, importing, aiReviewing,
   return <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">项目名称与阶段分类</h3><p className="mt-1 text-xs text-slate-600">勾选后录入新项目，或同步已有项目的文件归档；未勾选项目不会处理。</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-700">{report.projects.length} 个项目</span><button onClick={onImport} disabled={importing || !selectedKeys.length} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{aiReviewing ? "DeepSeek 审核归档阶段…" : importing ? "正在归档…" : `DeepSeek 辅助归档（${selectedKeys.length}）`}</button></div></div>
     <div className="mt-3 rounded-xl border border-emerald-100 bg-white p-3 text-xs text-slate-600">已有项目不会重复创建，重新扫描后可以再次勾选并同步原有文件。录入或同步只建立当前及下一阶段目录，并将文件复制到对应阶段的“已归档”目录；原文件不会移动、重命名或删除。</div>
+    {organizationPlan && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/50 px-3 py-2 text-xs text-emerald-800"><span className="font-bold">整理计划 · {organizationPlan.projectName}</span><span>共 {summarizeOrganizationPlan(organizationPlan).total} 个文件</span><span>可整理 {summarizeOrganizationPlan(organizationPlan).ready}</span><span className={organizationPlan.status === "draft" ? "text-amber-700" : ""}>待确认 {summarizeOrganizationPlan(organizationPlan).review}</span><span className="text-slate-500">目标：整理预览_日期</span></div>}
     <div className="mt-4 grid gap-3 lg:grid-cols-2">{report.projects.map((project) => {
       const displayName = nameOverrides[project.projectKey] ?? project.projectName;
       const normalizedName = displayName.trim().replace(/\s+/g, " ").toLocaleLowerCase();

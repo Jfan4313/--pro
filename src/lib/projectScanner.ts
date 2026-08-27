@@ -47,6 +47,7 @@ export type ProjectStageSummary = {
 
 export type ScannedProject = {
   projectKey: string;
+  projectNumber?: string;
   projectName: string;
   confidence: number;
   evidence: string[];
@@ -109,6 +110,15 @@ function cleanProjectName(value: string) {
   return value.replace(/\.(pdf|docx?|xlsx?|pptx?|txt|zip|rar|7z)$/i, "").replace(/^[【\[(（].*?[】\])）]\s*/u, "").replace(/[-_](资料|文件|归档|整理)(?:[-_（(].*)?$/u, "").trim();
 }
 
+export function getScannedProjectIdentity(value: string) {
+  const raw = cleanProjectName(value);
+  const numbered = raw.match(/^(PRJ[-_ ]?\d{1,})[ _-]+(.+)$/i);
+  return {
+    projectNumber: numbered?.[1] || "",
+    projectName: (numbered?.[2] || raw).trim(),
+  };
+}
+
 function getPathSegments(relativePath: string) {
   return relativePath.split("/").filter(Boolean);
 }
@@ -122,6 +132,9 @@ const DIRECTORY_STAGE_RULES: Array<{ stage: typeof STAGES[number]; terms: RegExp
     { stage: STAGES[9], terms: /运营维护|运维|运行数据|发电量|巡检|维修工单|备品备件|质保|保险|客户运维/i },
     { stage: STAGES[8], terms: /验收|并网验收|并网供电|竣工|运维|移交|运行/i },
     { stage: STAGES[6], terms: /项目交底|交底|安全教育|安全技术|人员资格|特种作业|危险源/i },
+    // 开工资料/施工前申报是一个完整的前置报审资料包。
+    // 目录命名优先于文件名和正文，不能把其中的合同、施工日期等内容拆到其他阶段。
+    { stage: STAGES[7], terms: /开工资料整理|开工资料包|施工前申报|开工前申报|开工资料|开工报审/i },
     { stage: STAGES[7], terms: /施工进场|进场|开工|施工|材料.*设备|设备.*材料|现场照片|作业指导|专项施工方案|分包方|开工资料|施工方案|日程安排/i },
     { stage: STAGES[5], terms: /深化设计|施工图|蓝图|设计变更|物料.?bom|图纸|设计资料|光伏图纸/i },
     { stage: STAGES[3], terms: /合同|协议|签约|补充协议|购售电|权属|营业执照|身份证|产权/i },
@@ -146,6 +159,10 @@ export function detectPathStage(relativePath: string) {
   if (!winner) return undefined;
   const parentConflicts = matches.filter((item) => item.stageKey !== winner.stageKey).map((item) => `${item.evidence}→${item.stageName}`);
   return { ...winner, parentConflicts };
+}
+
+function nearestFolderLabel(folderLabels: string[], terms: RegExp) {
+  return [...folderLabels].reverse().find((label) => terms.test(normalizeText(label)));
 }
 
 function getProjectKey(relativePath: string) {
@@ -233,6 +250,10 @@ function classifySignal(value: string) {
 export function classifyArchiveCategory(name: string, content = "", folderLabels: string[] = []) {
   const folderValue = normalizeText(folderLabels.join(" "));
   const value = normalizeText(`${folderValue} ${name} ${content}`);
+  // 目录已经明确表达“开工前申报”时，整包资料保持在同一类别。
+  // 不能因为单个文件名或正文出现合同、施工、并网等词而拆散目录。
+  const preStartFolder = nearestFolderLabel(folderLabels, /开工资料整理|开工资料包|施工前申报|开工前申报|开工资料|开工报审/);
+  if (preStartFolder) return "开工前申报";
   // 目录中的业务文件夹是最高证据。保留目录层级，归档器会据此创建
   // 真正的子文件夹；正文里的“施工日期”等词只能产生冲突提示。
   const folderRules: Array<[RegExp, string]> = [
@@ -278,8 +299,9 @@ export function classifyArchiveCategory(name: string, content = "", folderLabels
   }
   const knownFolderMatch = Object.values(PROJECT_ARCHIVE_STRUCTURE).flatMap((paths) => paths)
     .map((path) => ({ path, leaf: normalizeText(path.split("/").at(-1) || path) }))
-    .filter((item) => normalizedFolders.includes(item.leaf))
-    .sort((a, b) => b.path.length - a.path.length)[0];
+    .map((item) => ({ ...item, index: normalizedFolders.lastIndexOf(item.leaf) }))
+    .filter((item) => item.index >= 0)
+    .sort((a, b) => b.index - a.index || b.path.length - a.path.length)[0];
   if (knownFolderMatch) return knownFolderMatch.path;
   const folderMatch = folderRules.find(([terms]) => terms.test(folderValue));
   if (folderMatch) {
@@ -405,7 +427,7 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
   for (const file of files) {
     const projectKey = getProjectKey(file.relativePath);
     file.projectKey = projectKey;
-    file.projectName = cleanProjectName(projectKey);
+    file.projectName = getScannedProjectIdentity(projectKey).projectName;
     const group = projectFileGroups.get(projectKey) || [];
     group.push(file);
     projectFileGroups.set(projectKey, group);
@@ -429,9 +451,10 @@ export async function scanProjectDirectories(handles: any[], options: ScanOption
   }
   files.filter((file) => !file.extension || /\s{2,}|[\\/:*?"<>|]/.test(file.name)).forEach((file) => issues.push({ type: "naming", title: "文件名需要人工确认", detail: file.relativePath, fileIds: [file.id], confidence: 0.7 }));
   const projects = [...projectFileGroups.entries()].map(([projectKey, projectFiles]) => {
-    const projectName = cleanProjectName(projectKey);
+    const identity = getScannedProjectIdentity(projectKey);
+    const projectName = identity.projectName;
     const contentNames = Array.from(new Set(projectFiles.flatMap((file) => (file.name.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,}(?:项目|工程)/g) || []).slice(0, 3)))).slice(0, 5);
-    return { projectKey, projectName: projectName === "未分组" ? (contentNames[0] || "未分组资料") : projectName, confidence: projectName === "未分组" ? 0.35 : 0.93, evidence: [projectKey, ...contentNames].filter(Boolean).slice(0, 6), fileCount: projectFiles.length, stageSummaries: buildStageSummaries(projectFiles) };
+    return { projectKey, projectNumber: identity.projectNumber, projectName: projectName === "未分组" ? (contentNames[0] || "未分组资料") : projectName, confidence: projectName === "未分组" ? 0.35 : 0.93, evidence: [projectKey, ...contentNames].filter(Boolean).slice(0, 6), fileCount: projectFiles.length, stageSummaries: buildStageSummaries(projectFiles) };
   }).sort((a, b) => b.fileCount - a.fileCount);
   const projectNames = projects.filter((project) => project.projectName !== "未分组资料").map((project) => project.projectName).slice(0, 20);
   const primaryProject = projects[0];

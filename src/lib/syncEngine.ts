@@ -6,6 +6,10 @@ import { AUTH_TOKEN_KEY } from "./clientIdentity";
 const SYNC_EVENT = "zhijian-sync-event";
 const CACHE_ONLY = String((import.meta as any).env?.VITE_SYNC_MODE || "sync").toLowerCase() === "cache";
 
+export function isCacheOnlySync() {
+  return CACHE_ONLY;
+}
+
 export type SyncState = "idle" | "saving" | "syncing" | "offline" | "error" | "conflict";
 export interface SyncStatus {
   state: SyncState;

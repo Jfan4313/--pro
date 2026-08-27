@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  buildArchiveVersionView,
   getArchiveProjectFolder,
+  getArchiveDisplayName,
   getArchiveStageFolder,
   getCurrentAndNextStages,
   LocalFolderStorageProvider,
@@ -120,6 +122,76 @@ test("local provider versions files and exposes provider-neutral indexes", async
   assert.equal(listed.length, 1);
   assert.deepEqual(listed.map((item) => item.version), ["V1"]);
   assert.equal((await provider.readFile(first.storageKey)).size, 5);
+  assert.match(first.storedName, /^方案_V1_\d{8}\.pdf$/);
+  assert.doesNotMatch(first.storedName, /PRJ-0001|测试_项目|01_/);
+});
+
+test("版本视图合并重复索引并标出最新和历史版本", () => {
+  const files = [
+    { storageKey: "p/s/a_V1_20260820.pdf", name: "a_V1_20260820.pdf", category: "设计/初步设计方案", version: "V1", checksum: "old" },
+    { storageKey: "p/s/a_V2_20260821.pdf", name: "a_V2_20260821.pdf", category: "设计/初步设计方案", version: "V2", checksum: "new" },
+    { storageKey: "p/s/a_V2_20260821.pdf", name: "a_V2_20260821.pdf", category: "设计/初步设计方案", version: "V2", checksum: "new" },
+  ];
+  const view = buildArchiveVersionView(files);
+  assert.equal(view.length, 2);
+  assert.equal(view[0].versionNumber, 2);
+  assert.equal(view[0].versionCount, 2);
+  assert.equal(view[0].isLatestVersion, true);
+  assert.equal(view[0].isDuplicate, true);
+  assert.equal(view[0].duplicateRecordCount, 2);
+  assert.equal(view[1].isLatestVersion, false);
+  assert.equal(getArchiveDisplayName({ name: "PRJ-0021_02_很长的公司项目名称_V2_20260821.pdf", category: "设计/初步设计方案", version: "V2" }), "初步设计方案_V2.pdf");
+});
+
+test("移动归档在目标写入成功后删除源文件", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  let sourceRemoved = false;
+  const sourceHandle = {
+    requestPermission: async () => "granted",
+    isSameEntry: async () => false,
+    remove: async () => { sourceRemoved = true; },
+  };
+
+  const archived = await provider.moveFile({
+    project,
+    stage: stages[1],
+    file: new File(["design"], "初步设计方案.pdf", { type: "application/pdf" }),
+    fileType: "初步设计方案",
+  }, sourceHandle);
+
+  assert.equal(sourceRemoved, true);
+  assert.match(archived.storageKey, /02_初步设计\/已归档/);
+  assert.equal((await provider.readFile(archived.storageKey)).size, 6);
+});
+
+test("源文件删除失败时撤销新生成的目标文件", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const sourceHandle = {
+    requestPermission: async () => "granted",
+    isSameEntry: async () => false,
+    remove: async () => { throw new Error("locked"); },
+  };
+
+  await assert.rejects(() => provider.moveFile({
+    project,
+    stage: stages[1],
+    file: new File(["design"], "初步设计方案.pdf", { type: "application/pdf" }),
+    fileType: "初步设计方案",
+  }, sourceHandle), /archive_source_remove_failed/);
+
+  assert.deepEqual(await provider.listFiles({ project, stages: [stages[1]] }), []);
+});
+
+test("可以只删除选中的本机文件版本", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const first = await provider.writeFile({ project, stage: stages[0], file: new File(["v1"], "方案.pdf"), fileType: "方案" });
+  const second = await provider.writeFile({ project, stage: stages[0], file: new File(["v2"], "方案.pdf"), fileType: "方案", projectFolder: first.storageKey.split("/")[0] });
+  await provider.deleteFile(first.storageKey);
+  const remaining = await provider.listFiles({ project, stages: [stages[0]], projectFolder: first.storageKey.split("/")[0] });
+  assert.deepEqual(remaining.map((file) => file.storageKey), [second.storageKey]);
 });
 
 test("归档文件保留来源子文件夹层级", async () => {

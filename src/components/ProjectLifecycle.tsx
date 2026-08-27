@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Folder, FileText, CheckCircle2, ChevronRight, ChevronDown, Upload, Clock, Shield, Download, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye, SkipForward, RotateCcw } from "lucide-react";
+import { Folder, FileText, CheckCircle2, ChevronRight, ChevronDown, Upload, Clock, Shield, Briefcase, ListTodo, FileCheck, ArrowRight, Save, Camera, ArrowLeft, Eye, SkipForward, RotateCcw, Plus } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
 import { useAuth } from "@/src/lib/auth";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
 import { getProjectFileDownloadUrl } from "@/src/lib/apiClient";
 import { useEntityList } from "@/src/hooks/useEntityList";
 import { getProjectNumber } from "@/src/lib/management";
 import { resolveProjectReference, sortProjectsNaturally } from "@/src/lib/projectNumbering";
-import { ArchiveFolderState, downloadLocalArchiveFile, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
+import { ArchiveFolderState, chooseLocalArchiveProvider, getLocalArchiveProvider, LocalFolderStorageProvider, openLocalArchiveFile, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 import { getLifecycleChecklist, getProjectCurrentStageInfo, STAGES } from "@/src/lib/projectLifecycle";
 
 function formatUploadTime(value: string) {
@@ -28,7 +29,8 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   onOpenSiteSurvey?: (projectId: string, recordId?: string) => void;
 }) {
   const { user } = useAuth();
-  const [boardData] = useProjectBoardData();
+  const [boardData, setBoardData] = useProjectBoardData();
+  const { allProjects: numberedProjects, reserveProjectNumber } = useProjectNumbering();
   const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const [appSettings] = useUserSettings<any>({});
@@ -42,6 +44,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   const [stageFilter, setStageFilter] = useState("all");
   const [showStageFilters, setShowStageFilters] = useState(false);
   const [activeStage, setActiveStage] = useState(STAGES[0].id);
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const requestedProject = useMemo(() => resolveProjectReference(allProjects, initialProjectReference), [allProjects, initialProjectReference]);
 
   const projectsWithStage = useMemo(() => allProjects.map((project: any, index: number) => ({
@@ -94,8 +97,6 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   const canManageStage = Boolean(user && (["admin", "company_admin", "project_manager"].includes(user.role) || user.permissions?.includes("*")));
   const defaultSkipReason = "历史项目，前期资料未移交";
 
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     if (activeProj && STAGES.some((stage) => stage.id === activeStage)) onSelectionChange?.(activeProj, activeStage);
   }, [activeProj, activeStage, onSelectionChange]);
@@ -107,39 +108,89 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
     setActiveStage(getProjectCurrentStageInfo(project.id, lifecycleStates).stage.id);
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
+  const createProject = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const name = String(formData.get("name") || "").trim().replace(/\s+/g, " ");
+    if (!name) return;
+    if (numberedProjects.some((project: any) => String(project.name || "").trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `项目名称“${name}”已存在` }));
+      return;
+    }
+    const project = { id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}`, projectNumber: await reserveProjectNumber(), name, type: String(formData.get("type") || "光伏项目"), businessModel: String(formData.get("businessModel") || "EPC"), manager: "", managerId: "", constructProgress: 0, supplyProgress: 0, status: "normal" };
+    await setBoardData((current: any[]) => {
+      const columns = Array.isArray(current) && current.length ? current : STAGES.map((stage) => ({ id: stage.id, title: stage.name, projects: [], count: 0 }));
+      return columns.map((column: any) => column.id === STAGES[0].id ? { ...column, projects: sortProjectsNaturally([project, ...(column.projects || [])]), count: (column.projects || []).length + 1 } : column);
+    });
+    setSelectedProject(project.id);
+    setActiveStage(STAGES[0].id);
+    setIsCreateProjectOpen(false);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: `已创建 ${project.projectNumber} · ${project.name}` }));
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      if(!activeProj) return;
-      const file = e.target.files[0];
+  const prepareLocalArchive = async (): Promise<{ provider: LocalFolderStorageProvider; needsSecondClick: boolean }> => {
+    let provider = await getLocalArchiveProvider();
+    const availability = await provider?.checkAvailability();
+    if (provider && availability?.available) return { provider, needsSecondClick: false };
+
+    if (provider && availability?.permission === "prompt") {
+      const granted = await requestLocalArchivePermission();
+      if (granted) return { provider, needsSecondClick: true };
+    }
+
+    // 浏览器首次写入本机文件系统时必须由用户授权一个总归档目录。
+    // 这里只选择根目录；项目和阶段子目录由系统自动创建，用户无需手工整理。
+    provider = await chooseLocalArchiveProvider();
+    return { provider, needsSecondClick: true };
+  };
+
+  const handleUploadClick = async () => {
+    try {
+      const { provider, needsSecondClick } = await prepareLocalArchive();
+      if (needsSecondClick) {
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "总归档目录已授权，请再次点击按钮选择要移动的文件" }));
+        return;
+      }
+      const picker = (window as any).showOpenFilePicker;
+      if (!picker) throw new Error("archive_move_unsupported");
+      const [sourceHandle] = await picker({ multiple: false });
+      if (!sourceHandle) return;
+      await archiveSelectedFile(await sourceHandle.getFile(), sourceHandle, provider);
+    } catch (error: any) {
+      if (error?.name === "AbortError") return;
+      const message = ["archive_picker_unsupported", "archive_move_unsupported"].includes(error?.message)
+        ? "当前浏览器不支持剪切归档，请使用最新版 Chrome 或 Edge"
+        : error?.message === "archive_source_delete_permission_required"
+          ? "未获得原文件删除权限，本次未移动文件"
+        : "无法访问本机归档目录，请重新选择总归档文件夹";
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: message }));
+    }
+  };
+
+  const archiveSelectedFile = async (file: File, sourceHandle: any, provider: LocalFolderStorageProvider) => {
+      if (!activeProj) return;
       const stage = STAGES.find(s => s.id === activeStage);
-      if(!stage) return;
+      if (!stage) return;
 
       const ext = file.name.includes(".") ? `.${file.name.split(".").pop()}` : "";
       const baseName = file.name.replace(new RegExp(`${ext.replace(".", "\\.")}$`), "");
       const expectedFile = stage.files.find((name) => {
-        const cleanExpected = name.replace(/\.[^.]+$/, "");
+        const cleanExpected = name.split("/").at(-1)?.replace(/\.[^.]+$/, "") || name.replace(/\.[^.]+$/, "");
         return baseName.includes(cleanExpected) || cleanExpected.includes(baseName);
       });
       const fileType = expectedFile ? expectedFile.replace(/\.[^.]+$/, "") : baseName;
-      
-      const currentFiles = Array.isArray(stageState.files) ? stageState.files : [];
 
       try {
-        const provider = await getLocalArchiveProvider();
         const availability = await provider?.checkAvailability();
         if (!provider || !availability?.available) throw new Error("archive_permission_required");
-        const uploaded = await provider.writeFile({
+        const uploaded = await provider.moveFile({
           project: activeProj,
           stage,
           fileType,
           file,
           autoRename: appSettings?.fileManagement?.autoRename !== false,
           projectFolder: archiveFolderStates[activeProj.id]?.projectFolder,
-        });
+        }, sourceHandle);
 
         const newFileObj = {
           name: uploaded.storedName,
@@ -157,16 +208,18 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
           archived: true,
         };
         
-        setLifecycleStates(prev => ({
-          ...prev,
-          [activeProj.id]: {
-            ...(prev[activeProj.id] || {}),
-            [activeStage]: {
-              ...((prev[activeProj.id] || {})[activeStage] || { checklist: {}, fields: {} }),
-              files: [...currentFiles, newFileObj]
+        setLifecycleStates(prev => {
+          const currentStageState = (prev[activeProj.id] || {})[activeStage] || { checklist: {}, fields: {} };
+          const currentFiles = Array.isArray(currentStageState.files) ? currentStageState.files : [];
+          const alreadyIndexed = currentFiles.some((item: any) => item.storageKey === uploaded.storageKey || (item.checksum && item.checksum === uploaded.checksum));
+          return {
+            ...prev,
+            [activeProj.id]: {
+              ...(prev[activeProj.id] || {}),
+              [activeStage]: { ...currentStageState, files: uploaded.wasSkipped && alreadyIndexed ? currentFiles : [...currentFiles, newFileObj] }
             }
-          }
-        }));
+          };
+        });
         await setArchiveFolderStates((current) => ({
           ...current,
           [activeProj.id]: {
@@ -178,22 +231,37 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
           },
         }));
         
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: '文件已规范命名并保存到项目资料夹' }));
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: uploaded.wasSkipped ? "检测到重复文件：原位置已移除，归档中只保留一份" : `文件已移动到本机“${stage.name}”阶段资料夹，原位置不再保留，未上传服务器` }));
       } catch (error: any) {
         const message = error?.message === "archive_permission_required"
-          ? "请先在项目资料或系统设置中授权本机归档文件夹"
+          ? "本机归档目录权限已失效，请重新点击上传并授权总归档文件夹"
+          : error?.message === "archive_source_delete_permission_required"
+            ? "未获得原文件删除权限，本次未移动文件"
+            : error?.message === "archive_source_remove_failed"
+              ? "无法删除原文件，已撤销目标文件，本次未完成移动"
+              : error?.message === "archive_move_unsupported"
+                ? "当前浏览器不支持剪切归档，请使用最新版 Chrome 或 Edge"
           : error?.message === "archive_file_exists"
             ? "同名文件已存在；请开启自动规范命名或调整文件名"
             : "文件保存失败，请检查本机归档目录权限";
         window.dispatchEvent(new CustomEvent('show-toast', { detail: message }));
-      } finally {
-        if (fileInputRef.current) fileInputRef.current.value = "";
       }
-    }
   };
 
   const handleSaveData = () => {
     window.dispatchEvent(new CustomEvent('show-toast', { detail: '阶段数据已保存' }));
+  };
+
+  const openArchivedFile = (fileObj: any) => {
+    if (fileObj.storageProvider === "local-folder" && fileObj.storageKey) {
+      void openLocalArchiveFile(fileObj.storageKey).catch(() => {
+        window.dispatchEvent(new CustomEvent("show-toast", { detail: "无法打开本机文件，请确认归档目录仍有访问权限" }));
+      });
+    } else if (fileObj.relativePath) {
+      window.open(getProjectFileDownloadUrl(fileObj.relativePath), "_blank", "noopener");
+    } else {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "这是待上传清单，请先选择真实文件归档" }));
+    }
   };
 
   const updateChecklist = (checkId: string, checked: boolean) => {
@@ -297,7 +365,10 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
             <Folder className="w-5 h-5 text-indigo-600" />
             项目档案与流程
           </h2>
-          <button type="button" onClick={onBack} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="返回多项目看板"><ArrowLeft className="h-4 w-4" /></button>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setIsCreateProjectOpen(true)} className="rounded-lg p-2 text-indigo-600 hover:bg-indigo-50" title="新增项目"><Plus className="h-4 w-4" /></button>
+            <button type="button" onClick={onBack} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="返回多项目看板"><ArrowLeft className="h-4 w-4" /></button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
           <button type="button" onClick={() => setShowStageFilters((value) => !value)} className="flex w-full items-center justify-between rounded-xl px-2 py-2 text-left hover:bg-slate-50">
@@ -344,7 +415,6 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                   <div className="flex flex-wrap items-center gap-3 mt-3">
                     <span className="font-mono bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md text-xs font-medium">项目编号: {getProjectNumber(activeProj)}</span>
                     {activeProj.manager && <span className="text-slate-500 text-sm flex items-center gap-1.5"><Briefcase className="w-4 h-4" />负责人: {activeProj.manager}</span>}
-                    {activeProj.dueDate && <span className="text-slate-500 text-sm flex items-center gap-1.5"><Clock className="w-4 h-4" />竣工计划: {activeProj.dueDate}</span>}
                   </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
@@ -422,7 +492,6 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                             {stage.desc}
                           </p>
                         </div>
-                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
                         <div className="flex flex-wrap gap-2">
                           {stage.id === "1_initiation" && <button onClick={() => onOpenSiteSurvey?.(activeProj.id, latestProjectSurvey?.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm"><Camera className="h-4 w-4" />{latestProjectSurvey ? "查看现场勘察报告" : "现场勘察"}{activeProjectSurveys.length > 0 ? `（${activeProjectSurveys.length}）` : ""}</button>}
                           {canManageStage && isStageSkipped && <button type="button" onClick={restoreActiveStage} className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"><RotateCcw className="h-4 w-4" />恢复此阶段</button>}
@@ -434,10 +503,12 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 shadow-sm transition-colors"
                           >
                             <Upload className="w-4 h-4" />
-                            上传规范资料
+                            选择本机文件并移动归档
                           </button>
                         </div>
                       </div>
+
+                      <p className="-mt-4 mb-6 text-xs text-slate-500">系统会把原文件移动到本机当前项目的“{stage.name}”阶段文件夹，原位置不再保留，也不会上传服务器。</p>
 
                       {isStageSkipped && <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"><div className="flex items-center gap-2 font-bold"><SkipForward className="h-4 w-4" />本阶段已跳过 · 资料欠缺</div><p className="mt-1 text-xs">原因：{stageState.skipReason || defaultSkipReason}。恢复阶段后即可继续上传资料和填写表单。</p></div>}
 
@@ -562,7 +633,14 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                 if (isZip) { iconColor = "text-amber-600"; bgColor = "bg-amber-50"; borderColor = "border-amber-100"; }
                                 
                                 return (
-                                  <div key={i} className="flex items-center justify-between p-4 bg-white hover:bg-slate-50 transition-colors group">
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    onClick={() => openArchivedFile(fileObj)}
+                                    className="group flex w-full items-center justify-between p-4 text-left bg-white hover:bg-slate-50 focus:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 transition-colors"
+                                    aria-label={`打开文件 ${fileObj.originalName || fileName}`}
+                                    title="点击调用电脑打开文件"
+                                  >
                                     <div className="flex items-center gap-4">
                                       <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center border shadow-sm", bgColor, borderColor, iconColor)}>
                                         <FileIcon className="w-6 h-6" />
@@ -586,25 +664,10 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <button
-                                        onClick={() => {
-                                          if (fileObj.storageProvider === "local-folder" && fileObj.storageKey) {
-                                            void downloadLocalArchiveFile(fileObj.storageKey, fileObj.storedName || fileObj.name).catch(() => {
-                                              window.dispatchEvent(new CustomEvent('show-toast', { detail: '原文件仅能在已授权的归档电脑下载' }));
-                                            });
-                                          } else if (fileObj.relativePath) {
-                                            window.open(getProjectFileDownloadUrl(fileObj.relativePath), "_blank");
-                                          } else {
-                                            window.dispatchEvent(new CustomEvent('show-toast', { detail: '这是待上传清单，请先上传真实文件' }));
-                                          }
-                                        }}
-                                        className="p-2.5 px-3 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 font-medium text-xs rounded-lg transition-colors border border-indigo-100 flex items-center gap-1.5"
-                                      >
-                                        <Download className="w-4 h-4" /> 下载
-                                      </button>
-                                    </div>
-                                  </div>
+                                    <span className="flex items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2.5 text-xs font-medium text-indigo-600 transition-colors group-hover:bg-indigo-100">
+                                      <Eye className="w-4 h-4" /> 打开文件
+                                    </span>
+                                  </button>
                                 );
                               });
                             })()}
@@ -626,6 +689,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
           </div>
         )}
       </div>
+      {isCreateProjectOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4"><form onSubmit={(event) => void createProject(event)} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">全生命周期新增项目</h3><p className="mt-1 text-xs text-slate-500">创建后项目会进入项目立项阶段。</p></div><button type="button" onClick={() => setIsCreateProjectOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100">×</button></div><div className="mt-5 space-y-4"><label className="block text-sm font-medium text-slate-700">项目名称<input name="name" required autoFocus className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 outline-none focus:border-indigo-500" placeholder="请输入项目名称" /></label><div className="grid grid-cols-2 gap-4"><label className="block text-sm font-medium text-slate-700">项目类型<select name="type" defaultValue="光伏项目" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5"><option>光伏项目</option><option>储能项目</option><option>充电桩项目</option><option>零碳园区</option><option>节能改造</option></select></label><label className="block text-sm font-medium text-slate-700">合作模式<select name="businessModel" defaultValue="EPC" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5"><option>EPC</option><option>EMC</option></select></label></div></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsCreateProjectOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">取消</button><button type="submit" className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white hover:bg-indigo-700">创建项目</button></div></form></div>}
     </div>
   );
 }

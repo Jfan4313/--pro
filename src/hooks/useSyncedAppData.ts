@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/src/lib/apiClient";
 import { offlineDb } from "@/src/lib/offlineDb";
-import { onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
+import { isCacheOnlySync, onSyncEvent, queueAppDataUpdate } from "@/src/lib/syncEngine";
 import { emptyWorkspaceValue } from "@/src/lib/workspaceDefaults";
 
 export type LegacyDataMigration<T> = {
@@ -29,6 +29,17 @@ export function useSyncedAppData<T>(
     const load = async () => {
       const cached = await offlineDb.getAppData<T>(key);
       if (!cancelled && cached !== undefined) setData(cached);
+
+      // Local-first workspaces must not replace their local project data with
+      // a stale or empty public response during a refresh. Writes in cache
+      // mode are already persisted in IndexedDB by queueAppDataUpdate.
+      if (isCacheOnlySync()) {
+        if (!cancelled) {
+          setData(cached !== undefined ? cached : initialValue);
+          setLoading(false);
+        }
+        return;
+      }
 
       try {
         const remote = await apiClient.getAppData<T>(key);

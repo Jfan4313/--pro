@@ -42,6 +42,7 @@ export type ArchiveFileIndex = {
 
 export type ArchiveCleanupCandidate = { storageKey: string; targetStorageKey: string; name: string; size: number; checksum: string; modifiedAt?: string; status: "ready" | "verified" | "conflict" };
 export type ArchiveRebuildResult = { verified: ArchiveCleanupCandidate[]; copied: number; skipped: number; conflicts: number; failed: number };
+export type ArchiveVersionView<T> = T & { versionNumber: number; versionCount: number; isLatestVersion: boolean; isDuplicate: boolean; duplicateRecordCount: number };
 
 export type ArchiveFolderState = {
   status: "pending" | "ready" | "error";
@@ -62,6 +63,7 @@ export interface ArchiveStorageProvider {
   readonly id: ArchiveStorageProviderId;
   checkAvailability(): Promise<ArchiveAvailability>;
   ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
+  renameProjectFolder(oldFolder: string, newFolder: string): Promise<void>;
   writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex>;
   writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex>;
   previewGeneratedArchiveFiles(): Promise<ArchiveCleanupCandidate[]>;
@@ -78,6 +80,7 @@ export abstract class CloudObjectStorageProvider implements ArchiveStorageProvid
   readonly id = "cloud-object-storage" as const;
   abstract checkAvailability(): Promise<ArchiveAvailability>;
   abstract ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
+  abstract renameProjectFolder(oldFolder: string, newFolder: string): Promise<void>;
   abstract writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex>;
   abstract writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex>;
   abstract previewGeneratedArchiveFiles(): Promise<ArchiveCleanupCandidate[]>;
@@ -122,6 +125,53 @@ export function getCurrentAndNextStages(stages: ArchiveStage[], currentStageInde
   return stages.slice(safeIndex, Math.min(stages.length, safeIndex + 2));
 }
 
+function archiveVersionNumber(file: any) {
+  const match = String(file?.version || file?.storedName || file?.name || "").match(/V(\d+)/i);
+  return Math.max(1, Number(match?.[1] || 1));
+}
+
+function archiveLogicalKey(file: any) {
+  const category = String(file?.category || "");
+  const meaningfulCategory = category && category !== "其他资料" ? category : "";
+  const source = String(file?.fileType || meaningfulCategory || file?.originalName || file?.storedName || file?.name || "资料");
+  return source.replace(/\.[^.]+$/, "").replace(/_V\d+_\d{8}$/i, "").trim().toLocaleLowerCase();
+}
+
+export function getArchiveDisplayName(file: any) {
+  const original = String(file?.originalName || "");
+  const categoryLeaf = String(file?.category || file?.fileType || "").split("/").filter(Boolean).at(-1) || "";
+  const stored = String(file?.storedName || file?.name || original || "资料");
+  const extension = stored.match(/(\.[^.]+)$/)?.[1] || original.match(/(\.[^.]+)$/)?.[1] || "";
+  const version = String(file?.version || stored.match(/_(V\d+)_\d{8}(?:\.[^.]+)?$/i)?.[1] || "");
+  if (categoryLeaf && categoryLeaf !== "其他资料") return `${categoryLeaf}${version ? `_${version}` : ""}${extension}`;
+  const withoutPrefix = stored.replace(/^PRJ-?\d+_\d+_/i, "");
+  const suffixPattern = /_V\d+_\d{8}(?:\.[^.]+)?$/i;
+  const base = withoutPrefix.replace(/\.[^.]+$/, "").replace(suffixPattern, "");
+  const shortBase = base.length > 48 ? `${base.slice(0, 26)}…${base.slice(-16)}` : base;
+  return `${shortBase}${version ? `_${version}` : ""}${extension}`;
+}
+
+export function buildArchiveVersionView<T extends { storageKey?: string; checksum?: string; createdAt?: string; updatedAt?: string; uploadTime?: string; version?: string; storedName?: string; originalName?: string; fileType?: string; category?: string; name?: string }>(files: T[]): ArchiveVersionView<T>[] {
+  const unique: Array<T & { duplicateRecordCount: number }> = [];
+  const byStorageKey = new Map<string, number>();
+  files.forEach((file, index) => {
+    const key = file.storageKey ? `storage:${file.storageKey}` : `index:${index}`;
+    const existing = byStorageKey.get(key);
+    if (existing !== undefined) { unique[existing].duplicateRecordCount += 1; return; }
+    byStorageKey.set(key, unique.length);
+    unique.push({ ...file, duplicateRecordCount: 1 });
+  });
+  const logicalGroups = new Map<string, typeof unique>();
+  for (const file of unique) logicalGroups.set(archiveLogicalKey(file), [...(logicalGroups.get(archiveLogicalKey(file)) || []), file]);
+  const checksumCounts = new Map<string, number>();
+  for (const file of unique) if (file.checksum) checksumCounts.set(file.checksum, (checksumCounts.get(file.checksum) || 0) + 1);
+  return unique.map((file) => {
+    const group = logicalGroups.get(archiveLogicalKey(file)) || [file];
+    const latest = [...group].sort((a, b) => archiveVersionNumber(b) - archiveVersionNumber(a) || new Date(b.createdAt || b.updatedAt || b.uploadTime || 0).getTime() - new Date(a.createdAt || a.updatedAt || a.uploadTime || 0).getTime())[0];
+    return { ...file, versionNumber: archiveVersionNumber(file), versionCount: group.length, isLatestVersion: latest === file, isDuplicate: file.duplicateRecordCount > 1 || Boolean(file.checksum && (checksumCounts.get(file.checksum) || 0) > 1) };
+  }).sort((a, b) => archiveLogicalKey(a).localeCompare(archiveLogicalKey(b), "zh-CN") || b.versionNumber - a.versionNumber);
+}
+
 async function getPermission(handle: any) {
   if (!handle?.queryPermission) return "granted" as const;
   return (await handle.queryPermission({ mode: "readwrite" })) as "granted" | "prompt" | "denied";
@@ -138,6 +188,17 @@ async function writeBlob(directory: any, name: string, blob: Blob) {
   const writable = await fileHandle.createWritable();
   await writable.write(blob);
   await writable.close();
+}
+
+async function copyDirectoryContents(source: any, target: any) {
+  for await (const entry of source.values()) {
+    if (entry.kind === "directory") {
+      const targetDirectory = await target.getDirectoryHandle(entry.name, { create: true });
+      await copyDirectoryContents(entry, targetDirectory);
+    } else if (entry.kind === "file") {
+      await writeBlob(target, entry.name, await entry.getFile());
+    }
+  }
 }
 
 async function fileExists(directory: any, name: string) {
@@ -228,6 +289,29 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     return { available: permission === "granted", permission, rootName: this.rootHandle.name };
   }
 
+  async renameProjectFolder(oldFolder: string, newFolder: string) {
+    if (!oldFolder || !newFolder || oldFolder === newFolder) return;
+    const availability = await this.checkAvailability();
+    if (!availability.available) throw Object.assign(new Error("archive_permission_required"), { code: "archive_permission_required" });
+    const source = await this.rootHandle.getDirectoryHandle(oldFolder);
+    try {
+      await this.rootHandle.getDirectoryHandle(newFolder);
+      throw Object.assign(new Error("archive_target_exists"), { code: "archive_target_exists" });
+    } catch (error: any) {
+      if (error?.code === "archive_target_exists") throw error;
+      if (error?.name !== "NotFoundError") throw error;
+    }
+    const target = await this.rootHandle.getDirectoryHandle(newFolder, { create: true });
+    await copyDirectoryContents(source, target);
+    try {
+      await this.rootHandle.removeEntry(oldFolder, { recursive: true });
+    } catch (error) {
+      // Keep the copied folder if the browser refuses the final removal; the
+      // caller can retry after permission is restored without losing files.
+      throw Object.assign(new Error("archive_old_folder_remove_failed"), { code: "archive_old_folder_remove_failed", cause: error });
+    }
+  }
+
   async ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], fixedProjectFolder?: string) {
     const availability = await this.checkAvailability();
     if (!availability.available) throw Object.assign(new Error("archive_permission_required"), { code: "archive_permission_required" });
@@ -263,7 +347,8 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     const archiveParts = [projectFolder, getArchiveStageFolder(stage), "已归档", ...categoryParts(category), ...sourceFolders];
     const archivedDirectory = await getDirectoryByParts(this.rootHandle, archiveParts, true);
     const { base, ext } = splitFilename(file.name || "资料");
-    const stem = preserveFolders ? sanitizeArchiveSegment(base || "资料") : [getArchiveProjectCode(project), getArchiveStageCode(stage), sanitizeArchiveSegment(fileType || base || "资料"), sanitizeArchiveSegment(base || "资料")].join("_");
+    const shortType = categoryParts(fileType || "").at(-1);
+    const stem = preserveFolders ? sanitizeArchiveSegment(base || "资料") : sanitizeArchiveSegment(shortType || base || "资料");
     const checksum = await sha256(file);
     const duplicate = await findDuplicate(archivedDirectory, checksum);
     if (duplicate) {
@@ -300,6 +385,35 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
       classificationEvidence,
       reviewStatus: "confirmed",
     };
+  }
+
+  async moveFile(input: Parameters<LocalFolderStorageProvider["writeFile"]>[0], sourceHandle: any): Promise<ArchiveFileIndex> {
+    if (!sourceHandle?.remove) throw Object.assign(new Error("archive_move_unsupported"), { code: "archive_move_unsupported" });
+    if (sourceHandle.requestPermission) {
+      const permission = await sourceHandle.requestPermission({ mode: "readwrite" });
+      if (permission !== "granted") throw Object.assign(new Error("archive_source_delete_permission_required"), { code: "archive_source_delete_permission_required" });
+    }
+
+    const archived = await this.writeFile(input);
+    const targetParts = archived.storageKey.split("/").filter(Boolean);
+    const targetName = targetParts.pop();
+    const targetDirectory = targetName ? await getDirectoryByParts(this.rootHandle, targetParts) : null;
+    const targetHandle = targetDirectory && targetName ? await targetDirectory.getFileHandle(targetName) : null;
+
+    // 用户若选中的文件本来就在目标归档位置，不能把它当成“源文件”删除。
+    if (targetHandle && sourceHandle.isSameEntry && await sourceHandle.isSameEntry(targetHandle)) return archived;
+
+    try {
+      await sourceHandle.remove();
+      return archived;
+    } catch (error) {
+      // 移动必须保持单份文件。删除源文件失败时，撤销本次新写入的目标；
+      // 命中既有重复文件时不删除原有归档。
+      if (!archived.wasSkipped && targetDirectory && targetName) {
+        try { await targetDirectory.removeEntry(targetName); } catch { /* 保留原始错误供界面提示 */ }
+      }
+      throw Object.assign(new Error("archive_source_remove_failed"), { code: "archive_source_remove_failed", cause: error });
+    }
   }
 
   async writeUncertainFile({ project, file, fileType, projectFolder: fixedProjectFolder, folderLabels = [] }: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex> {
@@ -445,6 +559,16 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     return (await directory.getFileHandle(filename)).getFile();
   }
 
+  async deleteFile(storageKey: string) {
+    const availability = await this.checkAvailability();
+    if (!availability.available) throw new Error("archive_permission_required");
+    const parts = String(storageKey).split("/").filter(Boolean);
+    const filename = parts.pop();
+    if (!filename || [filename, ...parts].some((part) => part === ".." || part === ".")) throw new Error("invalid_storage_key");
+    const directory = await getDirectoryByParts(this.rootHandle, parts);
+    await directory.removeEntry(filename);
+  }
+
   async getDownloadTarget(storageKey: string) {
     const file = await this.readFile(storageKey);
     const url = URL.createObjectURL(file);
@@ -455,6 +579,10 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
 export async function getLocalArchiveProvider() {
   const handle = await offlineDb.getAppData<any>(LOCAL_ARCHIVE_HANDLE_KEY);
   return handle ? new LocalFolderStorageProvider(handle) : null;
+}
+
+export async function getLocalArchiveHandle() {
+  return offlineDb.getAppData<any>(LOCAL_ARCHIVE_HANDLE_KEY);
 }
 
 export async function chooseLocalArchiveProvider() {
@@ -484,4 +612,30 @@ export async function downloadLocalArchiveFile(storageKey: string, downloadName?
   if (downloadName) link.download = downloadName;
   link.click();
   window.setTimeout(target.revoke, 1000);
+}
+
+export async function openLocalArchiveFile(storageKey: string) {
+  // 必须在点击事件仍有用户激活时先创建窗口，否则读取文件句柄后的异步
+  // window.open 可能被浏览器当成弹窗拦截。
+  const previewWindow = window.open("about:blank", "_blank");
+  try {
+    const provider = await getLocalArchiveProvider();
+    if (!provider) throw new Error("archive_folder_not_authorized");
+    const availability = await provider.checkAvailability();
+    if (!availability.available) throw new Error("archive_permission_required");
+    const target = await provider.getDownloadTarget(storageKey);
+    if (previewWindow) {
+      previewWindow.location.href = target.url;
+    } else {
+      const link = document.createElement("a");
+      link.href = target.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.click();
+    }
+    window.setTimeout(target.revoke, 60_000);
+  } catch (error) {
+    previewWindow?.close();
+    throw error;
+  }
 }
