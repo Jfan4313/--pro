@@ -241,7 +241,7 @@ export function Settings() {
       const updates: Record<string, ArchiveFolderState> = {};
       for (const project of projects) {
         const stageInfo = getProjectCurrentStageInfo(project.id, lifecycleStates);
-        const result = await provider.ensureProjectStructure(project, getCurrentAndNextStages(STAGES, stageInfo.index), archiveFolderStates[project.id]?.projectFolder);
+        const result = await provider.ensureProjectStructure(project, STAGES, archiveFolderStates[project.id]?.projectFolder);
         updates[project.id] = {
           status: "ready",
           storageProvider: "local-folder",
@@ -252,7 +252,7 @@ export function Settings() {
         count += 1;
       }
       await setArchiveFolderStates((current) => ({ ...current, ...updates }));
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `已为 ${count} 个项目生成当前及下一阶段资料夹` }));
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: `已为 ${count} 个项目生成完整生命周期及分类子文件夹` }));
     } catch (error: any) {
       window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.message === "archive_permission_required" ? '请先授权本机归档文件夹' : '生成失败，请检查本机文件夹权限' }));
     } finally {

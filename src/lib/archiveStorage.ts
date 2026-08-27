@@ -1,4 +1,5 @@
 import { offlineDb } from "./offlineDb";
+import { archiveFolderLabels } from "./projectArchiveStructure";
 
 export const LOCAL_ARCHIVE_HANDLE_KEY = "projectFilesDirectoryHandle";
 
@@ -183,6 +184,13 @@ async function getDirectoryByParts(root: any, parts: string[], create = false) {
   return directory;
 }
 
+async function ensureNestedFolders(root: any, paths: string[]) {
+  for (const path of paths) {
+    const parts = path.split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
+    if (parts.length) await getDirectoryByParts(root, parts, true);
+  }
+}
+
 async function writeBlob(directory: any, name: string, blob: Blob) {
   const fileHandle = await directory.getFileHandle(name, { create: true });
   const writable = await fileHandle.createWritable();
@@ -322,8 +330,8 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
 
     for (const stage of stages) {
       const stageDirectory = await projectDirectory.getDirectoryHandle(getArchiveStageFolder(stage), { create: true });
-      await stageDirectory.getDirectoryHandle("待提交", { create: true });
-      await stageDirectory.getDirectoryHandle("已归档", { create: true });
+      const folders = archiveFolderLabels(stage.id);
+      await ensureNestedFolders(stageDirectory, folders);
       if (!(await fileExists(stageDirectory, "文件清单.json"))) {
         await writeBlob(stageDirectory, "文件清单.json", new Blob([JSON.stringify({
           projectId: project.id,
@@ -344,7 +352,7 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     const localFolderLabels = folderLabels || (sourceParts.length > 1 ? sourceParts.slice(1, -1) : []);
     const category = fileType || "其他资料";
     const sourceFolders = preserveFolders ? meaningfulFolderLabels(localFolderLabels, stage, category) : [];
-    const archiveParts = [projectFolder, getArchiveStageFolder(stage), "已归档", ...categoryParts(category), ...sourceFolders];
+    const archiveParts = [projectFolder, getArchiveStageFolder(stage), ...categoryParts(category), ...sourceFolders];
     const archivedDirectory = await getDirectoryByParts(this.rootHandle, archiveParts, true);
     const { base, ext } = splitFilename(file.name || "资料");
     const shortType = categoryParts(fileType || "").at(-1);
@@ -511,6 +519,23 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     const projectFolder = fixedProjectFolder || getArchiveProjectFolder(project);
     const results: ArchiveFileIndex[] = [];
     for (const stage of stages) {
+      let stageDirectory: any;
+      try {
+        stageDirectory = await getDirectoryByParts(this.rootHandle, [projectFolder, getArchiveStageFolder(stage)]);
+      } catch (error: any) {
+        if (error?.name === "NotFoundError") continue;
+        throw error;
+      }
+      const walkDirect = async (current: any, pathParts: string[]) => {
+        for await (const entry of current.values()) {
+          if (entry.name === "待提交" || entry.name === "已归档" || entry.name === "文件清单.json") continue;
+          if (entry.kind === "directory") { await walkDirect(entry, [...pathParts, entry.name]); continue; }
+          if (entry.kind !== "file") continue;
+          const file = await entry.getFile();
+          results.push({ storageProvider: this.id, storageKey: [...pathParts, entry.name].join("/"), projectId: project.id, stageId: stage.id, originalName: entry.name, storedName: entry.name, version: entry.name.match(/_(V\d+)_\d{8}(?:\.[^.]+)?$/)?.[1] || "", size: file.size, contentType: file.type || "application/octet-stream", checksum: await sha256(file), createdAt: new Date(file.lastModified).toISOString(), category: pathParts.slice(2).join("/") || "其他资料", classificationSource: "folder", classificationConfidence: 0.9, classificationEvidence: pathParts.slice(2).join("/") || getArchiveStageFolder(stage), reviewStatus: "confirmed" });
+        }
+      };
+      await walkDirect(stageDirectory, [projectFolder, getArchiveStageFolder(stage)]);
       for (const bucket of ["待提交", "已归档"] as const) {
         let directory: any;
         try {

@@ -190,7 +190,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
         return;
       }
       try {
-        const result = await provider.ensureProjectStructure(newProject, getCurrentAndNextStages(STAGES, 0));
+        const result = await provider.ensureProjectStructure(newProject, STAGES);
         await setArchiveFolderStates((current) => ({
           ...current,
           [newProject.id]: {
@@ -288,7 +288,11 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     }
     const conflict = hasProjectIdentityConflict(allProjects, normalizedProject);
     if (conflict.nameConflict || conflict.numberConflict) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: conflict.nameConflict ? `项目名称“${normalizedProject.name}”已存在` : `项目编号“${normalizedProject.projectNumber}”已存在` }));
+      const conflictProject = conflict.numberConflict
+        ? allProjects.find((project: any) => String(project.id) !== String(normalizedProject.id) && normalizeProjectNumber(project.projectNumber || project.code) === normalizedProject.projectNumber)
+        : allProjects.find((project: any) => String(project.id) !== String(normalizedProject.id) && String(project.name || "").trim().toLocaleLowerCase() === normalizedProject.name.toLocaleLowerCase());
+      const archivedLabel = conflictProject && archivedProjects.some((project: any) => project.id === conflictProject.id) ? "（已归档）" : "";
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: conflict.nameConflict ? `项目名称“${normalizedProject.name}”已存在：${conflictProject?.name || "已有项目"}${archivedLabel}` : `项目编号“${normalizedProject.projectNumber}”已存在：${conflictProject?.name || "已有项目"}${archivedLabel}。请打开“项目归档”查看` }));
       return;
     }
     const isArchived = archivedProjects.some((project: any) => project.id === normalizedProject.id);

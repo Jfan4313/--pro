@@ -167,7 +167,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       const provider = await getLocalArchiveProvider();
       const availability = await provider?.checkAvailability();
       if (!provider || !availability?.available) throw new Error("archive_permission_required");
-      const result = await provider.ensureProjectStructure(selectedProject, availableStages, archiveFolderStates[selectedProject.id]?.projectFolder);
+      const result = await provider.ensureProjectStructure(selectedProject, STAGES, archiveFolderStates[selectedProject.id]?.projectFolder);
       await setArchiveFolderStates((current) => ({
         ...current,
         [selectedProject.id]: {
@@ -178,7 +178,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
           updatedAt: new Date().toISOString(),
         },
       }));
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前及下一阶段资料夹已生成" }));
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: "完整生命周期资料夹及分类子文件夹已生成" }));
       await loadFiles();
     } catch (error: any) {
       window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message === "archive_permission_required" ? "请先授权本机归档文件夹" : "生成失败，请检查本机文件夹权限" }));

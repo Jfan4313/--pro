@@ -96,8 +96,9 @@ test("local provider creates an idempotent structure and never overwrites its ch
   const projectDirectory = root.entries.get(first.projectFolder) as MemoryDirectoryHandle;
   const stageDirectory = projectDirectory.entries.get("01_项目立项") as MemoryDirectoryHandle;
   const checklist = stageDirectory.entries.get("文件清单.json") as MemoryFileHandle;
-  assert.ok(stageDirectory.entries.has("待提交"));
-  assert.ok(stageDirectory.entries.has("已归档"));
+  assert.ok(!stageDirectory.entries.has("待提交"));
+  assert.ok(!stageDirectory.entries.has("已归档"));
+  assert.ok(stageDirectory.entries.has("现场勘察"));
   assert.equal(checklist.writes, 1);
 
   await provider.ensureProjectStructure(project, stages.slice(0, 2), first.projectFolder);
@@ -161,7 +162,7 @@ test("移动归档在目标写入成功后删除源文件", async () => {
   }, sourceHandle);
 
   assert.equal(sourceRemoved, true);
-  assert.match(archived.storageKey, /02_初步设计\/已归档/);
+  assert.match(archived.storageKey, /02_初步设计\/初步设计方案/);
   assert.equal((await provider.readFile(archived.storageKey)).size, 6);
 });
 
@@ -199,7 +200,7 @@ test("归档文件保留来源子文件夹层级", async () => {
   const provider = new LocalFolderStorageProvider(root);
   const file = new File(["hello"], "方案.pdf", { type: "application/pdf" });
   const archived = await provider.writeFile({ project, stage: stages[0], file, fileType: "方案", sourceRelativePath: "测试项目/开工资料/施工方案/方案.pdf", preserveFolders: true });
-  assert.match(archived.storageKey, /已归档\/方案\/开工资料\/施工方案\/方案\.pdf$/);
+  assert.match(archived.storageKey, /01_项目立项\/方案\/开工资料\/施工方案\/方案\.pdf$/);
 });
 
 test("旧平铺归档先重建并校验后才能删除旧副本", async () => {
@@ -208,7 +209,7 @@ test("旧平铺归档先重建并校验后才能删除旧副本", async () => {
   const structure = await provider.ensureProjectStructure(project, [stages[2]]);
   const projectDirectory = root.entries.get(structure.projectFolder) as MemoryDirectoryHandle;
   const stageDirectory = projectDirectory.entries.get("03_商务沟通") as MemoryDirectoryHandle;
-  const archived = stageDirectory.entries.get("已归档") as MemoryDirectoryHandle;
+  const archived = await stageDirectory.getDirectoryHandle("已归档", { create: true });
   const oldName = "PRJ-0001_03_招投标_技术标书_V1_20260821.pdf";
   const oldHandle = await archived.getFileHandle(oldName, { create: true });
   const writable = await oldHandle.createWritable();
