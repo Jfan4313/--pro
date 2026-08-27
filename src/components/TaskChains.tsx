@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Clock3, ExternalLink, FolderTree, GitBranch, MessageSquareText, Search, UserRound, X } from "lucide-react";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
+import { useUnifiedTasks } from "@/src/lib/taskModel";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useAuth } from "@/src/lib/auth";
 import { cn } from "@/src/lib/utils";
 import { flattenProjects, formatLocalDate } from "@/src/lib/management";
-import { appendFollowUpToSchedule, canCreateFollowUp, createFollowUpRecord, getTaskChains, groupTaskChainsByProject, UNASSIGNED_PROJECT_KEY } from "@/src/lib/workMemoFollowUps";
+import { canCreateFollowUp, createFollowUpRecord, getTaskChains, groupTaskChainsByProject, UNASSIGNED_PROJECT_KEY } from "@/src/lib/workMemoFollowUps";
 
 type TaskChainsProps = { projectReference?: string; onOpenWorkMemo?: () => void };
 type Scope = "focus" | "all" | "recent";
@@ -16,12 +17,11 @@ const statusTone: Record<string, string> = { pending: "bg-slate-100 text-slate-6
 export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps) {
   const { user } = useAuth();
   const [projectBoardData] = useProjectBoardData();
-  const [rawRecords, setRecords] = useSyncedAppData<any[]>("workMemos", []);
+  const { tasks: rawRecords, setTasks: setRecords } = useUnifiedTasks();
   const records = useMemo(() => Array.isArray(rawRecords)
     ? rawRecords.filter((item: any) => item && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string")
     : [], [rawRecords]);
   const [personnel] = useSyncedAppData<any[]>("personnelData", []);
-  const [scheduleData, setScheduleData] = useSyncedAppData<any[]>("scheduleData", []);
   const projects = useMemo(() => flattenProjects(projectBoardData), [projectBoardData]);
   const internalPeople = useMemo(() => personnel.filter((person: any) => person?.name && person.status !== "inactive"), [personnel]);
   const chains = useMemo(() => getTaskChains(records), [records]);
@@ -72,7 +72,6 @@ export function TaskChains({ projectReference, onOpenWorkMemo }: TaskChainsProps
     if (!followUpFor || !form.title.trim() || !form.assignee || !form.dueDate) return;
     const task = createFollowUpRecord(followUpFor, form, user);
     await setRecords((current) => [...(Array.isArray(current) ? current : []), task]);
-    await setScheduleData((current) => appendFollowUpToSchedule(current, task));
     setFollowUpFor(null);
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "后续跟进已发布，并已加入任务链" }));
   };

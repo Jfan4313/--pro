@@ -108,7 +108,7 @@ function writeDigestNotification(digest) {
 }
 
 wecomNotifier.startScheduledDigest(() => {
-  const row = db.prepare("SELECT value FROM app_data WHERE key = ?").get("workMemos");
+  const row = db.prepare("SELECT value FROM app_data WHERE key = ?").get("tasks") || db.prepare("SELECT value FROM app_data WHERE key = ?").get("workMemos");
   return parseJson(row?.value, []);
 }, writeDigestNotification);
 

@@ -5,13 +5,15 @@ import { cn } from "@/src/lib/utils";
 import { STAGES } from '@/src/lib/projectLifecycle';
 import { MobileHome } from './MobileHome';
 import { useDashboardOverview } from '@/src/features/dashboard/useDashboardOverview';
-import { DASHBOARD_DATA_KEYS, exportWorkspaceSnapshot, importWorkspaceSnapshot } from '@/src/features/dashboard/dashboardTools';
+import { DASHBOARD_DATA_KEYS, createLocalSnapshot, exportWorkspaceSnapshot, importWorkspaceSnapshot, listLocalSnapshots, previewWorkspaceSnapshot, restoreLocalSnapshot } from '@/src/features/dashboard/dashboardTools';
 import { dispatchRiskFocus, type RiskAction } from '@/src/lib/riskActions';
 import { PRODUCT_RELEASE_SUMMARY, PRODUCT_VERSION, PRODUCT_VERSION_DATE } from '@/src/lib/productVersion';
 import { useSyncedAppData } from '@/src/hooks/useSyncedAppData';
+import { useAuth } from '@/src/lib/auth';
 
-export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void }) {
+export function Dashboard({ setActiveTab, onOpenProject, isMobileViewport = false }: { setActiveTab: (tab: string) => void; onOpenProject?: (projectId: string) => void; isMobileViewport?: boolean }) {
   const [chatPosts] = useSyncedAppData<any[]>('chatPosts', []);
+  const { user } = useAuth();
   const {
     acceptedProjects,
     allFlatProjects,
@@ -62,10 +64,18 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
       window.dispatchEvent(new CustomEvent('show-toast', { detail: error?.message || '配置文件导入失败' }));
     }
   };
+  const handleRestoreSnapshot = async () => {
+    const snapshot = (await listLocalSnapshots())[0];
+    if (!snapshot) { window.dispatchEvent(new CustomEvent('show-toast', { detail: '暂无可恢复的本地快照' })); return; }
+    const preview = await previewWorkspaceSnapshot(snapshot);
+    if (!window.confirm(`将恢复 ${new Date(snapshot.createdAt).toLocaleString()} 创建的快照，预计覆盖 ${preview.changedCount} 类数据，是否继续？`)) return;
+    const count = await restoreLocalSnapshot(snapshot);
+    window.dispatchEvent(new CustomEvent('show-toast', { detail: `已提交 ${count} 类数据恢复，请等待同步完成` }));
+  };
 
   return (
     <>
-    <MobileHome
+    {isMobileViewport && <MobileHome
       projects={allFlatProjects}
       todayTasks={todayTasks}
       overdueTasks={overdueTasks}
@@ -76,16 +86,19 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
       announcements={recentChatPosts}
       setActiveTab={setActiveTab}
       onOpenProject={onOpenProject}
-    />
-    <div className="hidden md:block p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
+    />}
+    {!isMobileViewport && <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">项目汇总</h2>
         <div className="flex gap-3">
-          <button onClick={() => { localStorage.setItem('zhijian-last-quick-save', new Date().toISOString()); window.dispatchEvent(new CustomEvent('show-toast', { detail: '已记录当前工作区保存点' })); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
-            <Save className="w-4 h-4" /> 快速保存
+          <button onClick={() => void createLocalSnapshot(user || undefined).then((snapshot) => window.dispatchEvent(new CustomEvent('show-toast', { detail: `已创建本地快照（${new Date(snapshot.createdAt).toLocaleString()}）` })))} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
+            <Save className="w-4 h-4" /> 创建本地快照
           </button>
           <button onClick={() => void exportWorkspaceSnapshot().then(() => window.dispatchEvent(new CustomEvent('show-toast', { detail: '工作区配置已导出' })))} className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors">
             <Download className="w-4 h-4" /> 导出配置
+          </button>
+          <button onClick={() => void handleRestoreSnapshot()} className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-100 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-colors">
+            <Save className="w-4 h-4" /> 恢复最近快照
           </button>
           <button onClick={() => importInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-100 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
             <Upload className="w-4 h-4" /> 导入配置
@@ -214,7 +227,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
               <p className="text-sm text-slate-500 mt-1">根据当前项目生命周期状态实时汇总</p>
             </div>
           </div>
-          <div className="h-80">
+          <div className="h-80 min-h-[20rem] min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={projectStageData} margin={{ top: 20, right: 0, bottom: 0, left: -20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -385,7 +398,7 @@ export function Dashboard({ setActiveTab, onOpenProject }: { setActiveTab: (tab:
           </table>
         </div>
       </div>
-    </div>
+    </div>}
     </>
   );
 }

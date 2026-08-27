@@ -45,7 +45,7 @@ export function registerDataRoutes(app, context) {
       updatedBy: userId(req),
     });
     emitEvent({ type: "app_data_changed", key: req.params.key, value: req.body.value, version, serverVersion });
-    if (req.params.key === "workMemos") {
+    if (req.params.key === "workMemos" || req.params.key === "tasks") {
       wecomNotifier?.notifyMemoChange(parseJson(existing?.value, []), req.body.value);
     }
     res.json({ key: req.params.key, value: req.body.value, updatedAt: timestamp, version });

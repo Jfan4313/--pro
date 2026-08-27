@@ -11,6 +11,7 @@ import { getProjectNameConflicts, hasProjectIdentityConflict, isValidProjectNumb
 import { ArchiveFolderState, getArchiveProjectFolder, getCurrentAndNextStages, getLocalArchiveProvider } from "@/src/lib/archiveStorage";
 import { useAuth } from "@/src/lib/auth";
 import { apiClient } from "@/src/lib/apiClient";
+import { buildProjectRecord, validateProjectInput } from "@/src/lib/projectService";
 
 const statusConfig = {
   normal: { icon: Clock, color: "text-slate-400", tooltip: "进度正常" },
@@ -149,28 +150,17 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
-    const name = String(formData.get('name') || "").trim().replace(/\s+/g, " ");
-    if (!name) return;
-    if (hasProjectIdentityConflict(allProjects, { name }).nameConflict) {
-      window.dispatchEvent(new CustomEvent('show-toast', { detail: `项目名称“${name}”已存在，请修改名称或编辑原项目` }));
+    const name = String(formData.get('name') || "");
+    const managerId = formData.get('managerId') as string;
+    const selectedManager = projectManagers.find((manager) => manager.id === managerId);
+    const validation = validateProjectInput(allProjects, { name, type: String(formData.get('type') || ""), businessModel: String(formData.get('businessModel') || ""), manager: selectedManager?.name || "", managerId });
+    if (!validation.input.name) return;
+    if (!validation.valid) {
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: validation.conflict.numberConflict ? `项目编号已存在` : `项目名称“${validation.input.name}”已存在，请修改名称或编辑原项目` }));
       return;
     }
     const projectNumber = await reserveProjectNumber();
-    const managerId = formData.get('managerId') as string;
-    const selectedManager = projectManagers.find((manager) => manager.id === managerId);
-
-    const newProject = {
-      id: `p${Date.now()}`,
-      projectNumber,
-      name,
-      type: formData.get('type') as string,
-      businessModel: formData.get('businessModel') as string,
-      manager: selectedManager?.name || "",
-      managerId,
-      constructProgress: 0,
-      supplyProgress: 0,
-      status: "normal"
-    };
+    const newProject = buildProjectRecord(validation.input, projectNumber);
 
     setData((prevData: any) => {
       const currentData = Array.isArray(prevData) && prevData.length > 0 ? prevData : boardSeed;

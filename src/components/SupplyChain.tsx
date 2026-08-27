@@ -30,6 +30,17 @@ const statusConfig = {
   "delayed": { label: "逾期风险", color: "text-rose-700 bg-rose-100" },
 };
 
+type PurchaseOrderLine = { materialId?: string; materialName: string; spec?: string; quantity: number };
+
+function getPurchaseOrderLines(order: any): PurchaseOrderLine[] {
+  if (Array.isArray(order?.itemLines) && order.itemLines.length) return order.itemLines;
+  return order?.items ? [{ materialName: String(order.items), quantity: Number(order.quantity) || 0 }] : [];
+}
+
+function purchaseOrderItemText(order: any) {
+  return getPurchaseOrderLines(order).map((line) => `${line.materialName}${line.spec ? ` ${line.spec}` : ""}`).join("、") || String(order?.items || "");
+}
+
 export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { defaultTab?: "orders" | "reconciliation" | "prices" | "procurement", hideHeader?: boolean }) {
   const [orders, setOrders] = useSyncedAppData("supplyOrders", []);
   const [suppliers, setSuppliers] = useSyncedAppData("suppliers", []);
@@ -95,7 +106,7 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
   const filteredOrders = orders.filter((order: any) => {
     const matchesSearch = order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.supplier.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.items.toLowerCase().includes(searchQuery.toLowerCase());
+      purchaseOrderItemText(order).toLowerCase().includes(searchQuery.toLowerCase());
     const matchesProject = selectedProjectId === "all" || order.projectId === selectedProjectId;
     const matchesStatus = statusFilter === "all" || order.status === statusFilter;
     return matchesSearch && matchesProject && matchesStatus;
@@ -117,6 +128,12 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
       quantity: Number(newOrderForm.quantity) || 0,
       supplier: newOrderForm.supplier,
       items: newOrderForm.items,
+      itemLines: [{
+        materialId: bomData.find((item: any) => item.id === newOrderForm.bomId)?.materialId || newOrderForm.bomId || undefined,
+        materialName: bomData.find((item: any) => item.id === newOrderForm.bomId)?.name || newOrderForm.items,
+        spec: bomData.find((item: any) => item.id === newOrderForm.bomId)?.spec || "",
+        quantity: Number(newOrderForm.quantity) || 0,
+      }],
       amount: `¥${Number(newOrderForm.amount).toLocaleString()}`,
       orderDate: new Date().toISOString().split('T')[0],
       expectedDate: newOrderForm.expectedDate,
@@ -388,7 +405,11 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
                 return matchesSearch && matchesProject;
               }).map((bom: any) => {
                 // Fuzzy match POs for this BOM item
-                const linkedOrders = orders.filter((o: any) => o.items.includes(bom.name) && (selectedProjectId === "all" || o.projectId === selectedProjectId));
+                const linkedOrders = orders.filter((o: any) => {
+                  const linkedById = getPurchaseOrderLines(o).some((line) => line.materialId && (line.materialId === bom.id || line.materialId === bom.materialId));
+                  const linkedByLegacyName = !Array.isArray(o.itemLines) && String(o.items || "").includes(bom.name);
+                  return (linkedById || linkedByLegacyName) && (selectedProjectId === "all" || o.projectId === selectedProjectId);
+                });
                 
                 // If we had structured items, we would sum them up. For now, we use procuredQty from BOM or estimate from POs.
                 // Since bomData already has procuredQty, we'll use that for demonstration, but ideally it's calculated from POs.
@@ -443,13 +464,13 @@ export function SupplyChain({ defaultTab = "orders", hideHeader = false }: { def
               {/* Show Unplanned/Extra POs */}
               {orders.filter((o: any) => {
                 const matchesProject = selectedProjectId === "all" || o.projectId === selectedProjectId;
-                const isExtra = !bomData.some((b: any) => o.items.includes(b.name));
+                const isExtra = !bomData.some((b: any) => getPurchaseOrderLines(o).some((line) => line.materialId && (line.materialId === b.id || line.materialId === b.materialId)) || (!Array.isArray(o.itemLines) && String(o.items || "").includes(b.name)));
                 return matchesProject && isExtra;
               }).map((order: any) => (
                 <tr key={`extra-${order.id}`} className="hover:bg-slate-50 transition-colors bg-blue-50/30">
                   <td className="px-6 py-4 font-mono font-medium text-slate-500">-</td>
-                  <td className="px-6 py-4 font-medium text-slate-900">{order.items.split(' ')[0] || order.items}</td>
-                  <td className="px-6 py-4 text-slate-600">{order.items.split(' ')[1] || '-'}</td>
+                  <td className="px-6 py-4 font-medium text-slate-900">{purchaseOrderItemText(order).split(' ')[0] || purchaseOrderItemText(order)}</td>
+                  <td className="px-6 py-4 text-slate-600">{purchaseOrderItemText(order).split(' ')[1] || '-'}</td>
                   <td className="px-6 py-4 text-right font-mono text-slate-500">0</td>
                   <td className="px-6 py-4 text-right font-mono text-slate-900 font-medium">未知</td>
                   <td className="px-6 py-4 text-right font-mono font-medium text-blue-600">计划外</td>

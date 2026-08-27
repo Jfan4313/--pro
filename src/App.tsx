@@ -17,6 +17,8 @@ import { useWorkspaceMigrations } from "./hooks/useWorkspaceMigrations";
 import { flattenProjects, formatLocalDate, getProjectNumber } from "./lib/management";
 import { resolveProjectReference } from "./lib/projectNumbering";
 import { useArchiveReconciler } from "./hooks/useArchiveReconciler";
+import { OpinionCenter } from "./components/OpinionCenter";
+import { AIGuide } from "./components/AIGuide";
 
 function lazyWithRecovery<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
   return lazy(() => loader().catch((error) => {
@@ -106,6 +108,7 @@ const tabPermissions: Record<string, string> = {
   "work-memo": "schedule",
   "task-chains": "schedule",
   "version-management": "dashboard",
+  opinions: "dashboard",
 };
 
 export default function App() {
@@ -276,7 +279,7 @@ export default function App() {
         <Header setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />
         <main className="app-main flex-1 overflow-y-auto flex flex-col">
           <PageErrorBoundary><Suspense fallback={<div className="flex min-h-full items-center justify-center text-sm text-slate-500">正在加载模块…</div>}>
-          {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} />}
+          {activeTab === "dashboard" && <Dashboard setActiveTab={navigateToTab} onOpenProject={openProjectDetail} isMobileViewport={isMobileViewport} />}
           {activeTab === "board" && <><div className="md:hidden min-h-full"><MobileProjects onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div><div className="hidden md:block h-full"><ProjectBoard onOpenProject={openProjectLifecycle} onOpenProjectDetail={openProjectDetail} /></div></>}
           {activeTab === "project-detail" && <ProjectDetail projectId={selectedProjectReference} onBack={() => navigateToTab("dashboard")} setActiveTab={navigateToTab} onOpenLifecycle={openProjectLifecycle} onOpenSurvey={(projectId) => openProjectSurvey(projectId)} />}
           {activeTab === "lifecycle" && <ProjectLifecycle initialProjectReference={selectedProjectReference} initialStageId={selectedStageId} onBack={() => navigateToTab("board")} onOpenProjectDetail={openProjectDetail} onSelectionChange={syncLifecycleRoute} onOpenSiteSurvey={(projectId, recordId) => openProjectSurvey(projectId, "lifecycle", recordId)} />}
@@ -301,6 +304,8 @@ export default function App() {
         </main>
 
         {activeTab !== "work-memo" && <SmartIntake setActiveTab={setActiveTab} />}
+        <div className="hidden md:block"><OpinionCenter activeTab={activeTab} projectReference={selectedProjectReference} /></div>
+        <div className="hidden md:block"><AIGuide activeTab={activeTab} projectReference={selectedProjectReference} /></div>
         <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("open-smart-intake"))} className="smart-intake-fab fixed bottom-20 right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 ring-4 ring-indigo-100 transition hover:scale-105 hover:bg-indigo-700 md:bottom-6 md:right-6" title="语音快速创建工作备忘" aria-label="语音快速创建工作备忘"><Mic className="h-6 w-6" /></button>
         {activeTab !== "work-memo" && <FirstRunGuide setActiveTab={navigateToTab} />}
 

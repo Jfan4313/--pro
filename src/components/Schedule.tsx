@@ -7,6 +7,7 @@ import { flattenTasks, formatLocalDate } from "@/src/lib/management";
 import * as XLSX from "xlsx";
 import { getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { useAuth } from "@/src/lib/auth";
+import { useUnifiedTasks } from "@/src/lib/taskModel";
 
 const initialScheduleData: any[] = [
   {
@@ -94,7 +95,7 @@ const schedulePhaseLabels: Record<string, string> = {
 
 export function Schedule() {
   const { user, can } = useAuth();
-  const [data, setData] = useSyncedAppData("scheduleData", []);
+  const { scheduleData: data, setScheduleData: setData } = useUnifiedTasks();
   const [boardData] = useProjectBoardData();
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
   const [projectMeta, setProjectMeta] = useSyncedAppData<Record<string, any>>("scheduleProjectMeta", {});

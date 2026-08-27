@@ -12,6 +12,7 @@ import { getProjectNumber } from "@/src/lib/management";
 import { hasProjectIdentityConflict, isValidProjectNumber, normalizeProjectNumber, resolveProjectReference, sortProjectsNaturally } from "@/src/lib/projectNumbering";
 import { ArchiveFolderState, chooseLocalArchiveProvider, getArchiveProjectFolder, getLocalArchiveProvider, LocalFolderStorageProvider, openLocalArchiveFile, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 import { getLifecycleChecklist, getProjectCurrentStageInfo, STAGES } from "@/src/lib/projectLifecycle";
+import { buildProjectRecord, validateProjectInput } from "@/src/lib/projectService";
 
 function formatUploadTime(value: string) {
   const date = new Date(value);
@@ -33,6 +34,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   const { allProjects: numberedProjects, reserveProjectNumber } = useProjectNumbering();
   const [lifecycleStates, setLifecycleStates, lifecycleLoading] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
+  const [personnelData] = useSyncedAppData<any[]>("personnelData", []);
   const [appSettings] = useUserSettings<any>({});
   const { data: surveyRecords } = useEntityList<any>("site-surveys", []);
   
@@ -129,13 +131,16 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
   const createProject = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const name = String(formData.get("name") || "").trim().replace(/\s+/g, " ");
-    if (!name) return;
-    if (numberedProjects.some((project: any) => String(project.name || "").trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
-      window.dispatchEvent(new CustomEvent("show-toast", { detail: `项目名称“${name}”已存在` }));
+    const name = String(formData.get("name") || "");
+    const managerId = String(formData.get("managerId") || "");
+    const manager = personnelData.find((person: any) => String(person.id) === managerId)?.name || "";
+    const validation = validateProjectInput(numberedProjects, { name, type: String(formData.get("type") || ""), businessModel: String(formData.get("businessModel") || ""), manager, managerId });
+    if (!validation.input.name) return;
+    if (!validation.valid) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: validation.conflict.numberConflict ? "项目编号已存在" : `项目名称“${validation.input.name}”已存在` }));
       return;
     }
-    const project = { id: globalThis.crypto?.randomUUID?.() || `p${Date.now()}`, projectNumber: await reserveProjectNumber(), name, type: String(formData.get("type") || "光伏项目"), businessModel: String(formData.get("businessModel") || "EPC"), manager: "", managerId: "", constructProgress: 0, supplyProgress: 0, status: "normal" };
+    const project = buildProjectRecord(validation.input, await reserveProjectNumber(), globalThis.crypto?.randomUUID?.() || undefined);
     await setBoardData((current: any[]) => {
       const columns = Array.isArray(current) && current.length ? current : STAGES.map((stage) => ({ id: stage.id, title: stage.name, projects: [], count: 0 }));
       return columns.map((column: any) => column.id === STAGES[0].id ? { ...column, projects: sortProjectsNaturally([project, ...(column.projects || [])]), count: (column.projects || []).length + 1 } : column);
@@ -159,8 +164,8 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
     const name = String(formData.get("name") || "").trim().replace(/\s+/g, " ");
     const projectNumber = normalizeProjectNumber(formData.get("projectNumber"));
     if (!name || !isValidProjectNumber(projectNumber)) return void window.dispatchEvent(new CustomEvent("show-toast", { detail: "请填写有效的项目名称和编号，例如 PRJ-0001" }));
-    const conflict = hasProjectIdentityConflict(numberedProjects, { id: editingProject.id, name, projectNumber });
-    if (conflict.nameConflict || conflict.numberConflict) return void window.dispatchEvent(new CustomEvent("show-toast", { detail: conflict.nameConflict ? `项目名称“${name}”已存在` : `项目编号“${projectNumber}”已存在，请打开项目汇总查看冲突项目` }));
+    const validation = validateProjectInput(numberedProjects, { name, projectNumber, type: editingProject.type, businessModel: editingProject.businessModel, manager: editingProject.manager, managerId: editingProject.managerId }, editingProject.id);
+    if (!validation.valid) return void window.dispatchEvent(new CustomEvent("show-toast", { detail: validation.conflict.nameConflict ? `项目名称“${name}”已存在` : `项目编号“${projectNumber}”已存在，请打开项目汇总查看冲突项目` }));
     const oldFolder = archiveFolderStates[editingProject.id]?.projectFolder;
     const newProject = { ...editingProject, name, projectNumber };
     const newFolder = getArchiveProjectFolder(newProject);
@@ -750,7 +755,7 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
           </div>
         )}
       </div>
-      {isCreateProjectOpen && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[10001] isolate flex items-center justify-center bg-slate-950/50 p-4"><form onSubmit={(event) => void createProject(event)} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">全生命周期新增项目</h3><p className="mt-1 text-xs text-slate-500">创建后项目会进入项目立项阶段。</p></div><button type="button" onClick={() => setIsCreateProjectOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100">×</button></div><div className="mt-5 space-y-4"><label className="block text-sm font-medium text-slate-700">项目名称<input name="name" required autoFocus className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 outline-none focus:border-indigo-500" placeholder="请输入项目名称" /></label><div className="grid grid-cols-2 gap-4"><label className="block text-sm font-medium text-slate-700">项目类型<select name="type" defaultValue="光伏项目" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5"><option>光伏项目</option><option>储能项目</option><option>充电桩项目</option><option>零碳园区</option><option>节能改造</option></select></label><label className="block text-sm font-medium text-slate-700">合作模式<select name="businessModel" defaultValue="EPC" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5"><option>EPC</option><option>EMC</option></select></label></div></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsCreateProjectOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">取消</button><button type="submit" className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white hover:bg-indigo-700">创建项目</button></div></form></div>}
+      {isCreateProjectOpen && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[10001] isolate flex items-center justify-center bg-slate-950/50 p-4"><form onSubmit={(event) => void createProject(event)} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">全生命周期新增项目</h3><p className="mt-1 text-xs text-slate-500">创建后项目会进入项目立项阶段。</p></div><button type="button" onClick={() => setIsCreateProjectOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100">×</button></div><div className="mt-5 space-y-4"><label className="block text-sm font-medium text-slate-700">项目名称<input name="name" required autoFocus className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 outline-none focus:border-indigo-500" placeholder="请输入项目名称" /></label><div className="grid grid-cols-2 gap-4"><label className="block text-sm font-medium text-slate-700">项目类型<select name="type" defaultValue="光伏项目" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5"><option>光伏项目</option><option>储能项目</option><option>充电桩项目</option><option>零碳园区</option><option>节能改造</option></select></label><label className="block text-sm font-medium text-slate-700">合作模式<select name="businessModel" defaultValue="EPC" className="mt-1 w-full rounded-lg border border-slate-200 bg-white"><option>EPC</option><option>EMC</option></select></label></div><label className="block text-sm font-medium text-slate-700">项目负责人<select name="managerId" defaultValue="" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5"><option value="">请选择负责人</option>{personnelData.map((person: any) => <option key={person.id} value={person.id}>{person.name || person.username}</option>)}</select></label></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsCreateProjectOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">取消</button><button type="submit" className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-bold text-white hover:bg-indigo-700">创建项目</button></div></form></div>}
     </div>
   );
 }

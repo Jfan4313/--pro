@@ -1,6 +1,6 @@
 import React from "react";
 import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Cloud, Eye, FileDown, FileText, FolderOpen, FolderSearch, HardDrive, History, MoreHorizontal, RefreshCw, Search, SearchCheck, Trash2, X } from "lucide-react";
-import { apiClient, downloadProjectManifestContent, getProjectFileDownloadUrl, ProjectFileManifest } from "@/src/lib/apiClient";
+import { apiClient, downloadProjectManifestContent, downloadProjectTemplateFileContent, getProjectFileDownloadUrl, ProjectFileManifest, ProjectTemplateFile } from "@/src/lib/apiClient";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useProjectNumbering } from "@/src/hooks/useProjectNumbering";
@@ -48,6 +48,11 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [uploadingManifestId, setUploadingManifestId] = React.useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [deletingStorageKey, setDeletingStorageKey] = React.useState<string | null>(null);
+  const [templates, setTemplates] = React.useState<ProjectTemplateFile[]>([]);
+  const [templateLoading, setTemplateLoading] = React.useState(false);
+  const [templateUploading, setTemplateUploading] = React.useState(false);
+  const [templateDeletingId, setTemplateDeletingId] = React.useState<string | null>(null);
+  const templateInputRef = React.useRef<HTMLInputElement | null>(null);
   const [workspaceMode, setWorkspaceMode] = React.useState<"browse" | "organize">("browse");
   const [maintenanceOpen, setMaintenanceOpen] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
@@ -188,12 +193,47 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     finally { setManifestLoading(false); }
   }, [selectedProject]);
 
+  const loadTemplates = React.useCallback(async () => {
+    setTemplateLoading(true);
+    try { setTemplates((await apiClient.listProjectTemplateFiles()).templates || []); }
+    catch { setTemplates([]); }
+    finally { setTemplateLoading(false); }
+  }, []);
+
   const openLocationPanel = async () => setIsLocationPanelOpen(true);
 
   React.useEffect(() => {
     loadFiles();
     loadManifests();
-  }, [loadFiles, loadManifests]);
+    loadTemplates();
+  }, [loadFiles, loadManifests, loadTemplates]);
+
+  const uploadTemplates = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setTemplateUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} 超过 20MB 限制`);
+        const contentBase64 = await readFileAsBase64(file);
+        await apiClient.uploadProjectTemplateFile(file.name, contentBase64, file.type || "application/octet-stream");
+      }
+      await loadTemplates();
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: `已上传 ${files.length} 个模板资料` }));
+    } catch (error: any) {
+      window.dispatchEvent(new CustomEvent("show-toast", { detail: error?.message || "模板资料上传失败" }));
+    } finally {
+      setTemplateUploading(false);
+      if (templateInputRef.current) templateInputRef.current.value = "";
+    }
+  };
+
+  const deleteTemplate = async (template: ProjectTemplateFile) => {
+    if (!template.canDelete || !window.confirm(`确定删除模板“${template.originalName}”吗？`)) return;
+    setTemplateDeletingId(template.id);
+    try { await apiClient.deleteProjectTemplateFile(template.id); await loadTemplates(); window.dispatchEvent(new CustomEvent("show-toast", { detail: "模板资料已删除" })); }
+    catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "模板资料删除失败" })); }
+    finally { setTemplateDeletingId(null); }
+  };
 
   const initFolders = async () => {
     if (!selectedProject) return;
@@ -647,6 +687,7 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
 
   return (
     <>
+    <TemplatePackagePanel templates={templates} loading={templateLoading} uploading={templateUploading} deletingId={templateDeletingId} inputRef={templateInputRef} onUpload={uploadTemplates} onDownload={(template) => void downloadProjectTemplateFileContent(template.id, template.originalName)} onDelete={(template) => void deleteTemplate(template)} />
     <main className="min-h-full bg-slate-50 px-3 pb-6 pt-3 md:hidden">
       <header className="sticky top-0 z-20 -mx-3 -mt-3 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
         <div className="flex items-center gap-3"><div className="min-w-0 flex-1"><h2 className="text-lg font-semibold tracking-tight text-slate-950">项目资料</h2><p className="mt-0.5 truncate text-[11px] text-slate-400">{currentStageInfo?.stage.name || "统一目录与文件状态"}</p></div><button type="button" onClick={() => { void loadFiles(); void loadManifests(); }} className="rounded-xl bg-slate-100 p-2.5 text-slate-600" aria-label="刷新项目资料"><RefreshCw className={cn("h-4 w-4", (isLoading || manifestLoading) && "animate-spin")} /></button><div className="relative"><button type="button" onClick={() => setMobileMenuOpen((open) => !open)} className="rounded-xl bg-slate-950 p-2.5 text-white" aria-label="项目资料更多操作"><MoreHorizontal className="h-4 w-4" /></button>{mobileMenuOpen && <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"><button onClick={() => { setWorkspaceMode("organize"); setMobileMenuOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">智能整理</button><button onClick={() => { void syncLocalManifest(); setMobileMenuOpen(false); }} disabled={localPermission !== "granted"} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40">同步文件清单</button><button onClick={() => { setIsLocationPanelOpen(true); setMobileMenuOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">归档位置</button><button onClick={() => { setMaintenanceOpen(true); setMobileMenuOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">历史归档迁移</button></div>}</div></div>
@@ -848,6 +889,29 @@ function ArchiveCleanupPanel({ candidates, scanning, rebuilding, deleting, onPre
   const totalSize = candidates.reduce((sum, item) => sum + item.size, 0);
   const verified = candidates.filter((item) => item.status === "verified").length;
   return <section className="rounded-2xl border border-rose-100 bg-rose-50/40 p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">旧归档重建与清理</h3><p className="mt-1 text-xs text-slate-600">先把平铺文件重建到分类目录并核对 SHA-256，只有校验成功的旧副本才能删除。</p></div><div className="flex flex-wrap gap-2"><button onClick={onPreview} disabled={scanning || rebuilding || deleting} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">{scanning ? "扫描旧归档…" : "预览旧平铺归档"}</button>{candidates.length > 0 && verified === 0 && <button onClick={onRebuild} disabled={scanning || rebuilding || deleting} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{rebuilding ? "重建并校验中…" : `重建 ${candidates.length} 个`}</button>}{verified > 0 && <button onClick={onDelete} disabled={scanning || rebuilding || deleting} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{deleting ? "清理中…" : `确认清理 ${verified} 个旧副本`}</button>}</div></div>{candidates.length > 0 && <div className="mt-3 rounded-xl border border-rose-100 bg-white p-3 text-xs text-rose-800">共 {candidates.length} 个旧平铺文件，约 {formatSize(totalSize)}；其中 {verified} 个已完成重建与哈希校验。未校验、冲突和人工文件不会删除。</div>}{!candidates.length && !scanning && <p className="mt-3 text-xs text-slate-500">尚未生成迁移预览。原始来源文件始终不会移动或删除。</p>}</section>;
+}
+
+function TemplatePackagePanel({ templates, loading, uploading, deletingId, inputRef, onUpload, onDownload, onDelete }: { templates: ProjectTemplateFile[]; loading: boolean; uploading: boolean; deletingId: string | null; inputRef: React.RefObject<HTMLInputElement | null>; onUpload: (files: FileList | null) => void; onDownload: (template: ProjectTemplateFile) => void; onDelete: (template: ProjectTemplateFile) => void }) {
+  return <section className="mx-auto w-full max-w-[1800px] px-3 pt-3 md:px-5 md:pt-5">
+    <div className="rounded-2xl border border-indigo-100 bg-white p-3 shadow-[0_8px_30px_rgba(15,23,42,0.04)] md:p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"><FolderOpen className="h-4 w-4" /></div><div className="min-w-0"><div className="flex items-center gap-2"><h3 className="text-sm font-bold text-slate-900">模板资料包</h3><span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">公司共享</span></div><p className="mt-0.5 truncate text-[11px] text-slate-500">上传合同、表格、报告等通用模板，所有项目均可查看使用</p></div></div>
+        <label className={cn("flex cursor-pointer items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-indigo-700", uploading && "cursor-wait opacity-60")}><input ref={inputRef} type="file" multiple className="hidden" disabled={uploading} onChange={(event) => onUpload(event.target.files)} /><Cloud className="h-4 w-4" />{uploading ? "上传中…" : "上传模板"}</label>
+      </div>
+      {loading && <div className="mt-3 h-10 animate-pulse rounded-xl bg-slate-100" />}
+      {!loading && templates.length === 0 && <div className="mt-3 rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">暂无模板资料，点击“上传模板”建立共享资料包</div>}
+      {!loading && templates.length > 0 && <div className="mt-3 grid gap-2 md:grid-cols-2 lg:grid-cols-3">{templates.map((template) => <div key={template.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5"><FileText className="h-4 w-4 shrink-0 text-indigo-500" /><div className="min-w-0 flex-1"><div className="truncate text-xs font-semibold text-slate-800" title={template.originalName}>{template.originalName}</div><div className="mt-1 truncate text-[10px] text-slate-400">{formatSize(template.size)} · {template.uploadedByName} · {formatTime(template.createdAt)}</div></div><button type="button" onClick={() => onDownload(template)} className="rounded-lg p-1.5 text-slate-500 hover:bg-white hover:text-indigo-600" title="下载模板"><FileDown className="h-3.5 w-3.5" /></button>{template.canDelete && <button type="button" onClick={() => onDelete(template)} disabled={deletingId === template.id} className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-rose-600 disabled:opacity-40" title="删除模板"><Trash2 className="h-3.5 w-3.5" /></button>}</div>)}</div>}
+    </div>
+  </section>;
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+    reader.onerror = () => reject(new Error("模板资料读取失败"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function formatSize(size = 0) {

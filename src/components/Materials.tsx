@@ -744,17 +744,6 @@ export function Materials({ setActiveTab }: { setActiveTab?: (tab: string, subTa
                 更新记录
               </button>
               
-              <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <button onClick={() => downloadTemplate('PO')} className="px-3 py-2 text-slate-500 hover:text-slate-700 hover:bg-slate-50 border-r border-slate-200 transition-colors" title="下载采购单模板">
-                  <Download className="w-4 h-4" />
-                </button>
-                <input type="file" ref={poFileInputRef} onChange={handleImportPO} className="hidden" accept=".xlsx,.xls,.csv" />
-                <button onClick={() => poFileInputRef.current?.click()} className="px-4 py-2 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors flex items-center">
-                  <Upload className="w-4 h-4 mr-2" />
-                  导入采购单
-                </button>
-              </div>
-
               <div className="flex items-center bg-indigo-600 rounded-xl shadow-sm shadow-indigo-600/20 overflow-hidden">
                 <button onClick={() => downloadTemplate('BOM')} className="px-3 py-2 text-indigo-200 hover:text-white hover:bg-indigo-700 border-r border-indigo-500/50 transition-colors" title="下载BOM模板">
                   <Download className="w-4 h-4" />

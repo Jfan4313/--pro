@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
-import { appendTaskToSchedule, buildTaskFromQuickIntake, deriveRisks, flattenProjects, flattenTasks, formatLocalDate } from "@/src/lib/management";
+import { buildTaskFromQuickIntake, deriveRisks, flattenProjects, formatLocalDate } from "@/src/lib/management";
+import { useUnifiedTasks } from "@/src/lib/taskModel";
 import { getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 
 export function useDashboardOverview() {
   const [projects] = useProjectBoardData();
-  const [tasks, setTasks] = useSyncedAppData<any[]>("scheduleData", []);
+  const { tasks, setTasks } = useUnifiedTasks();
   const [personnel] = useSyncedAppData<any[]>("personnelData", []);
   const [materials] = useSyncedAppData<any[]>("materialsData", []);
   const [lifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
@@ -17,7 +18,7 @@ export function useDashboardOverview() {
   const [externalPartners] = useSyncedAppData<any[]>("externalPartners", []);
 
   const allFlatProjects = useMemo(() => flattenProjects(projects), [projects]);
-  const allTasks = useMemo(() => flattenTasks(tasks), [tasks]);
+  const allTasks = useMemo(() => (Array.isArray(tasks) ? tasks : []), [tasks]);
   const today = formatLocalDate();
   const todayTasks = useMemo(() => allTasks.filter((task: any) => task.deadline === today && task.status !== "completed"), [allTasks, today]);
   const overdueTasks = useMemo(() => allTasks.filter((task: any) => task.deadline && task.deadline < today && task.status !== "completed"), [allTasks, today]);
@@ -94,7 +95,16 @@ export function useDashboardOverview() {
       return;
     }
     const task = buildTaskFromQuickIntake(item);
-    await setTasks((prev: any[]) => appendTaskToSchedule(prev, project, task));
+    await setTasks((prev: any[]) => [...(Array.isArray(prev) ? prev : []), {
+      ...task,
+      title: (task as any).title || task.name,
+      name: task.name || (task as any).title,
+      projectId: project.id,
+      projectName: project.name,
+      createdBy: "项目经理",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }]);
     await setQuickIntakeItems((prev: any[]) => (Array.isArray(prev) ? prev : []).map((entry: any) => entry.id === item.id ? {
       ...entry,
       status: "confirmed",

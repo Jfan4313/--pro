@@ -48,6 +48,7 @@ const navGroups = [
       { id: "personnel", label: "施工人员", icon: Users, permission: "personnel" },
       { id: "partners", label: "参建外协", icon: Handshake, permission: "partners" },
       { id: "organization", label: "公司组织", icon: Network, permission: "organization" },
+      { id: "opinions", label: "意见中心", icon: MessageSquare, permission: "dashboard" },
     ],
   },
   {
@@ -67,6 +68,7 @@ const mobileNavItems = [
   { id: "work-memo", label: "待办", icon: ClipboardList },
   { id: "chat", label: "协作", icon: MessageSquare },
 ];
+const lowFrequencyMobileItems = new Set(["opinions", "version-management", "settings", "accounts", "organization"]);
 
 export function Sidebar({ activeTab, setActiveTab, onOpenProcurement }: SidebarProps) {
   const { user, logout, can } = useAuth();
@@ -74,6 +76,7 @@ export function Sidebar({ activeTab, setActiveTab, onOpenProcurement }: SidebarP
   const [openGroups, setOpenGroups] = useState<string[]>(["workspace", "execution", "supply"]);
   const canViewAccounts = can("accounts");
   const visibleNavGroups = navGroups.map((group) => ({ ...group, items: group.items.filter((item) => item.id === "accounts" ? canViewAccounts : can(item.permission)) })).filter((group) => group.items.length > 0);
+  const mobileWorkbenchGroups = visibleNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => !lowFrequencyMobileItems.has(item.id)) })).filter((group) => group.items.length > 0);
   const visibleNavItems = visibleNavGroups.flatMap((group) => group.items);
   const visibleMobileNavItems = mobileNavItems.filter((item) => can(item.id === "board" ? "projects" : item.id === "chat" ? "collaboration" : item.id));
 
@@ -197,7 +200,7 @@ export function Sidebar({ activeTab, setActiveTab, onOpenProcurement }: SidebarP
             </button>
           </div>
           <div className="max-h-[62vh] space-y-5 overflow-y-auto px-1 pb-6">
-            {visibleNavGroups.map((group) => <section key={group.id}><h3 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{group.label}</h3><div className="grid grid-cols-4 gap-x-2 gap-y-5">{group.items.map((item) => {
+            {mobileWorkbenchGroups.map((group) => <section key={group.id}><h3 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{group.label}</h3><div className="grid grid-cols-4 gap-x-2 gap-y-5">{group.items.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return <button key={item.id} onClick={() => navigate(item.id)} className="flex min-w-0 flex-col items-center gap-2 text-center"><span className={cn("flex h-12 w-12 items-center justify-center rounded-2xl border transition-colors", isActive ? "border-slate-900 bg-slate-900 text-white" : "border-slate-100 bg-slate-50 text-slate-600")}><Icon className="h-5 w-5" /></span><span className={cn("w-full truncate text-[11px]", isActive ? "font-semibold text-slate-900" : "text-slate-600")}>{item.label}</span></button>;

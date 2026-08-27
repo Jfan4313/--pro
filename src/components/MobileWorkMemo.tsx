@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/src/lib/auth";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
+import { useUnifiedTasks } from "@/src/lib/taskModel";
 import { formatLocalDate } from "@/src/lib/management";
 import {
   canDeleteWorkMemo,
@@ -113,7 +114,7 @@ export function buildProjectTrees(records: SafeMemo[]): ProjectTree[] {
 
 export function MobileWorkMemo() {
   const { user } = useAuth();
-  const [rawRecords, setRawRecords] = useSyncedAppData<any[]>("workMemos", []);
+  const { tasks: rawRecords, setTasks: setRawRecords } = useUnifiedTasks();
   const records = useMemo<SafeMemo[]>(
     () =>
       Array.isArray(rawRecords)

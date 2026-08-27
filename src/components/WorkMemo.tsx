@@ -19,6 +19,7 @@ import {
 import { useAuth } from "@/src/lib/auth";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
+import { useUnifiedTasks } from "@/src/lib/taskModel";
 import { cn } from "@/src/lib/utils";
 import { formatLocalDate } from "@/src/lib/management";
 import {
@@ -910,14 +911,7 @@ export function WorkMemo({
   const [projectBoardData] = useProjectBoardData();
   const [personnelData] = useSyncedAppData<any[]>("personnelData", []);
   const [accountDirectory, setAccountDirectory] = useState<any[]>([]);
-  const [scheduleData, setScheduleData] = useSyncedAppData<any[]>(
-    "scheduleData",
-    [],
-  );
-  const [rawRecords, setRecords] = useSyncedAppData<WorkMemoRecord[]>(
-    "workMemos",
-    emptyMemo,
-  );
+  const { scheduleData, setScheduleData, tasks: rawRecords, setTasks: setRecords } = useUnifiedTasks();
   const records = useMemo(() => normalizeMemoRecords(rawRecords), [rawRecords]);
   const [filter, setFilter] = useState<
     "all" | "mine" | "company" | "unconfirmed" | "overdue"
@@ -927,6 +921,11 @@ export function WorkMemo({
   const [isBatchOpen, setIsBatchOpen] = useState(false);
   const [isCreateChoiceOpen, setIsCreateChoiceOpen] = useState(false);
   const [feedbackFor, setFeedbackFor] = useState<WorkMemoRecord | null>(null);
+  const [completionFor, setCompletionFor] = useState<WorkMemoRecord | null>(
+    null,
+  );
+  const [completionFeedback, setCompletionFeedback] = useState("");
+  const [completionAddFollowUp, setCompletionAddFollowUp] = useState(false);
   const [followUpFor, setFollowUpFor] = useState<WorkMemoRecord | null>(null);
   const [editingMemo, setEditingMemo] = useState<WorkMemoRecord | null>(null);
   const [form, setForm] = useState({
@@ -1358,12 +1357,34 @@ export function WorkMemo({
     }
   };
 
+  const openCompletion = (item: WorkMemoRecord) => {
+    if (!canOperate(item)) return;
+    setCompletionFor(item);
+    setCompletionFeedback(item.feedback || "");
+    setCompletionAddFollowUp(false);
+  };
+
+  const completeMemo = (event: FormEvent) => {
+    event.preventDefault();
+    if (!completionFor || !canOperate(completionFor)) return;
+    const parent = completionFor;
+    const feedbackText = completionFeedback.trim();
+    updateMemo(parent.id, {
+      status: "confirmed",
+      feedback: feedbackText,
+      feedbackAt: feedbackText ? new Date().toISOString() : parent.feedbackAt,
+      confirmedAt: new Date().toISOString(),
+    });
+    setCompletionFor(null);
+    setCompletionFeedback("");
+    window.dispatchEvent(
+      new CustomEvent("show-toast", { detail: "任务已完成" }),
+    );
+    if (completionAddFollowUp) openFollowUp(parent);
+  };
+
   const canOperate = (item: WorkMemoRecord) =>
     hasAssignedPerson(item, user) ||
-    isSamePerson(item.creator, user) ||
-    user?.role === "admin" ||
-    user?.permissions?.includes("*");
-  const canConfirm = (item: WorkMemoRecord) =>
     isSamePerson(item.creator, user) ||
     user?.role === "admin" ||
     user?.permissions?.includes("*");
@@ -1602,7 +1623,7 @@ export function WorkMemo({
         )}
         <div
           className={cn(
-            "grid gap-4 bg-slate-50/60 p-4 md:p-5 xl:grid-cols-2",
+            "bg-slate-50/60 p-4 md:p-5 xl:columns-2 xl:gap-4",
             viewMode === "calendar" && "hidden",
           )}
         >
@@ -1637,7 +1658,7 @@ export function WorkMemo({
                   }
                 }}
                 className={cn(
-                  "min-w-0 cursor-pointer rounded-2xl border bg-white p-4 shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:border-indigo-200 hover:shadow-md active:scale-[0.99] md:p-5",
+                  "mb-4 min-w-0 break-inside-avoid cursor-pointer rounded-2xl border bg-white p-4 shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:border-indigo-200 hover:shadow-md active:scale-[0.99] md:p-5",
                   chainExpanded
                     ? "border-violet-300 ring-2 ring-violet-100 shadow-md"
                     : "border-slate-200",
@@ -1744,33 +1765,11 @@ export function WorkMemo({
                       )}
                     {actionable && item.status !== "confirmed" && (
                       <button
-                        onClick={() => {
-                          setFeedbackFor(item);
-                          setFeedback(item.feedback || "");
-                        }}
-                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-                      >
-                        <MessageSquareText className="h-3.5 w-3.5" />
-                        提交反馈
-                      </button>
-                    )}
-                    {canConfirm(item) && item.status === "feedback" && (
-                      <button
-                        onClick={() => {
-                          updateMemo(item.id, {
-                            status: "confirmed",
-                            confirmedAt: new Date().toISOString(),
-                          });
-                          window.dispatchEvent(
-                            new CustomEvent("show-toast", {
-                              detail: "已确认完成",
-                            }),
-                          );
-                        }}
+                        onClick={() => openCompletion(item)}
                         className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" />
-                        确认完成
+                        完成任务
                       </button>
                     )}
                     {canManageWorkMemo(item, user) && (
@@ -1897,7 +1896,7 @@ export function WorkMemo({
                   单条新建工作安排
                 </h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  发布后所有成员可见，负责人需要提交反馈。
+                  发布后所有成员可见，负责人可直接完成任务并填写反馈。
                 </p>
               </div>
               <button
@@ -2383,6 +2382,66 @@ export function WorkMemo({
         </div>
       )}
 
+      {completionFor && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4">
+          <form
+            onSubmit={completeMemo}
+            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl md:p-6"
+          >
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">完成任务</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {completionFor.title}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCompletionFor(null)}
+                className="rounded-full p-2 text-slate-400 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold text-slate-600">
+                执行反馈（可选）
+              </span>
+              <textarea
+                value={completionFeedback}
+                onChange={(event) => setCompletionFeedback(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                rows={5}
+                placeholder="填写完成结果、收款情况、现场情况或遗留问题"
+              />
+            </label>
+            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3">
+              <input
+                type="checkbox"
+                checked={completionAddFollowUp}
+                onChange={(event) =>
+                  setCompletionAddFollowUp(event.target.checked)
+                }
+                className="mt-0.5 h-4 w-4 accent-violet-600"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-violet-900">
+                  完成后添加后续任务
+                </span>
+                <span className="mt-0.5 block text-xs text-violet-700">
+                  提交完成后自动打开后续安排，可选择具体父任务。
+                </span>
+              </span>
+            </label>
+            <button
+              type="submit"
+              className="mt-4 w-full rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-700"
+            >
+              提交并完成
+            </button>
+          </form>
+        </div>
+      )}
       {feedbackFor && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4">
           <form
