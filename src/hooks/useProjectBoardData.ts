@@ -1,6 +1,6 @@
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useAuth } from "@/src/lib/auth";
-import { hasProjectBoardProjects, mergeProjectBoardData } from "@/src/lib/projectBoardMigration";
+import { mergeProjectBoardData } from "@/src/lib/projectBoardMigration";
 import { createEmptyBoardColumns } from "@/src/lib/workspaceDefaults";
 
 export function useProjectBoardData() {
@@ -14,7 +14,9 @@ export function useProjectBoardData() {
   const legacyKeys = isDemoAccount || !user?.id ? [] : [`projectBoardData:${user.id}`, "projectBoardData"];
   const syncedData = useSyncedAppData<any[]>(dataKey, seed, {
     keys: legacyKeys,
-    shouldMigrate: (currentValue) => !hasProjectBoardProjects(currentValue),
+    // A partially populated company board must still merge legacy user/global
+    // boards; otherwise projects that lived in the old keys silently disappear.
+    shouldMigrate: () => legacyKeys.length > 0,
     mergeValues: (currentValue, legacyValues) => mergeProjectBoardData(currentValue, legacyValues, seed),
   });
 
