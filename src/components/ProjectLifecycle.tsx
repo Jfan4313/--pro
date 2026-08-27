@@ -102,6 +102,23 @@ export function ProjectLifecycle({ initialProjectReference, initialStageId, onBa
     if (activeProj && STAGES.some((stage) => stage.id === activeStage)) onSelectionChange?.(activeProj, activeStage);
   }, [activeProj, activeStage, onSelectionChange]);
 
+  useEffect(() => {
+    if (!activeProj) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const provider = await getLocalArchiveProvider();
+        const availability = await provider?.checkAvailability();
+        if (!provider || !availability?.available) return;
+        const result = await provider.normalizeProjectStructure(activeProj, STAGES, archiveFolderStates[activeProj.id]?.projectFolder);
+        if (!cancelled && result.renamed > 0) window.dispatchEvent(new CustomEvent("show-toast", { detail: `已自动修正 ${result.renamed} 个旧文件夹名称` }));
+      } catch {
+        // 本机目录未授权或暂不可写时不影响生命周期页面浏览。
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProj?.id, archiveFolderStates[activeProj?.id || ""]?.projectFolder]);
+
   const selectProject = (projectId: string) => {
     const project = allProjects.find((item: any) => item.id === projectId);
     if (!project) return;

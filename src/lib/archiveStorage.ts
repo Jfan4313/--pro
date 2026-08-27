@@ -407,14 +407,24 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
       for (const folderPath of folderPaths) {
         const oldParts = folderPath.split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
         const newParts = numberArchiveFolderPath(stage.id, folderPath).split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
-        if (oldParts.join("/") === newParts.join("/")) continue;
-        const source = await getExistingDirectoryByLabels(stageDirectory, oldParts);
-        if (!source) continue;
-        if (source.name === newParts.at(-1)) continue;
-        const target = await getDirectoryByParts(stageDirectory, newParts, true);
-        await copyDirectoryContents(source, target);
-        await stageDirectory.removeEntry(oldParts[0], { recursive: true });
-        renamed += 1;
+        const targetName = newParts.at(-1);
+        if (!targetName || oldParts.join("/") === newParts.join("/")) continue;
+        const sourceParent = oldParts.length > 1
+          ? await getExistingDirectoryByLabels(stageDirectory, oldParts.slice(0, -1))
+          : stageDirectory;
+        const targetParent = await getDirectoryByParts(stageDirectory, newParts.slice(0, -1), true);
+        if (!sourceParent) continue;
+        const sources: any[] = [];
+        for await (const entry of sourceParent.values()) {
+          if (entry.kind === "directory" && withoutFolderNumber(entry.name) === withoutFolderNumber(oldParts.at(-1) || "") && entry.name !== targetName) sources.push(entry);
+        }
+        if (!sources.length) continue;
+        const target = await targetParent.getDirectoryHandle(targetName, { create: true });
+        for (const source of sources) {
+          await copyDirectoryContents(source, target);
+          await sourceParent.removeEntry(source.name, { recursive: true });
+          renamed += 1;
+        }
       }
     }
     return { renamed, projectFolder };
