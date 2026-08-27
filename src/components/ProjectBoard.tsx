@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw } from "lucide-react";
+import { MoreHorizontal, Clock, AlertTriangle, CheckCircle2, X, Eye, Edit2, Save, ShoppingCart, ExternalLink, ShieldAlert, Plus, FileText, Archive, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useUserSettings } from "@/src/hooks/useUserSettings";
@@ -106,6 +106,22 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
     void setData((currentData: any[]) => currentData.map((column: any) => column.id === targetColumn ? { ...column, projects: [{ ...project, archiveStatus: undefined, archivedAt: undefined }, ...(column.projects || [])] } : column));
     void setArchivedProjects((current: any[]) => current.filter((item: any) => item.id !== project.id));
     window.dispatchEvent(new CustomEvent("show-toast", { detail: "项目已恢复到项目立项阶段" }));
+  };
+
+  const deleteArchivedProject = async (project: any) => {
+    if (!window.confirm(`确定永久删除已归档项目“${project.name}”吗？\n\n这只删除系统中的项目记录、阶段状态和归档状态；本地资料文件夹不会删除。`)) return;
+    await setArchivedProjects((current: any[]) => current.filter((item: any) => item.id !== project.id));
+    await setLifecycleStates((current: any) => {
+      const next = { ...(current || {}) };
+      delete next[project.id];
+      return next;
+    });
+    await setArchiveFolderStates((current: any) => {
+      const next = { ...(current || {}) };
+      delete next[project.id];
+      return next;
+    });
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: "已删除归档项目记录，本地资料文件未删除" }));
   };
 
   const archiveSelectedProjects = () => {
@@ -354,7 +370,7 @@ export function ProjectBoard({ onOpenProject, onOpenProjectDetail }: { onOpenPro
 
       {(projectNumberConflicts.length > 0 || projectNameConflicts.length > 0) && <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{projectNumberConflicts.length > 0 && <div>重复项目编号：{projectNumberConflicts.map((item) => item.projectNumber).join("、")}。重复编号暂不可用于跳转。</div>}{projectNameConflicts.length > 0 && <div>重复项目名称：{projectNameConflicts.map((item) => item.projectName).join("、")}。请逐项点击编辑修正，系统不会自动合并或删除。</div>}</div>}
 
-      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">归档项目也可以修改名称和编号，修改不会移动项目资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{sortProjectsNaturally(archivedProjects).map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => setEditingProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50"><Edit2 className="h-3.5 w-3.5" />编辑</button><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button></div></div>)}</div>}</div>}
+      {showArchive && <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-bold text-indigo-900">已有项目归档</h3><p className="mt-1 text-xs text-indigo-700">归档项目也可以修改名称和编号，修改不会移动项目资料。</p></div><Archive className="h-5 w-5 text-indigo-500" /></div>{archivedProjects.length === 0 ? <p className="mt-3 rounded-xl bg-white/70 p-3 text-xs text-slate-500">暂无已归档项目</p> : <div className="mt-3 grid gap-2 md:grid-cols-2">{sortProjectsNaturally(archivedProjects).map((project: any) => <div key={project.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{project.name}</p><p className="mt-1 text-xs text-slate-400">{getProjectNumber(project)} · 归档于 {project.archivedAt?.slice(0, 10) || "-"}</p></div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => setEditingProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50"><Edit2 className="h-3.5 w-3.5" />编辑</button><button type="button" onClick={() => restoreArchivedProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><RotateCcw className="h-3.5 w-3.5" />恢复</button><button type="button" onClick={() => void deleteArchivedProject(project)} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50" title="删除归档项目"><Trash2 className="h-3.5 w-3.5" />删除</button></div></div>)}</div>}</div>}
 
       <div className="flex-1 overflow-y-auto pb-4 custom-scrollbar">
         <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">

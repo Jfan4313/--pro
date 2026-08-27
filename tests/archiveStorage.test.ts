@@ -11,6 +11,7 @@ import {
   getCurrentAndNextStages,
   LocalFolderStorageProvider,
 } from "../src/lib/archiveStorage";
+import { numberArchiveFolderPath } from "../src/lib/projectArchiveStructure";
 import { getProjectFolderName, listProjectFilesFromDisk } from "../server/domain/projectFiles.js";
 
 class MemoryFileHandle {
@@ -85,6 +86,7 @@ const project = { id: "p-1", projectNumber: "PRJ-0001", name: "测试 / 项目" 
 test("uses the stable project number and current-plus-next stage window", () => {
   assert.equal(getArchiveProjectFolder(project), "PRJ-0001_测试_项目");
   assert.equal(getArchiveStageFolder(stages[0]), "01_项目立项");
+  assert.equal(numberArchiveFolderPath("1_initiation", "现场勘察/结构照片"), "01_现场勘察/01_结构照片");
   assert.deepEqual(getCurrentAndNextStages(stages, 1).map((stage) => stage.id), ["2_preliminary", "3_business"]);
   assert.deepEqual(getCurrentAndNextStages(stages, 2).map((stage) => stage.id), ["3_business"]);
 });
@@ -98,11 +100,28 @@ test("local provider creates an idempotent structure and never overwrites its ch
   const checklist = stageDirectory.entries.get("文件清单.json") as MemoryFileHandle;
   assert.ok(!stageDirectory.entries.has("待提交"));
   assert.ok(!stageDirectory.entries.has("已归档"));
-  assert.ok(stageDirectory.entries.has("现场勘察"));
+  assert.ok(stageDirectory.entries.has("01_现场勘察"));
   assert.equal(checklist.writes, 1);
 
   await provider.ensureProjectStructure(project, stages.slice(0, 2), first.projectFolder);
   assert.equal(checklist.writes, 1);
+});
+
+test("检测旧项目文件时自动修正无序号子文件夹", async () => {
+  const root = new MemoryDirectoryHandle("归档") as any;
+  const provider = new LocalFolderStorageProvider(root);
+  const projectDirectory = await root.getDirectoryHandle(getArchiveProjectFolder(project), { create: true });
+  const stageDirectory = await projectDirectory.getDirectoryHandle("01_项目立项", { create: true });
+  const oldFolder = await stageDirectory.getDirectoryHandle("现场勘察", { create: true });
+  const oldChild = await oldFolder.getFileHandle("照片.jpg", { create: true });
+  const writable = await oldChild.createWritable();
+  await writable.write(new Blob(["photo"]));
+  await writable.close();
+
+  await provider.ensureProjectStructure(project, [stages[0]]);
+  assert.equal(stageDirectory.entries.has("现场勘察"), false);
+  const corrected = stageDirectory.entries.get("01_现场勘察") as MemoryDirectoryHandle;
+  assert.ok(corrected.entries.has("照片.jpg"));
 });
 
 test("local provider versions files and exposes provider-neutral indexes", async () => {
@@ -218,7 +237,7 @@ test("旧平铺归档先重建并校验后才能删除旧副本", async () => {
 
   const preview = await provider.previewGeneratedArchiveFiles();
   assert.equal(preview.length, 1);
-  assert.match(preview[0].targetStorageKey, /已归档\/招投标资料\/技术标/);
+  assert.match(preview[0].targetStorageKey, /已归档\/09_招投标资料\/02_技术标/);
   const rebuilt = await provider.rebuildGeneratedArchiveFiles(preview);
   assert.equal(rebuilt.verified.length, 1);
   assert.ok(archived.entries.has(oldName));

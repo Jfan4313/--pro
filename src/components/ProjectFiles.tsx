@@ -92,6 +92,8 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
       setLocalFolderName(availability?.rootName || "");
       setFileRoot(availability?.rootName || "未授权本机文件夹");
       if (provider && availability?.available) {
+        const normalized = await provider.normalizeProjectStructure(selectedProject, STAGES, archiveFolderStates[selectedProject.id]?.projectFolder);
+        if (normalized.renamed > 0) window.dispatchEvent(new CustomEvent("show-toast", { detail: `已自动修正 ${normalized.renamed} 个旧文件夹名称` }));
         const localFiles = await provider.listFiles({ project: selectedProject, stages: STAGES, projectFolder: archiveFolderStates[selectedProject.id]?.projectFolder });
         for (const file of localFiles) {
           const folder = stagesById.get(file.stageId);

@@ -74,6 +74,31 @@ export function archiveFolderLabels(stageId: string) {
   return PROJECT_ARCHIVE_STRUCTURE[stageId] || [];
 }
 
+/**
+ * 为阶段内的标准目录补齐每一级序号，保持 Finder/文件管理器中的业务顺序。
+ * 已经带序号的目录不重复添加，便于兼容用户手工整理过的目录。
+ */
+export function numberArchiveFolderPath(stageId: string, folderPath: string) {
+  const parts = String(folderPath || "").split("/").filter(Boolean);
+  if (!parts.length) return "";
+  const configured = archiveFolderLabels(stageId).map((path) => path.split("/").filter(Boolean));
+  const orders = parts.map((part, index) => {
+    const clean = part.replace(/^\d+[_-]/, "");
+    const candidates = configured
+      .filter((path) => path.slice(0, index).every((value, parentIndex) => value.replace(/^\d+[_-]/, "") === parts[parentIndex].replace(/^\d+[_-]/, "")))
+      .map((path) => path[index])
+      .filter(Boolean)
+      .map((value) => value.replace(/^\d+[_-]/, ""));
+    const position = candidates.findIndex((value) => value === clean);
+    return position >= 0 ? position + 1 : 0;
+  });
+  return parts.map((part, index) => {
+    if (/^\d+[_-]/.test(part)) return part;
+    const order = orders[index];
+    return order ? `${String(order).padStart(2, "0")}_${part}` : part;
+  }).join("/");
+}
+
 export function hasArchiveFolder(stageId: string, labels: string[]) {
   const normalized = labels.join("/").toLocaleLowerCase();
   return archiveFolderLabels(stageId).some((path) => normalized.includes(path.toLocaleLowerCase()));

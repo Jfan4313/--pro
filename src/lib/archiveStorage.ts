@@ -1,5 +1,5 @@
 import { offlineDb } from "./offlineDb";
-import { archiveFolderLabels } from "./projectArchiveStructure";
+import { archiveFolderLabels, numberArchiveFolderPath } from "./projectArchiveStructure";
 
 export const LOCAL_ARCHIVE_HANDLE_KEY = "projectFilesDirectoryHandle";
 
@@ -64,6 +64,7 @@ export interface ArchiveStorageProvider {
   readonly id: ArchiveStorageProviderId;
   checkAvailability(): Promise<ArchiveAvailability>;
   ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
+  normalizeProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ renamed: number; projectFolder: string }>;
   renameProjectFolder(oldFolder: string, newFolder: string): Promise<void>;
   writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex>;
   writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex>;
@@ -81,6 +82,7 @@ export abstract class CloudObjectStorageProvider implements ArchiveStorageProvid
   readonly id = "cloud-object-storage" as const;
   abstract checkAvailability(): Promise<ArchiveAvailability>;
   abstract ensureProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ projectFolder: string; generatedThroughStageId?: string }>;
+  abstract normalizeProjectStructure(project: ArchiveProject, stages: ArchiveStage[], projectFolder?: string): Promise<{ renamed: number; projectFolder: string }>;
   abstract renameProjectFolder(oldFolder: string, newFolder: string): Promise<void>;
   abstract writeFile(input: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex>;
   abstract writeUncertainFile(input: { project: ArchiveProject; file: File; fileType?: string; projectFolder?: string; folderLabels?: string[] }): Promise<ArchiveFileIndex>;
@@ -184,9 +186,19 @@ async function getDirectoryByParts(root: any, parts: string[], create = false) {
   return directory;
 }
 
-async function ensureNestedFolders(root: any, paths: string[]) {
+async function getExistingDirectoryByParts(root: any, parts: string[]) {
+  try {
+    return await getDirectoryByParts(root, parts);
+  } catch (error: any) {
+    if (error?.name === "NotFoundError") return null;
+    throw error;
+  }
+}
+
+async function ensureNestedFolders(root: any, stageId: string, paths: string[]) {
   for (const path of paths) {
-    const parts = path.split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
+    const numberedPath = numberArchiveFolderPath(stageId, path);
+    const parts = numberedPath.split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
     if (parts.length) await getDirectoryByParts(root, parts, true);
   }
 }
@@ -263,6 +275,11 @@ function inferLegacyCategory(name: string) {
   return "其他资料";
 }
 
+function stageIdFromArchiveFolder(folderName: string) {
+  const code = Number(String(folderName || "").match(/^(\d+)[_-]/)?.[1] || 0);
+  return code >= 1 && code <= 10 ? `${code}_${["initiation", "preliminary", "business", "contract", "filing", "detailed_design", "briefing", "construction", "acceptance", "operations"][code - 1]}` : "";
+}
+
 function meaningfulFolderLabels(labels: string[], stage: ArchiveStage, category: string) {
   const stageName = String(stage.name || "").replace(/[①②③④⑤⑥⑦⑧⑨⑩]/g, "").replace(/^\d+[_-]?/, "").trim().toLocaleLowerCase();
   const categoryRoots = categoryParts(category).map((item) => item.toLocaleLowerCase());
@@ -331,7 +348,7 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     for (const stage of stages) {
       const stageDirectory = await projectDirectory.getDirectoryHandle(getArchiveStageFolder(stage), { create: true });
       const folders = archiveFolderLabels(stage.id);
-      await ensureNestedFolders(stageDirectory, folders);
+      await ensureNestedFolders(stageDirectory, stage.id, folders);
       if (!(await fileExists(stageDirectory, "文件清单.json"))) {
         await writeBlob(stageDirectory, "文件清单.json", new Blob([JSON.stringify({
           projectId: project.id,
@@ -343,7 +360,38 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
         }, null, 2)], { type: "application/json" }));
       }
     }
+    // 兼容已经存在的旧目录：新目录先创建完成，再安全复制并校验式迁移旧无序号目录。
+    await this.normalizeProjectStructure(project, stages, projectFolder);
     return { projectFolder, generatedThroughStageId: stages.at(-1)?.id };
+  }
+
+  async normalizeProjectStructure(project: ArchiveProject, stages: ArchiveStage[], fixedProjectFolder?: string) {
+    const availability = await this.checkAvailability();
+    if (!availability.available) throw Object.assign(new Error("archive_permission_required"), { code: "archive_permission_required" });
+    const projectFolder = fixedProjectFolder || getArchiveProjectFolder(project);
+    const projectDirectory = await getExistingDirectoryByParts(this.rootHandle, [projectFolder]);
+    if (!projectDirectory) return { renamed: 0, projectFolder };
+    let renamed = 0;
+    for (const stage of stages) {
+      const stageDirectory = await getExistingDirectoryByParts(projectDirectory, [getArchiveStageFolder(stage)]);
+      if (!stageDirectory) continue;
+      const folderPaths = [...new Set(archiveFolderLabels(stage.id).flatMap((path) => {
+        const parts = path.split("/").filter(Boolean);
+        return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+      }))].sort((a, b) => a.split("/").length - b.split("/").length);
+      for (const folderPath of folderPaths) {
+        const oldParts = folderPath.split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
+        const newParts = numberArchiveFolderPath(stage.id, folderPath).split("/").filter(Boolean).map((part) => sanitizeArchiveSegment(part));
+        if (oldParts.join("/") === newParts.join("/")) continue;
+        const source = await getExistingDirectoryByParts(stageDirectory, oldParts);
+        if (!source) continue;
+        const target = await getDirectoryByParts(stageDirectory, newParts, true);
+        await copyDirectoryContents(source, target);
+        await stageDirectory.removeEntry(oldParts[0], { recursive: true });
+        renamed += 1;
+      }
+    }
+    return { renamed, projectFolder };
   }
 
   async writeFile({ project, stage, file, fileType, autoRename = true, projectFolder: fixedProjectFolder, sourceRelativePath, folderLabels, preserveFolders = false, classificationSource, classificationConfidence, classificationEvidence }: { project: ArchiveProject; stage: ArchiveStage; file: File; fileType?: string; autoRename?: boolean; projectFolder?: string; sourceRelativePath?: string; folderLabels?: string[]; preserveFolders?: boolean; classificationSource?: string; classificationConfidence?: number; classificationEvidence?: string }): Promise<ArchiveFileIndex> {
@@ -352,7 +400,7 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
     const localFolderLabels = folderLabels || (sourceParts.length > 1 ? sourceParts.slice(1, -1) : []);
     const category = fileType || "其他资料";
     const sourceFolders = preserveFolders ? meaningfulFolderLabels(localFolderLabels, stage, category) : [];
-    const archiveParts = [projectFolder, getArchiveStageFolder(stage), ...categoryParts(category), ...sourceFolders];
+    const archiveParts = [projectFolder, getArchiveStageFolder(stage), ...categoryParts(numberArchiveFolderPath(stage.id, category)), ...sourceFolders];
     const archivedDirectory = await getDirectoryByParts(this.rootHandle, archiveParts, true);
     const { base, ext } = splitFilename(file.name || "资料");
     const shortType = categoryParts(fileType || "").at(-1);
@@ -450,7 +498,8 @@ export class LocalFolderStorageProvider implements ArchiveStorageProvider {
         else if (entry.kind === "file" && generatedName.test(entry.name) && parts.at(-1) === "已归档") {
           const file = await entry.getFile().catch(() => null);
           if (!file) continue;
-          const category = categoryParts(inferLegacyCategory(entry.name));
+          const stageId = stageIdFromArchiveFolder(parts[1] || "");
+          const category = categoryParts(numberArchiveFolderPath(stageId, inferLegacyCategory(entry.name)));
           candidates.push({ storageKey: [...parts, entry.name].join("/"), targetStorageKey: [...parts, ...category, entry.name].join("/"), name: entry.name, size: file.size, checksum: await sha256(file), modifiedAt: new Date(file.lastModified).toISOString(), status: "ready" });
         }
       }
