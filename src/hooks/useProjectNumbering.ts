@@ -23,8 +23,9 @@ export function useProjectNumbering() {
   const allProjects = useMemo(() => [...activeProjects, ...(Array.isArray(archivedProjects) ? archivedProjects : [])], [activeProjects, archivedProjects]);
 
   useEffect(() => {
-    sequenceRef.current = Math.max(sequenceRef.current, Number(reservedSequence || 0), getHighestProjectSequence(allProjects));
-  }, [allProjects, reservedSequence]);
+    // 新编号只跟随当前项目看板。已删除或已归档的历史项目不能把编号跳到旧序列之后。
+    sequenceRef.current = getHighestProjectSequence(activeProjects);
+  }, [activeProjects]);
 
   useEffect(() => {
     if (boardLoading || archiveLoading || sequenceLoading || migrationLoading) return;
@@ -36,11 +37,11 @@ export function useProjectNumbering() {
   }, [archiveLoading, archivedProjects, boardData, boardLoading, migrationDone, migrationLoading, reservedSequence, sequenceLoading]);
 
   const reserveProjectNumber = useCallback(async () => {
-    const next = Math.max(sequenceRef.current, getHighestProjectSequence(allProjects, reservedSequence)) + 1;
+    const next = Math.max(sequenceRef.current, getHighestProjectSequence(activeProjects)) + 1;
     sequenceRef.current = next;
     await setReservedSequence(next);
     return formatProjectNumber(next);
-  }, [allProjects, reservedSequence, setReservedSequence]);
+  }, [activeProjects, setReservedSequence]);
 
   const resetProjectNumbering = useCallback(async () => {
     sequenceRef.current = 0;
