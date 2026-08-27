@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, Eye, FileDown, FileText, FolderOpen, FolderSearch, History, RefreshCw, SearchCheck, Trash2, UploadCloud, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Cloud, Eye, FileDown, FileText, FolderOpen, FolderSearch, HardDrive, History, MoreHorizontal, RefreshCw, Search, SearchCheck, Trash2, X } from "lucide-react";
 import { apiClient, downloadProjectManifestContent, getProjectFileDownloadUrl, ProjectFileManifest } from "@/src/lib/apiClient";
 import { useSyncedAppData } from "@/src/hooks/useSyncedAppData";
 import { useProjectBoardData } from "@/src/hooks/useProjectBoardData";
@@ -8,9 +8,10 @@ import { normalizeProjectName, normalizeProjectNumber, parseProjectSequence, sor
 import { flattenProjects, getProjectNumber } from "@/src/lib/management";
 import { STAGES, getProjectCurrentStageInfo } from "@/src/lib/projectLifecycle";
 import { cn } from "@/src/lib/utils";
-import { ArchiveCleanupCandidate, ArchiveFolderState, buildArchiveVersionView, chooseLocalArchiveProvider, getArchiveDisplayName, getCurrentAndNextStages, getLocalArchiveHandle, getLocalArchiveProvider, openLocalArchiveFile, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
+import { ArchiveCleanupCandidate, ArchiveFolderState, chooseLocalArchiveProvider, getArchiveDisplayName, getCurrentAndNextStages, getLocalArchiveHandle, getLocalArchiveProvider, openLocalArchiveFile, requestLocalArchivePermission } from "@/src/lib/archiveStorage";
 import { downloadScanReport, getScannedFileHandle, getScannedProjectIdentity, pickScanDirectory, ProjectScanReport, scanProjectDirectories } from "@/src/lib/projectScanner";
 import { createMaterialOrganizationPlan, summarizeOrganizationPlan, MaterialOrganizationPlan } from "@/src/lib/projectMaterialOrganizationSkill";
+import { buildProjectFileWorkspace, filesForDirectory, ProjectWorkspaceDirectory, ProjectWorkspaceFile, versionsForFile } from "@/src/lib/projectFileWorkspace";
 
 export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [boardData, setBoardData] = useProjectBoardData();
@@ -18,9 +19,8 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [lifecycleStates, setLifecycleStates] = useSyncedAppData<Record<string, any>>("projectLifecycleStates", {});
   const [archiveFolderStates, setArchiveFolderStates] = useSyncedAppData<Record<string, ArchiveFolderState>>("projectArchiveFolderStates", {});
   const projects = React.useMemo(() => flattenProjects(boardData), [boardData]);
-  const [stageFilter, setStageFilter] = React.useState("all");
   const [projectSearch, setProjectSearch] = React.useState("");
-  const [selectedProjectId, setSelectedProjectId] = React.useState("");
+  const [selectedProjectId, setSelectedProjectId] = React.useState(() => typeof window === "undefined" ? "" : window.localStorage.getItem("projectFilesRecentProjectId") || "");
   const [fileRoot, setFileRoot] = React.useState("");
   const [projectFiles, setProjectFiles] = React.useState<any>(null);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -48,28 +48,30 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   const [uploadingManifestId, setUploadingManifestId] = React.useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [deletingStorageKey, setDeletingStorageKey] = React.useState<string | null>(null);
-  const [activeSection, setActiveSection] = React.useState<"directory" | "organize" | "remote" | "migration">("directory");
+  const [workspaceMode, setWorkspaceMode] = React.useState<"browse" | "organize">("browse");
+  const [maintenanceOpen, setMaintenanceOpen] = React.useState(false);
+  const [moreOpen, setMoreOpen] = React.useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = React.useState(false);
+  const [selectedDirectoryId, setSelectedDirectoryId] = React.useState("");
+  const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string>>(new Set());
+  const [sourceFilter, setSourceFilter] = React.useState<"all" | "local" | "remote" | "issues">("all");
+  const [fileSearch, setFileSearch] = React.useState("");
+  const [fileSort, setFileSort] = React.useState<"updated" | "name">("updated");
+  const [expandedVersionGroups, setExpandedVersionGroups] = React.useState<Set<string>>(new Set());
+  const [mobileDirectoryId, setMobileDirectoryId] = React.useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const scanAbortRef = React.useRef<AbortController | null>(null);
 
   const selectedProject = projects.find((project: any) => project.id === selectedProjectId) || projects[0];
   const visibleProjects = React.useMemo(() => {
     const normalizedSearch = projectSearch.trim().toLocaleLowerCase();
     return sortProjectsNaturally(projects.filter((project: any) => {
-      const matchesStage = stageFilter === "all" || getProjectCurrentStageInfo(project.id, lifecycleStates).stage.id === stageFilter;
       const text = `${getProjectNumber(project)} ${project.name || ""}`.toLocaleLowerCase();
-      return matchesStage && (!normalizedSearch || text.includes(normalizedSearch));
+      return !normalizedSearch || text.includes(normalizedSearch);
     }));
-  }, [projects, stageFilter, lifecycleStates, projectSearch]);
+  }, [projects, projectSearch]);
   const currentStageInfo = selectedProject ? getProjectCurrentStageInfo(selectedProject.id, lifecycleStates) : null;
-  const availableStages = currentStageInfo ? getCurrentAndNextStages(STAGES, currentStageInfo.index) : STAGES.slice(0, 2);
-  const archivedStages = STAGES.map((stage) => ({
-    stage,
-    folder: (projectFiles?.stages || []).find((item: any) => item.stageId === stage.id || item.stageName === stage.name),
-  })).filter(({ stage, folder }) => availableStages.some((item) => item.id === stage.id) || (folder?.files || []).length > 0);
-  const totalFiles = React.useMemo(() => {
-    return (projectFiles?.stages || []).reduce((sum: number, stage: any) => sum + (stage.files || []).length, 0);
-  }, [projectFiles]);
-  const expectedFiles = STAGES.reduce((sum, stage) => sum + stage.files.length, 0);
+  const workspace = React.useMemo(() => buildProjectFileWorkspace(projectFiles?.stages || [], manifests, STAGES), [projectFiles, manifests]);
   const organizationPlan = React.useMemo<MaterialOrganizationPlan | null>(() => {
     if (!scanReport) return null;
     const project = scanReport.projects.find((item) => selectedImportProjects.includes(item.projectKey)) || scanReport.projects[0];
@@ -77,8 +79,39 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
   }, [scanReport, selectedImportProjects, projectNameOverrides, fileClassificationOverrides]);
 
   React.useEffect(() => {
-    if (!visibleProjects.some((project: any) => project.id === selectedProjectId)) setSelectedProjectId(visibleProjects[0]?.id || "");
-  }, [visibleProjects, selectedProjectId]);
+    if (!projects.some((project: any) => project.id === selectedProjectId)) setSelectedProjectId(sortProjectsNaturally(projects)[0]?.id || "");
+  }, [projects, selectedProjectId]);
+
+  React.useEffect(() => {
+    if (!selectedProject?.id) return;
+    window.localStorage.setItem("projectFilesRecentProjectId", selectedProject.id);
+    setProjectSearch("");
+    const currentIndex = Math.max(0, STAGES.findIndex((stage) => stage.id === currentStageInfo?.stage.id));
+    const stageIds = STAGES.slice(currentIndex, currentIndex + 2).map((stage) => stage.id);
+    setExpandedDirectories(new Set(stageIds));
+    setSelectedDirectoryId(currentStageInfo?.stage.id || STAGES[0].id);
+    setMobileDirectoryId("");
+    setExpandedVersionGroups(new Set());
+  }, [selectedProject?.id, currentStageInfo?.stage.id]);
+
+  React.useEffect(() => {
+    if (!selectedDirectoryId && workspace.directories[0]) setSelectedDirectoryId(currentStageInfo?.stage.id || workspace.directories[0].id);
+  }, [workspace.directories, selectedDirectoryId, currentStageInfo?.stage.id]);
+
+  const selectedDirectory = React.useMemo(() => findWorkspaceDirectory(workspace.directories, selectedDirectoryId), [workspace.directories, selectedDirectoryId]);
+  const directoryFiles = React.useMemo(() => {
+    const query = fileSearch.trim().toLocaleLowerCase();
+    return filesForDirectory(workspace, selectedDirectoryId)
+      .filter((file) => sourceFilter === "all" || (sourceFilter === "local" && file.canOpenLocal) || (sourceFilter === "remote" && file.manifest?.availability === "uploaded") || (sourceFilter === "issues" && ["missing", "stale"].includes(file.availability)))
+      .filter((file) => !query || `${file.name} ${file.originalName} ${file.category}`.toLocaleLowerCase().includes(query))
+      .sort((a, b) => fileSort === "name" ? a.name.localeCompare(b.name, "zh-CN", { numeric: true }) : new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [workspace, selectedDirectoryId, sourceFilter, fileSearch, fileSort]);
+  const mobileDirectory = React.useMemo(() => findWorkspaceDirectory(workspace.directories, mobileDirectoryId), [workspace.directories, mobileDirectoryId]);
+  const mobileFiles = React.useMemo(() => {
+    if (!mobileDirectoryId) return [];
+    const query = fileSearch.trim().toLocaleLowerCase();
+    return filesForDirectory(workspace, mobileDirectoryId).filter((file) => !query || `${file.name} ${file.originalName} ${file.category}`.toLocaleLowerCase().includes(query));
+  }, [workspace, mobileDirectoryId, fileSearch]);
 
   const loadFiles = React.useCallback(async () => {
     if (!selectedProject) return;
@@ -540,6 +573,35 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     if (file.relativePath || file.storageKey) window.open(getProjectFileDownloadUrl(file.relativePath || file.storageKey), "_blank");
   };
 
+  const openWorkspaceFile = async (file: ProjectWorkspaceFile) => {
+    if (file.canOpenLocal) return openFile(file.raw);
+    if (file.canViewRemote && file.manifest) {
+      try { await downloadProjectManifestContent(file.manifest.id, file.originalName); }
+      catch { window.dispatchEvent(new CustomEvent("show-toast", { detail: "当前账号无权查看该远程文件" })); }
+      return;
+    }
+    if (file.storageProvider === "legacy-server" || file.relativePath) return openFile(file.raw);
+    window.dispatchEvent(new CustomEvent("show-toast", { detail: file.availability === "missing" ? "来源电脑上的文件已经缺失" : "该文件需要在来源电脑打开或上传" }));
+  };
+
+  const chooseProject = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setProjectPickerOpen(false);
+    setProjectSearch("");
+  };
+
+  const toggleDirectory = (id: string) => setExpandedDirectories((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const toggleVersions = (groupKey: string) => setExpandedVersionGroups((current) => {
+    const next = new Set(current);
+    if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey);
+    return next;
+  });
+
   const deleteLocalFile = async (file: any) => {
     if (!selectedProject || file.storageProvider !== "local-folder" || !file.storageKey) return;
     const displayName = getArchiveDisplayName(file);
@@ -569,155 +631,166 @@ export function ProjectFiles({ setActiveTab }: { setActiveTab: (tab: string) => 
     }
   };
 
-  return (
-    <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-[1600px] mx-auto w-full">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">项目资料管理</h2>
-          <p className="text-slate-500 text-sm mt-1">按项目、阶段和参建单位查看本地归档资料</p>
+  if (workspaceMode === "organize") return (
+    <main className="mx-auto w-full max-w-[1680px] space-y-5 p-5 animate-in fade-in duration-300">
+      <header className="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => { setWorkspaceMode("browse"); void loadFiles(); }} className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98]" aria-label="返回资料工作台"><ArrowLeft className="h-5 w-5" /></button>
+          <div><h2 className="text-xl font-semibold tracking-tight text-slate-950">智能整理</h2><p className="mt-0.5 text-xs text-slate-500">扫描文件夹、确认分类并复制到项目归档目录</p></div>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <button onClick={loadFiles} className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm flex items-center">
-            <RefreshCw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
-            刷新
-          </button>
-          <button onClick={() => void openLocationPanel()} className="px-4 py-2 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors shadow-sm flex items-center">
-            <FolderSearch className="w-4 h-4 mr-2" />
-            设置归档位置
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div className="grid gap-2 sm:grid-cols-4">
-          {([ ["directory", "项目目录", "查看阶段文件"], ["organize", "智能整理", "扫描与归档预览"], ["remote", "远程清单", "同步与按需上传"], ["migration", "历史迁移", "重建旧归档"] ] as const).map(([key, label, description]) => <button key={key} type="button" onClick={() => setActiveSection(key)} className={cn("rounded-xl px-3 py-3 text-left transition", activeSection === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50")}><div className="text-sm font-bold">{label}</div><div className={cn("mt-1 text-[11px]", activeSection === key ? "text-slate-300" : "text-slate-400")}>{description}</div></button>)}
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 flex items-center gap-2"><FolderOpen className="h-5 w-5 text-indigo-600" /><h3 className="font-bold text-slate-900">选择要查看的项目</h3><span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-indigo-600">{visibleProjects.length} 个</span></div>
-            <div className="relative"><FolderSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="搜索项目名称或项目编号" className="w-full rounded-xl border border-indigo-100 bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" /></div>
-          </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <button onClick={() => setStageFilter("all")} className={cn("rounded-xl border px-3 py-2 text-xs font-bold", stageFilter === "all" ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-100 bg-white text-slate-600")}>全部阶段</button>
-            {STAGES.map(stage => <button key={stage.id} onClick={() => setStageFilter(stage.id)} className={cn("rounded-xl border px-3 py-2 text-xs font-bold", stageFilter === stage.id ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-100 bg-white text-slate-600")}>{stage.name.split(" ")[1]?.split("(")[0]}</button>)}
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {visibleProjects.map((project: any, index: number) => <button key={project.id} type="button" onClick={() => setSelectedProjectId(project.id)} className={cn("rounded-xl border bg-white p-3 text-left transition-all", selectedProject?.id === project.id ? "border-indigo-500 ring-2 ring-indigo-100" : "border-indigo-100 hover:border-indigo-300")}><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-slate-900">{project.name}</span><span className="shrink-0 font-mono text-[10px] text-indigo-600">{getProjectNumber(project, index)}</span></div><div className="mt-1 text-xs text-slate-500">{getProjectCurrentStageInfo(project.id, lifecycleStates).stage.name.split(" ")[1]}</div></button>)}
-          {visibleProjects.length === 0 && <div className="col-span-full rounded-xl border border-dashed border-indigo-200 bg-white/70 p-6 text-center text-sm text-slate-500">没有匹配的项目，请调整阶段或搜索条件。</div>}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Metric icon={FolderOpen} label="资料根目录" value={fileRoot || "未连接"} compact />
-        <Metric icon={FileText} label="已归档文件" value={`${totalFiles} 份`} />
-        <Metric icon={UploadCloud} label="阶段清单项" value={`${expectedFiles} 项`} />
-      </div>
-
-      {backendError && (
-        <div className="rounded-2xl border border-amber-100 bg-amber-50 p-5 text-sm text-amber-700">
-          {backendError}。新资料仅保存在本机授权目录，服务器历史资料仍会在服务恢复后显示。
-        </div>
-      )}
-
-      {isLocationPanelOpen && <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">本机项目资料归档位置</h3><p className="mt-1 text-xs text-slate-500">文件内容只写入当前电脑；项目和文件索引可同步到其他设备。</p></div><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">关闭</button></div><div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{localFolderName || "尚未选择本机文件夹"}{localFolderName && <span className={cn("ml-2 text-xs", localPermission === "granted" ? "text-emerald-600" : "text-amber-600")}>{localPermission === "granted" ? "可读写" : "需要恢复权限"}</span>}</div><button onClick={() => void chooseLocalFolder()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white">{localFolderName ? "重新选择" : "选择本机文件夹"}</button>{localFolderName && localPermission !== "granted" && <button onClick={() => void restoreLocalPermission()} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-700">恢复授权</button>}</div></div>}
-
-      {activeSection === "organize" && <div className="space-y-6">
-      <ScanPanel
-        roots={scanRoots}
-        report={scanReport}
-        running={scanRunning}
-        progress={scanProgress}
-        filter={scanFilter}
-        currentStageId={currentStageInfo?.stage.id}
-        currentStageName={currentStageInfo?.stage.name}
-        classificationOverrides={fileClassificationOverrides}
-        onClassificationChange={(fileId, value) => setFileClassificationOverrides((current) => ({ ...current, [fileId]: value }))}
-        onAddRoot={() => void addScanRoot()}
-        onRun={() => void runScan()}
-        onCancel={cancelScan}
-        onClear={() => { setScanRoots([]); setScanReport(null); setFileClassificationOverrides({}); }}
-        onFilter={setScanFilter}
-      />
-
+        <div className="min-w-0 rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-600"><span className="font-mono text-slate-500">{selectedProject ? getProjectNumber(selectedProject) : "—"}</span><span className="mx-2 text-slate-300">/</span><span className="font-semibold text-slate-800">{selectedProject?.name || "暂无项目"}</span></div>
+      </header>
+      <ScanPanel roots={scanRoots} report={scanReport} running={scanRunning} progress={scanProgress} filter={scanFilter} currentStageId={currentStageInfo?.stage.id} currentStageName={currentStageInfo?.stage.name} classificationOverrides={fileClassificationOverrides} onClassificationChange={(fileId, value) => setFileClassificationOverrides((current) => ({ ...current, [fileId]: value }))} onAddRoot={() => void addScanRoot()} onRun={() => void runScan()} onCancel={cancelScan} onClear={() => { setScanRoots([]); setScanReport(null); setFileClassificationOverrides({}); }} onFilter={setScanFilter} />
       <ProjectStructureSummary report={scanReport} organizationPlan={organizationPlan} selectedKeys={selectedImportProjects} importing={importingProjects} aiReviewing={aiArchiveReviewing} existingProjects={allProjects} nameOverrides={projectNameOverrides} onNameChange={(projectKey, name) => setProjectNameOverrides((current) => ({ ...current, [projectKey]: name }))} onToggle={toggleImportProject} onImport={importScannedProjects} />
-      </div>}
+    </main>
+  );
 
-      {activeSection === "migration" && <ArchiveCleanupPanel candidates={cleanupCandidates} scanning={cleanupScanning} rebuilding={cleanupRebuilding} deleting={cleanupDeleting} onPreview={() => void previewArchiveCleanup()} onRebuild={() => void rebuildOldArchives()} onDelete={() => void deleteOldArchives()} />}
+  return (
+    <>
+    <main className="min-h-full bg-slate-50 px-3 pb-6 pt-3 md:hidden">
+      <header className="sticky top-0 z-20 -mx-3 -mt-3 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur">
+        <div className="flex items-center gap-3"><div className="min-w-0 flex-1"><h2 className="text-lg font-semibold tracking-tight text-slate-950">项目资料</h2><p className="mt-0.5 truncate text-[11px] text-slate-400">{currentStageInfo?.stage.name || "统一目录与文件状态"}</p></div><button type="button" onClick={() => { void loadFiles(); void loadManifests(); }} className="rounded-xl bg-slate-100 p-2.5 text-slate-600" aria-label="刷新项目资料"><RefreshCw className={cn("h-4 w-4", (isLoading || manifestLoading) && "animate-spin")} /></button><div className="relative"><button type="button" onClick={() => setMobileMenuOpen((open) => !open)} className="rounded-xl bg-slate-950 p-2.5 text-white" aria-label="项目资料更多操作"><MoreHorizontal className="h-4 w-4" /></button>{mobileMenuOpen && <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"><button onClick={() => { setWorkspaceMode("organize"); setMobileMenuOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">智能整理</button><button onClick={() => { void syncLocalManifest(); setMobileMenuOpen(false); }} disabled={localPermission !== "granted"} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40">同步文件清单</button><button onClick={() => { setIsLocationPanelOpen(true); setMobileMenuOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">归档位置</button><button onClick={() => { setMaintenanceOpen(true); setMobileMenuOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">历史归档迁移</button></div>}</div></div>
+        <select value={selectedProject?.id || ""} onChange={(event) => chooseProject(event.target.value)} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400">{sortProjectsNaturally(projects).map((project: any, index: number) => <option key={project.id} value={project.id}>{getProjectNumber(project, index)} · {project.name}</option>)}</select>
+        <div className="mt-2 flex items-center gap-2 text-[10px] tabular-nums"><span className="rounded-md bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">本机 {workspace.localFiles}</span><span className="rounded-md bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">已上传 {workspace.remoteFiles}</span><span className="rounded-md bg-slate-100 px-2 py-1 font-semibold text-slate-600">全部 {workspace.totalFiles}</span>{workspace.issueFiles > 0 && <span className="rounded-md bg-amber-50 px-2 py-1 font-semibold text-amber-700">异常 {workspace.issueFiles}</span>}</div>
+      </header>
 
-      {activeSection === "remote" && <ManifestPanel manifests={manifests} loading={manifestLoading} uploadingId={uploadingManifestId} uploadProgress={uploadProgress} onUpload={(manifest) => void uploadManifest(manifest)} />}
+      {backendError && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">{backendError}</div>}
+      {isLocationPanelOpen && <section className="mt-3 rounded-2xl border border-slate-200 bg-white p-4"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-900">本机归档位置</h3><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg p-2 text-slate-400"><X className="h-4 w-4" /></button></div><p className="mt-1 break-all text-xs text-slate-500">{fileRoot || "手机浏览器未授权本机目录；仍可查看已同步和已上传的资料。"}</p><div className="mt-3 flex gap-2"><button onClick={() => void chooseLocalFolder()} className="flex-1 rounded-xl bg-slate-950 py-2.5 text-xs font-semibold text-white">选择文件夹</button>{localFolderName && localPermission !== "granted" && <button onClick={() => void restoreLocalPermission()} className="rounded-xl border border-amber-200 px-3 text-xs font-semibold text-amber-700">恢复授权</button>}</div></section>}
+      {maintenanceOpen && <section className="mt-3 rounded-2xl border border-rose-100 bg-white p-3"><div className="flex items-center justify-between px-1 pb-2"><h3 className="text-sm font-semibold text-slate-900">归档维护</h3><button onClick={() => setMaintenanceOpen(false)} className="rounded-lg p-2 text-slate-400"><X className="h-4 w-4" /></button></div><ArchiveCleanupPanel candidates={cleanupCandidates} scanning={cleanupScanning} rebuilding={cleanupRebuilding} deleting={cleanupDeleting} onPreview={() => void previewArchiveCleanup()} onRebuild={() => void rebuildOldArchives()} onDelete={() => void deleteOldArchives()} /></section>}
 
-      {activeSection === "directory" && <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-slate-900">{selectedProject ? `${getProjectNumber(selectedProject)} · ${selectedProject.name}` : "暂无项目"}</h3>
-          <p className="text-xs text-slate-500 mt-1">当前阶段：{currentStageInfo?.stage.name || "项目立项"}。显示已有资料以及当前、下一阶段目录。</p>
-          {selectedProject && <p className={cn("mt-1 text-xs", archiveFolderStates[selectedProject.id]?.status === "ready" ? "text-emerald-600" : archiveFolderStates[selectedProject.id]?.status === "error" ? "text-rose-600" : "text-amber-600")}>目录状态：{archiveFolderStates[selectedProject.id]?.status === "ready" ? "已生成" : archiveFolderStates[selectedProject.id]?.status === "error" ? "生成失败，可点击上方按钮重试" : "待归档电脑生成"}</p>}
+      {mobileDirectoryId ? <section className="mt-3">
+        <button type="button" onClick={() => setMobileDirectoryId("")} className="flex items-center gap-1 rounded-lg py-2 text-xs font-semibold text-slate-600"><ArrowLeft className="h-4 w-4" />返回项目目录</button>
+        <div className="rounded-2xl border border-slate-200 bg-white"><div className="border-b border-slate-100 p-3"><div className="flex items-center gap-1 text-[10px] text-slate-400"><span>{STAGES.find((stage) => stage.id === mobileDirectory?.stageId)?.name}</span>{mobileDirectory?.path.map((part) => <React.Fragment key={part}><ChevronRight className="h-3 w-3" /><span className="truncate">{part}</span></React.Fragment>)}</div><div className="mt-2 flex items-center rounded-xl bg-slate-100 px-3"><Search className="h-4 w-4 text-slate-400" /><input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="搜索当前目录" className="w-full bg-transparent px-2 py-2.5 text-sm outline-none" /></div></div>
+          <div className="divide-y divide-slate-100">{mobileFiles.map((file) => <MobileWorkspaceFileCard key={file.id} file={file} onOpen={() => void openWorkspaceFile(file)} onUpload={() => file.manifest && void uploadManifest(file.manifest)} />)}{mobileFiles.length === 0 && <div className="p-10 text-center text-xs text-slate-400">当前目录暂无文件</div>}</div>
+        </div>
+      </section> : <section className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white"><div className="border-b border-slate-100 px-4 py-3 text-xs font-semibold text-slate-700">阶段目录</div><nav className="p-2">{workspace.directories.map((directory) => <MobileWorkspaceDirectoryRow key={directory.id} directory={directory} expanded={expandedDirectories} onToggle={toggleDirectory} onOpen={setMobileDirectoryId} />)}</nav>{workspace.totalFiles === 0 && !isLoading && <div className="border-t border-slate-100 p-8 text-center text-xs text-slate-400">该项目暂无资料；可从“更多”进入智能整理。</div>}</section>}
+      {localPermission === "unsupported" && <p className="mt-3 rounded-xl bg-slate-100 p-3 text-[11px] leading-5 text-slate-500">当前手机浏览器不支持直接访问电脑归档目录。已同步清单和已上传文件仍可查看，本机文件操作请在来源电脑完成。</p>}
+    </main>
+
+    <main className="mx-auto hidden w-full max-w-[1800px] space-y-3 p-5 animate-in fade-in duration-300 md:block">
+      <header className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="mr-1 min-w-[150px]"><h2 className="text-lg font-semibold tracking-tight text-slate-950">项目资料</h2><p className="text-[11px] text-slate-400">统一目录与文件状态</p></div>
+          <div className="relative min-w-[260px] flex-1 max-w-[480px]">
+            <button type="button" onClick={() => setProjectPickerOpen((open) => !open)} className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+              <span className="min-w-0"><span className="mr-2 font-mono text-[11px] text-indigo-600">{selectedProject ? getProjectNumber(selectedProject) : "—"}</span><span className="truncate text-sm font-semibold text-slate-800">{selectedProject?.name || "选择项目"}</span></span><ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+            </button>
+            {projectPickerOpen && <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10">
+              <div className="flex items-center rounded-lg bg-slate-100 px-2.5"><Search className="h-4 w-4 text-slate-400" /><input autoFocus value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="搜索名称或编号" className="w-full bg-transparent px-2 py-2 text-sm outline-none" /></div>
+              <div className="mt-1 max-h-64 overflow-auto">{visibleProjects.map((project: any, index: number) => <button key={project.id} type="button" onClick={() => chooseProject(project.id)} className={cn("flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition hover:bg-slate-50", selectedProject?.id === project.id && "bg-indigo-50")}><span className="min-w-0 truncate text-sm font-medium text-slate-800">{project.name}</span><span className="ml-3 shrink-0 font-mono text-[10px] text-slate-400">{getProjectNumber(project, index)}</span></button>)}{visibleProjects.length === 0 && <div className="p-4 text-center text-xs text-slate-400">没有匹配项目</div>}</div>
+            </div>}
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] tabular-nums">
+            <span className="rounded-lg bg-slate-100 px-2 py-1.5 text-slate-600">{currentStageInfo?.stage.name || "未确定阶段"}</span>
+            <span className="rounded-lg bg-emerald-50 px-2 py-1.5 font-semibold text-emerald-700"><HardDrive className="mr-1 inline h-3.5 w-3.5" />{workspace.localFiles}</span>
+            <span className="rounded-lg bg-indigo-50 px-2 py-1.5 font-semibold text-indigo-700"><Cloud className="mr-1 inline h-3.5 w-3.5" />{workspace.remoteFiles}</span>
+            {workspace.issueFiles > 0 && <span className="rounded-lg bg-amber-50 px-2 py-1.5 font-semibold text-amber-700">异常 {workspace.issueFiles}</span>}
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button type="button" onClick={() => { void loadFiles(); void loadManifests(); }} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 active:scale-95" title="刷新"><RefreshCw className={cn("h-4 w-4", (isLoading || manifestLoading) && "animate-spin")} /></button>
+            <button type="button" onClick={() => setWorkspaceMode("organize")} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]">智能整理</button>
+            <button type="button" onClick={() => void syncLocalManifest()} disabled={manifestSyncing || localPermission !== "granted"} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45">{manifestSyncing ? "同步中…" : "同步清单"}</button>
+            <button type="button" onClick={() => void openLocationPanel()} className={cn("rounded-lg border px-3 py-2 text-xs font-semibold transition", localPermission === "granted" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700")}>{localPermission === "granted" ? localFolderName || "归档位置" : "设置归档位置"}</button>
+            <div className="relative"><button type="button" onClick={() => setMoreOpen((open) => !open)} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" aria-label="更多操作"><MoreHorizontal className="h-4 w-4" /></button>{moreOpen && <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10"><button type="button" onClick={() => { setMaintenanceOpen(true); setMoreOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">历史归档迁移</button><button type="button" onClick={() => void initFolders()} className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">检查并生成目录</button></div>}</div>
           </div>
         </div>
+      </header>
 
-        <div className="divide-y divide-slate-100">
-          {archivedStages.map(({ stage, folder }) => {
-            const files = buildArchiveVersionView(folder?.files || []);
-            const localFiles = files.filter((file: any) => file.storageProvider === "local-folder");
-            const nonLocalFiles = files.filter((file: any) => file.storageProvider !== "local-folder");
-            return (
-              <div key={stage.id} className="p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h4 className="font-semibold text-slate-900">{stage.name}</h4>
-                    <p className="text-xs text-slate-500 mt-1">应归档：{stage.files.join("、") || "无"}</p>
-                  </div>
-                  <span className={cn("shrink-0 px-2.5 py-1 rounded-full text-xs font-medium border", files.length > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-slate-100 text-slate-500 border-slate-200")}>
-                    本机 {localFiles.length} · 非本机 {nonLocalFiles.length}
-                  </span>
-                </div>
+      {backendError && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-700">{backendError}。本机资料仍可正常使用，远程服务恢复后会自动补充显示。</div>}
+      {isLocationPanelOpen && <section className="rounded-xl border border-slate-200 bg-white px-4 py-3"><div className="flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1"><div className="text-sm font-semibold text-slate-900">本机归档位置</div><div className="mt-1 truncate text-xs text-slate-500">{fileRoot || "尚未选择文件夹"} · 文件内容保存在当前电脑，清单可同步到其他设备</div></div><button onClick={() => void chooseLocalFolder()} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">{localFolderName ? "重新选择" : "选择文件夹"}</button>{localFolderName && localPermission !== "granted" && <button onClick={() => void restoreLocalPermission()} className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700">恢复授权</button>}<button onClick={() => void initFolders()} disabled={localPermission !== "granted"} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">检查目录</button><button onClick={() => setIsLocationPanelOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100" aria-label="关闭"><X className="h-4 w-4" /></button></div></section>}
+      {maintenanceOpen && <section className="rounded-xl border border-rose-100 bg-rose-50/40 p-4"><div className="mb-3 flex items-center justify-between"><div><h3 className="text-sm font-semibold text-slate-900">归档维护</h3><p className="mt-0.5 text-xs text-slate-500">重建并校验旧平铺归档后，才允许清理旧副本。</p></div><button onClick={() => setMaintenanceOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-white"><X className="h-4 w-4" /></button></div><ArchiveCleanupPanel candidates={cleanupCandidates} scanning={cleanupScanning} rebuilding={cleanupRebuilding} deleting={cleanupDeleting} onPreview={() => void previewArchiveCleanup()} onRebuild={() => void rebuildOldArchives()} onDelete={() => void deleteOldArchives()} /></section>}
 
-                <div className="mt-4 space-y-4">
-                  {([{"label":"本机文件","files":localFiles,"local":true},{"label":"非本机文件","files":nonLocalFiles,"local":false}] as const).map((section) => section.files.length > 0 && (
-                    <div key={section.label}>
-                      <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-600">
-                        <span className={cn("h-2 w-2 rounded-full", section.local ? "bg-emerald-500" : "bg-slate-400")} />
-                        {section.label}<span className="font-normal text-slate-400">{section.files.length} 份</span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                        {section.files.map((file: any) => {
-                          const displayName = getArchiveDisplayName(file);
-                          return (
-                            <div key={file.storageKey || file.relativePath || file.name} className={cn("rounded-xl border p-3 flex items-center justify-between gap-3", section.local ? "border-emerald-100 bg-emerald-50/40" : "border-slate-100 bg-slate-50")}>
-                              <button type="button" onClick={() => void openFile(file)} className="min-w-0 flex-1 text-left" title={`打开：${file.name}`}>
-                                <div className="truncate text-sm font-semibold text-slate-900">{displayName}</div>
-                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                                  <span className={cn("rounded-full px-2 py-0.5 font-bold", section.local ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600")}>{section.local ? "本机可打开" : "非本机文件"}</span>
-                                  <span>{formatSize(file.size)}</span><span>·</span><span>{formatTime(file.updatedAt)}</span>
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 font-bold text-indigo-600"><History className="h-3 w-3" />V{file.versionNumber}{file.versionCount > 1 ? ` / 共${file.versionCount}版` : ""}</span>
-                                  <span className={cn("rounded-full px-2 py-0.5 font-bold", file.isLatestVersion ? "bg-indigo-100 text-indigo-700" : "bg-amber-100 text-amber-700")}>{file.isLatestVersion ? "最新版本" : "历史版本"}</span>
-                                  {file.isDuplicate && <span className="rounded-full bg-rose-100 px-2 py-0.5 font-bold text-rose-700">重复文件</span>}
-                                </div>
-                              </button>
-                              <div className="flex shrink-0 items-center gap-1">
-                                <button type="button" onClick={() => void openFile(file)} className="rounded-lg p-2 text-indigo-600 hover:bg-white" title={section.local ? "调用电脑打开" : "查看或下载"}><Eye className="h-4 w-4" /></button>
-                                {section.local && <button type="button" onClick={() => void deleteLocalFile(file)} disabled={deletingStorageKey === file.storageKey} className="rounded-lg p-2 text-rose-500 hover:bg-white disabled:opacity-40" title="删除这个版本"><Trash2 className="h-4 w-4" /></button>}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                  {files.length === 0 && <div className="rounded-xl bg-slate-50 p-5 text-center text-xs text-slate-400">该阶段目录已创建，暂无文件</div>}
-                </div>
-              </div>
-            );
-          })}
-          {archivedStages.length === 0 && <div className="p-10 text-center text-sm text-slate-400">该项目暂无真实归档文件</div>}
-        </div>
-      </div>}
-    </div>
+      <section className="grid min-h-[560px] grid-cols-[320px_minmax(0,1fr)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.05)] h-[calc(100dvh-190px)]">
+        <aside className="flex min-h-0 flex-col border-r border-slate-200 bg-slate-50/70">
+          <div className="border-b border-slate-200 px-3 py-3"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-700">项目目录</span><span className="font-mono text-[10px] text-slate-400">{workspace.totalFiles} FILES</span></div></div>
+          <nav className="min-h-0 flex-1 overflow-auto p-2" aria-label="项目文件目录">{workspace.directories.map((directory) => <WorkspaceDirectoryRow key={directory.id} directory={directory} selectedId={selectedDirectoryId} expanded={expandedDirectories} onSelect={setSelectedDirectoryId} onToggle={toggleDirectory} />)}</nav>
+          <div className="border-t border-slate-200 px-3 py-2 text-[10px] text-slate-400">绿色为本机可用，蓝色为已上传，黄色表示需要处理</div>
+        </aside>
+
+        <section className="flex min-h-0 min-w-0 flex-col">
+          <div className="border-b border-slate-200 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 text-xs text-slate-400"><span>{STAGES.find((stage) => stage.id === selectedDirectory?.stageId)?.name || "项目资料"}</span>{selectedDirectory?.path.map((part) => <React.Fragment key={part}><ChevronRight className="h-3 w-3" /><span className="truncate text-slate-600">{part}</span></React.Fragment>)}</div><div className="mt-1 text-sm font-semibold text-slate-900">{selectedDirectory?.path.at(-1) || selectedDirectory?.name || "选择目录"}<span className="ml-2 text-xs font-normal text-slate-400">{directoryFiles.length} 个文件</span></div></div>
+              <div className="relative w-56"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" /><input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="搜索当前目录" className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-xs outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2"><div className="flex gap-1">{([['all','全部'],['local','本机'],['remote','已上传'],['issues','异常']] as const).map(([key, label]) => <button key={key} type="button" onClick={() => setSourceFilter(key)} className={cn("rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition", sourceFilter === key ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{label}</button>)}</div><select value={fileSort} onChange={(event) => setFileSort(event.target.value as "updated" | "name")} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-600 outline-none"><option value="updated">最近更新</option><option value="name">按名称</option></select></div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {isLoading && workspace.files.length === 0 ? <WorkspaceSkeleton /> : directoryFiles.length > 0 ? <div className="divide-y divide-slate-100">{directoryFiles.map((file) => <WorkspaceFileRow key={file.id} file={file} versions={versionsForFile(workspace, file)} expanded={expandedVersionGroups.has(file.groupKey)} deleting={deletingStorageKey === file.storageKey} uploading={uploadingManifestId === file.manifest?.id} uploadProgress={uploadProgress} onToggleVersions={() => toggleVersions(file.groupKey)} onOpen={(target) => void openWorkspaceFile(target)} onDelete={(target) => void deleteLocalFile(target.raw)} onUpload={(target) => target.manifest && void uploadManifest(target.manifest)} />)}</div> : <div className="flex h-full min-h-72 items-center justify-center p-8 text-center"><div><FolderOpen className="mx-auto h-9 w-9 text-slate-200" /><h3 className="mt-3 text-sm font-semibold text-slate-700">当前目录没有匹配文件</h3><p className="mt-1 text-xs text-slate-400">可切换目录、来源筛选或清除搜索条件。</p></div></div>}
+          </div>
+        </section>
+      </section>
+    </main>
+    </>
   );
+}
+
+function findWorkspaceDirectory(directories: ProjectWorkspaceDirectory[], id: string): ProjectWorkspaceDirectory | undefined {
+  for (const directory of directories) {
+    if (directory.id === id) return directory;
+    const child = findWorkspaceDirectory(directory.children, id);
+    if (child) return child;
+  }
+  return undefined;
+}
+
+function WorkspaceDirectoryRow({ directory, selectedId, expanded, onSelect, onToggle }: { key?: React.Key; directory: ProjectWorkspaceDirectory; selectedId: string; expanded: Set<string>; onSelect: (id: string) => void; onToggle: (id: string) => void }) {
+  const isExpanded = expanded.has(directory.id);
+  const hasChildren = directory.children.length > 0;
+  const indent = ["pl-1", "pl-4", "pl-7", "pl-10", "pl-12"][Math.min(directory.depth, 4)];
+  return <div>
+    <div className={cn("group flex items-center gap-1 rounded-lg pr-2 transition", indent, selectedId === directory.id ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white/80")}>
+      <button type="button" onClick={() => hasChildren ? onToggle(directory.id) : onSelect(directory.id)} className="flex h-8 w-6 shrink-0 items-center justify-center text-slate-400" aria-label={hasChildren ? `${isExpanded ? "收起" : "展开"}${directory.name}` : `打开${directory.name}`}>{hasChildren ? isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" /> : <span className="h-1 w-1 rounded-full bg-slate-300" />}</button>
+      <button type="button" onClick={() => onSelect(directory.id)} className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left"><FolderOpen className={cn("h-4 w-4 shrink-0", directory.depth === 0 ? "text-indigo-500" : "text-slate-400")} /><span className={cn("min-w-0 flex-1 truncate text-xs", directory.depth === 0 ? "font-semibold" : "font-medium")}>{directory.name}</span></button>
+      <span className="font-mono text-[10px] text-slate-400">{directory.count}</span>
+      {directory.issueCount > 0 && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title={`${directory.issueCount} 个异常文件`} />}
+    </div>
+    {hasChildren && isExpanded && <div>{directory.children.map((child) => <WorkspaceDirectoryRow key={child.id} directory={child} selectedId={selectedId} expanded={expanded} onSelect={onSelect} onToggle={onToggle} />)}</div>}
+  </div>;
+}
+
+function WorkspaceFileRow({ file, versions, expanded, deleting, uploading, uploadProgress, onToggleVersions, onOpen, onDelete, onUpload }: { key?: React.Key; file: ProjectWorkspaceFile; versions: ProjectWorkspaceFile[]; expanded: boolean; deleting: boolean; uploading: boolean; uploadProgress: number; onToggleVersions: () => void; onOpen: (file: ProjectWorkspaceFile) => void; onDelete: (file: ProjectWorkspaceFile) => void; onUpload: (file: ProjectWorkspaceFile) => void }) {
+  const historical = versions.filter((version) => version.id !== file.id);
+  return <article className="bg-white transition hover:bg-slate-50/70">
+    <div className="flex min-h-[58px] items-center gap-3 px-4 py-2.5">
+      <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", file.canOpenLocal ? "bg-emerald-50 text-emerald-600" : file.availability === "uploaded" ? "bg-indigo-50 text-indigo-600" : file.availability === "missing" || file.availability === "stale" ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-500")}>{file.canOpenLocal ? <HardDrive className="h-4 w-4" /> : <FileText className="h-4 w-4" />}</span>
+      <button type="button" onClick={() => onOpen(file)} className="min-w-0 flex-1 text-left focus:outline-none"><div className="truncate text-xs font-semibold text-slate-900" title={file.originalName}>{file.name}</div><div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400"><WorkspaceAvailabilityBadge availability={file.availability} /><span>{formatSize(file.size)}</span><span>·</span><span>{formatTime(file.updatedAt) || "时间未知"}</span><span>·</span><span className="truncate">{file.category}</span>{file.isDuplicate && <span className="font-semibold text-rose-600">重复记录</span>}</div></button>
+      <div className="flex shrink-0 items-center gap-1">
+        {file.versionCount > 1 && <button type="button" onClick={onToggleVersions} className={cn("flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition", expanded ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100")}><History className="h-3.5 w-3.5" />{file.versionCount} 版<ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} /></button>}
+        {file.canUpload && <button type="button" onClick={() => onUpload(file)} disabled={uploading} className="rounded-md bg-indigo-50 px-2 py-1.5 text-[10px] font-semibold text-indigo-700 disabled:opacity-50">{uploading ? `${uploadProgress}%` : "上传"}</button>}
+        {(file.canOpenLocal || file.canViewRemote || file.source === "legacy") && <button type="button" onClick={() => onOpen(file)} className="rounded-md p-2 text-slate-500 transition hover:bg-white hover:text-indigo-600" title="打开文件"><Eye className="h-4 w-4" /></button>}
+        {file.canOpenLocal && <button type="button" onClick={() => onDelete(file)} disabled={deleting} className="rounded-md p-2 text-slate-400 transition hover:bg-white hover:text-rose-600 disabled:opacity-40" title="删除这个版本"><Trash2 className="h-4 w-4" /></button>}
+      </div>
+    </div>
+    {expanded && historical.length > 0 && <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-2"><div className="ml-11 space-y-1">{historical.map((version) => <div key={version.id} className="flex items-center gap-3 rounded-lg px-2 py-1.5 text-[10px] text-slate-500 hover:bg-white"><span className="w-8 font-mono font-semibold text-indigo-600">V{version.versionNumber}</span><span className="min-w-0 flex-1 truncate">{version.originalName}</span><span>{formatSize(version.size)}</span><span>{formatTime(version.updatedAt)}</span>{(version.canOpenLocal || version.canViewRemote || version.source === "legacy") && <button type="button" onClick={() => onOpen(version)} className="rounded p-1 text-slate-400 hover:text-indigo-600"><Eye className="h-3.5 w-3.5" /></button>}{version.canOpenLocal && <button type="button" onClick={() => onDelete(version)} className="rounded p-1 text-slate-400 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>}</div>)}</div></div>}
+  </article>;
+}
+
+function WorkspaceAvailabilityBadge({ availability }: { availability: ProjectWorkspaceFile["availability"] }) {
+  const labels: Record<ProjectWorkspaceFile["availability"], [string, string]> = {
+    local: ["本机可用", "bg-emerald-50 text-emerald-700"], uploaded: ["已上传", "bg-indigo-50 text-indigo-700"], "local-only": ["来源电脑可用", "bg-slate-100 text-slate-600"], stale: ["索引过期", "bg-amber-50 text-amber-700"], missing: ["本机已缺失", "bg-rose-50 text-rose-700"], legacy: ["历史服务器", "bg-slate-100 text-slate-600"],
+  };
+  const [label, tone] = labels[availability];
+  return <span className={cn("rounded px-1.5 py-0.5 font-semibold", tone)}>{label}</span>;
+}
+
+function WorkspaceSkeleton() {
+  return <div className="divide-y divide-slate-100">{Array.from({ length: 8 }, (_, index) => <div key={index} className="flex h-[58px] animate-pulse items-center gap-3 px-4"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="flex-1"><div className="h-3 w-2/5 rounded bg-slate-100" /><div className="mt-2 h-2 w-3/5 rounded bg-slate-100" /></div></div>)}</div>;
+}
+
+function MobileWorkspaceDirectoryRow({ directory, expanded, onToggle, onOpen }: { key?: React.Key; directory: ProjectWorkspaceDirectory; expanded: Set<string>; onToggle: (id: string) => void; onOpen: (id: string) => void }) {
+  const isExpanded = expanded.has(directory.id);
+  const hasChildren = directory.children.length > 0;
+  return <div>
+    <div className={cn("flex items-center gap-2 rounded-xl px-2", directory.depth === 0 ? "py-1" : "ml-5 border-l border-slate-100 py-0.5")}>
+      <button type="button" onClick={() => hasChildren ? onToggle(directory.id) : onOpen(directory.id)} className="flex h-9 w-7 shrink-0 items-center justify-center text-slate-400" aria-label={hasChildren ? `${isExpanded ? "收起" : "展开"}${directory.name}` : `打开${directory.name}`}>{hasChildren ? isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" /> : <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />}</button>
+      <button type="button" onClick={() => onOpen(directory.id)} className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left"><FolderOpen className={cn("h-4 w-4 shrink-0", directory.depth === 0 ? "text-indigo-500" : "text-slate-400")} /><span className={cn("min-w-0 flex-1 truncate text-xs text-slate-800", directory.depth === 0 ? "font-semibold" : "font-medium")}>{directory.name}</span><span className="font-mono text-[10px] text-slate-400">{directory.count}</span>{directory.issueCount > 0 && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />}</button>
+    </div>
+    {hasChildren && isExpanded && directory.children.map((child) => <MobileWorkspaceDirectoryRow key={child.id} directory={child} expanded={expanded} onToggle={onToggle} onOpen={onOpen} />)}
+  </div>;
+}
+
+function MobileWorkspaceFileCard({ file, onOpen, onUpload }: { key?: React.Key; file: ProjectWorkspaceFile; onOpen: () => void; onUpload: () => void }) {
+  return <article className="p-3"><div className="flex items-start gap-3"><span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", file.canOpenLocal ? "bg-emerald-50 text-emerald-600" : file.availability === "uploaded" ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-500")}><FileText className="h-4 w-4" /></span><button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left"><h3 className="truncate text-xs font-semibold text-slate-900">{file.name}</h3><div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400"><WorkspaceAvailabilityBadge availability={file.availability} /><span>V{file.versionNumber}{file.versionCount > 1 ? ` / ${file.versionCount}版` : ""}</span><span>{formatSize(file.size)}</span><span>{formatTime(file.updatedAt)}</span></div></button><div className="flex shrink-0 gap-1">{file.canUpload && <button onClick={onUpload} className="rounded-lg bg-indigo-50 px-2 py-1.5 text-[10px] font-semibold text-indigo-700">上传</button>}{(file.canOpenLocal || file.canViewRemote || file.source === "legacy") && <button onClick={onOpen} className="rounded-lg bg-slate-100 p-2 text-slate-500"><Eye className="h-4 w-4" /></button>}</div></div></article>;
 }
 
 function ScanPanel({ roots, report, running, progress, filter, currentStageId, currentStageName, classificationOverrides, onClassificationChange, onAddRoot, onRun, onCancel, onClear, onFilter }: { roots: any[]; report: ProjectScanReport | null; running: boolean; progress: { current: number; total: number; name: string }; filter: "all" | "review" | "issues"; currentStageId?: string; currentStageName?: string; classificationOverrides: Record<string, { stageId: string; category: string }>; onClassificationChange: (fileId: string, value: { stageId: string; category: string }) => void; onAddRoot: () => void; onRun: () => void; onCancel: () => void; onClear: () => void; onFilter: (filter: "all" | "review" | "issues") => void }) {
@@ -737,18 +810,6 @@ function ScanFileRow({ file, override, onChange }: { key?: string; file: Project
   const stageId = override?.stageId || file.stageId || "";
   const category = override?.category || file.category;
   return <div className="flex flex-col gap-2 border-b border-slate-100 p-3 last:border-0 lg:flex-row lg:items-center"><div className="min-w-0 flex-1"><div className="truncate text-xs font-semibold text-slate-900">{file.relativePath}</div><div className="mt-1 truncate text-[11px] text-slate-500">{category} · {STAGES.find((stage) => stage.id === stageId)?.name || "待复核"} · 置信度 {override ? "人工确认" : `${Math.round(file.confidence * 100)}%`}{file.contentConflict ? ` · ${file.contentConflict}` : ""}</div></div><div className="flex flex-wrap items-center gap-2"><select value={stageId} onChange={(event) => onChange({ stageId: event.target.value, category })} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"><option value="">未确定阶段</option>{STAGES.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select><input value={category} onChange={(event) => onChange({ stageId, category: event.target.value })} className="w-36 rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-700" aria-label="资料类别" />{(file.status === "needs-review" || file.status === "unreadable") && !override && <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />}</div></div>;
-}
-
-function Metric({ icon: Icon, label, value, compact }: any) {
-  return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center min-w-0">
-      <div className="p-4 bg-indigo-50 text-indigo-600 rounded-xl mr-4 shrink-0"><Icon className="w-6 h-6" /></div>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-500">{label}</p>
-        <p className={cn("font-bold text-slate-900 mt-1", compact ? "text-sm truncate" : "text-2xl")}>{value}</p>
-      </div>
-    </div>
-  );
 }
 
 function ProjectStructureSummary({ report, organizationPlan, selectedKeys, importing, aiReviewing, existingProjects, nameOverrides, onNameChange, onToggle, onImport }: { report: ProjectScanReport | null; organizationPlan: MaterialOrganizationPlan | null; selectedKeys: string[]; importing: boolean; aiReviewing: boolean; existingProjects: any[]; nameOverrides: Record<string, string>; onNameChange: (projectKey: string, name: string) => void; onToggle: (projectKey: string) => void; onImport: () => void }) {
@@ -787,30 +848,6 @@ function ArchiveCleanupPanel({ candidates, scanning, rebuilding, deleting, onPre
   const totalSize = candidates.reduce((sum, item) => sum + item.size, 0);
   const verified = candidates.filter((item) => item.status === "verified").length;
   return <section className="rounded-2xl border border-rose-100 bg-rose-50/40 p-5 shadow-sm"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-bold text-slate-900">旧归档重建与清理</h3><p className="mt-1 text-xs text-slate-600">先把平铺文件重建到分类目录并核对 SHA-256，只有校验成功的旧副本才能删除。</p></div><div className="flex flex-wrap gap-2"><button onClick={onPreview} disabled={scanning || rebuilding || deleting} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">{scanning ? "扫描旧归档…" : "预览旧平铺归档"}</button>{candidates.length > 0 && verified === 0 && <button onClick={onRebuild} disabled={scanning || rebuilding || deleting} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{rebuilding ? "重建并校验中…" : `重建 ${candidates.length} 个`}</button>}{verified > 0 && <button onClick={onDelete} disabled={scanning || rebuilding || deleting} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{deleting ? "清理中…" : `确认清理 ${verified} 个旧副本`}</button>}</div></div>{candidates.length > 0 && <div className="mt-3 rounded-xl border border-rose-100 bg-white p-3 text-xs text-rose-800">共 {candidates.length} 个旧平铺文件，约 {formatSize(totalSize)}；其中 {verified} 个已完成重建与哈希校验。未校验、冲突和人工文件不会删除。</div>}{!candidates.length && !scanning && <p className="mt-3 text-xs text-slate-500">尚未生成迁移预览。原始来源文件始终不会移动或删除。</p>}</section>;
-}
-
-function ManifestPanel({ manifests, loading, uploadingId, uploadProgress, onUpload }: { manifests: ProjectFileManifest[]; loading: boolean; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
-  const grouped = React.useMemo(() => manifests.reduce<Record<string, ProjectFileManifest[]>>((result, manifest) => { (result[manifest.stageId] ||= []).push(manifest); return result; }, {}), [manifests]);
-  return <section className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5 shadow-sm">
-    <div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><FileDown className="h-5 w-5 text-violet-600" /><h3 className="font-bold text-slate-900">远程文件清单</h3></div><p className="mt-1 text-xs text-slate-600">其他电脑只同步这些元数据；“仅本机可用”的文件不会传输实际内容。</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-violet-700">{loading ? "读取中…" : `${manifests.length} 个文件`}</span></div>
-    {manifests.length === 0 && !loading && <div className="mt-4 rounded-xl border border-dashed border-violet-200 bg-white p-6 text-center text-xs text-slate-500">还没有发布文件清单。请在来源电脑点击“同步文件清单”。</div>}
-    <div className="mt-4 space-y-3">{(Object.entries(grouped) as Array<[string, ProjectFileManifest[]]>).map(([stageId, files]) => { const stage = STAGES.find((item) => item.id === stageId); const uploaded = files.filter((file) => file.availability === "uploaded").length; return <div key={stageId} className="rounded-xl border border-violet-100 bg-white p-4"><div className="flex items-center justify-between gap-3"><div className="text-sm font-bold text-slate-900">{stage?.name || stageId}</div><span className="text-xs text-slate-500">{uploaded}/{files.length} 已上传</span></div><ManifestDirectoryTree files={files} /><div className="mt-3 space-y-2">{files.map((manifest) => <div key={manifest.id}><ManifestFileRow manifest={manifest} uploadingId={uploadingId} uploadProgress={uploadProgress} onUpload={onUpload} /></div>)}</div></div>})}</div>
-  </section>;
-}
-
-function ManifestDirectoryTree({ files }: { files: ProjectFileManifest[] }) {
-  const paths = React.useMemo(() => files.map((file) => {
-    const parts = file.logicalPath.split("/").filter(Boolean);
-    const bucketIndex = parts.findIndex((part) => part === "已归档" || part === "待提交" || part === "未确定");
-    return { file, parts: bucketIndex >= 0 ? parts.slice(bucketIndex, -1) : [file.category || "其他资料"] };
-  }), [files]);
-  const folders = Array.from(new Set(paths.map((item) => item.parts.join("/")).filter(Boolean))).sort();
-  return <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3"><div className="mb-2 text-[10px] font-bold text-violet-700">远程逻辑目录（不包含来源电脑路径）</div>{folders.map((folder) => <div key={folder} className="flex items-center gap-1.5 py-0.5 text-[11px] text-slate-600"><FolderOpen className="h-3.5 w-3.5 shrink-0 text-violet-500" /><span>{folder}</span><span className="text-slate-400">· {paths.filter((item) => item.parts.join("/") === folder).length} 个文件</span></div>)}</div>;
-}
-
-function ManifestFileRow({ manifest, uploadingId, uploadProgress, onUpload }: { manifest: ProjectFileManifest; uploadingId: string | null; uploadProgress: number; onUpload: (manifest: ProjectFileManifest) => void }) {
-  const sourceLabel = manifest.classificationSource === "manual" ? "人工确认" : manifest.classificationSource === "folder" ? "目录判断" : manifest.classificationSource === "ai" ? "DeepSeek 建议" : manifest.classificationSource === "filename" ? "文件名判断" : manifest.classificationSource === "content" ? "正文辅助" : "待确认";
-  return <div className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{manifest.originalName}</div><div className="mt-1 truncate text-[11px] text-slate-500" title={manifest.logicalPath}>{manifest.logicalPath} · {formatSize(manifest.size)} · {formatTime(manifest.lastIndexedAt)} · V{manifest.version.replace(/^V/i, "")}</div><div className="mt-1 text-[10px] text-slate-400">{manifest.category} · {sourceLabel}{manifest.reviewStatus === "needs-review" ? " · 需要人工复核" : ""}{manifest.classificationEvidence ? ` · ${manifest.classificationEvidence}` : ""}</div></div><div className="flex shrink-0 items-center gap-2"><span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", manifest.availability === "uploaded" ? "bg-emerald-100 text-emerald-700" : manifest.availability === "missing" ? "bg-rose-100 text-rose-700" : manifest.availability === "stale" ? "bg-amber-100 text-amber-700" : "bg-violet-100 text-violet-700")}>{manifest.availability === "uploaded" ? "已上传" : manifest.availability === "missing" ? "本机已缺失" : manifest.availability === "stale" ? "索引过期" : "仅本机可用"}</span>{manifest.availability !== "uploaded" && <button onClick={() => onUpload(manifest)} disabled={uploadingId !== null} className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-[10px] font-bold text-white disabled:opacity-50">{uploadingId === manifest.id ? `上传 ${uploadProgress}%` : "上传此文件"}</button>}{manifest.availability === "uploaded" && manifest.canViewContent && <button onClick={() => void downloadProjectManifestContent(manifest.id, manifest.originalName)} className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-emerald-700">查看内容</button>}</div></div>;
 }
 
 function formatSize(size = 0) {
