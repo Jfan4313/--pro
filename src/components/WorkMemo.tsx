@@ -132,7 +132,11 @@ function BatchWorkMemoModal({ projects, personnel, user, onClose, onPublish }: {
       if (!next.length) throw new Error("没有识别出任务");
       setDrafts(next);
     } catch (caught: any) {
-      setError(`AI 识别失败：${String(caught?.message || "请检查后台服务")}`);
+      if (caught?.status === 401 || caught?.message === "authentication_required") {
+        setError("当前处于免登录试用模式，批量 AI 识别需要先登录官网账号；登录后请重新点击“生成任务预览”。");
+      } else {
+        setError(`AI 识别失败：${String(caught?.message || "请检查后台服务")}`);
+      }
       setDrafts([]);
     } finally { setIsAnalyzing(false); }
   };
